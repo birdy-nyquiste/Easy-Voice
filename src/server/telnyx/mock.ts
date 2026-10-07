@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { encodeClientState, parseTelnyxEnvelope } from "./events";
-import { STOCK_VOICES } from "./stock-voices";
+import { MOCK_CATALOG, toStockVoices } from "./stock-voices";
 import type { CallResults, ClonedVoiceResult, VoiceProvider } from "./types";
 
 /**
@@ -85,7 +85,7 @@ export const mockProvider: VoiceProvider = {
   async releaseNumber() {},
 
   async listStockVoices() {
-    return STOCK_VOICES;
+    return toStockVoices(MOCK_CATALOG);
   },
 
   maxCloneSampleBytes: 5 * 1024 * 1024,

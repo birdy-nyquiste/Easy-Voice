@@ -47,3 +47,21 @@ describe("Telnyx webhook verification", () => {
     await expect(provider.parseWebhook(body, headers(now - 600))).rejects.toThrow(/Stale/);
   });
 });
+
+describe("stock voice catalog", async () => {
+  const { toStockVoices } = await import("@/server/telnyx/stock-voices");
+
+  it("offers English Kokoro and Mandarin Ultra voices, skipping deprecated and other models", () => {
+    const voices = toStockVoices([
+      { id: "Telnyx.KokoroTTS.af_heart", name: "af_heart", language: "en-US", model_id: "KokoroTTS", gender: "Female" },
+      { id: "Telnyx.Ultra.aaa", name: "Hao - Friendly Guy", language: "zh", model_id: "Ultra", gender: "Male" },
+      { id: "Telnyx.Ultra.bbb", name: "Old", language: "zh", model_id: "Ultra", deprecated: true },
+      { id: "Telnyx.Ultra.ccc", name: "Asher", language: "en-US", model_id: "Ultra" },
+      { id: "Telnyx.Bayan.ASSY", name: "ASSY", language: "ar-JO", model_id: "Bayan" },
+    ]);
+    expect(voices).toEqual([
+      { ref: "Telnyx.KokoroTTS.af_heart", name: "Heart", language: "en-US", gender: "female", provider: "Telnyx" },
+      { ref: "Telnyx.Ultra.aaa", name: "Hao - Friendly Guy", language: "zh-CN", gender: "male", provider: "Telnyx" },
+    ]);
+  });
+});
