@@ -1,12 +1,15 @@
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import { requiredEnv } from "@/lib/env";
 import * as schema from "./schema";
 
-const url = process.env.DATABASE_URL ?? "postgres://localhost:5432/easy_voice";
+const url = requiredEnv("DATABASE_URL", "postgres://localhost:5432/easy_voice");
 
 const globalForDb = globalThis as unknown as { pg?: postgres.Sql };
-const client = globalForDb.pg ?? postgres(url, { max: 10 });
+// prepare: false — DATABASE_URL on Vercel is Neon's pooled (PgBouncer) endpoint,
+// which doesn't reliably support named prepared statements.
+const client = globalForDb.pg ?? postgres(url, { max: 10, prepare: false });
 if (process.env.NODE_ENV !== "production") globalForDb.pg = client;
 
 export const db = drizzle(client, { schema });
