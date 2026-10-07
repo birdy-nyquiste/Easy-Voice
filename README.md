@@ -27,6 +27,8 @@ pnpm test        # integration tests against the easy_voice_test database
 pnpm typecheck && pnpm lint
 ```
 
+CI (`.github/workflows/ci.yml`) runs typecheck, lint, the tests against a Postgres 16 service, and a production build on every PR and on pushes to `main`.
+
 ## Going live with Telnyx
 
 1. In the Telnyx portal, create an **Outbound Voice Profile** and a **Call Control Application**. Set the app's webhook URL to `https://<host>/api/webhooks/telnyx` and **webhook API version to "2"**. Link the outbound profile to the app, and enable **"call cost in webhooks"** (`call_cost_in_webhooks`) so each call's Telnyx cost is recorded for reconciliation.
