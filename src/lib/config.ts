@@ -1,3 +1,5 @@
+import { requiredEnv } from "./env";
+
 function int(name: string, fallback: number): number {
   const raw = process.env[name];
   if (!raw) return fallback;
@@ -8,8 +10,12 @@ function int(name: string, fallback: number): number {
 
 export const config = {
   appUrl: process.env.APP_URL ?? "http://localhost:3000",
-  authSecret: process.env.AUTH_SECRET ?? "dev-insecure-secret",
-  cronSecret: process.env.CRON_SECRET ?? "",
+  get authSecret() {
+    return requiredEnv("AUTH_SECRET", "dev-insecure-secret");
+  },
+  get cronSecret() {
+    return requiredEnv("CRON_SECRET", "");
+  },
   /** Dev-only shortcut to credit a balance without paying. Never available in production builds. */
   get devCreditEnabled() {
     return process.env.NODE_ENV !== "production";

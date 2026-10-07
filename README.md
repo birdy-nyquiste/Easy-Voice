@@ -42,6 +42,14 @@ API details and open questions are in [docs/telnyx-api-notes.md](docs/telnyx-api
 
 Stripe only processes one-time top-up payments; there are no subscriptions. Number rental and usage are deducted from the balance. Set `STRIPE_SECRET_KEY`. Point a webhook at `/api/webhooks/stripe` for the `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed` and `checkout.session.expired` events, then set `STRIPE_WEBHOOK_SECRET`. Locally: `stripe listen --forward-to localhost:3000/api/webhooks/stripe`.
 
+## Deploying to Vercel
+
+- Connect a Neon database under Vercel → Storage. It provides `DATABASE_URL` (pooled) and `DATABASE_URL_UNPOOLED`.
+- Set the remaining production variables (see `.env.example`). In production the app refuses to start without
+  `AUTH_SECRET`, `CRON_SECRET` and `DATABASE_URL`, rather than falling back to dev defaults.
+- Vercel runs `vercel-build`, which applies pending migrations (`scripts/migrate.mjs`, using the unpooled URL) and then
+  builds. **Only production builds migrate.** Preview deploys share the production database, so they skip migrations.
+
 ## Daily jobs
 
 `GET /api/cron/daily` with `Authorization: Bearer $CRON_SECRET` does four things: charges monthly number renewals, releases numbers after the negative-balance grace period, purges recordings, transcripts and the Telnyx AI conversation older than `RETENTION_DAYS`, fetches any transcripts the post-call fetch missed, and finishes number orders still in progress. On Vercel, `vercel.json` schedules it daily.

@@ -10,7 +10,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "vercel-build": "node scripts/migrate.mjs && next build"
   },
   "dependencies": {
     "arctic": "^3.7.0",
