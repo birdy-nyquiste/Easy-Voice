@@ -1,8 +1,8 @@
 import { createPublicKey, verify } from "node:crypto";
 import { config } from "@/lib/config";
 import { encodeClientState, parseTelnyxEnvelope } from "./events";
-import { STOCK_VOICES } from "./stock-voices";
-import type { AssistantSpec, CallRef, ClonedVoiceResult, NumberOrderResult, OrderStatus, VoiceProvider } from "./types";
+import { toStockVoices, type CatalogVoice } from "./stock-voices";
+import type { AssistantSpec, CallRef, ClonedVoiceResult, NumberOrderResult, OrderStatus, StockVoice, VoiceProvider } from "./types";
 
 /**
  * Telnyx v2 REST adapter. Field names follow docs/telnyx-api-notes.md; items
@@ -52,6 +52,10 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
     if (!res.ok) throw new TelnyxApiError(res.status, text, path);
     return (text ? JSON.parse(text) : {}) as T;
   }
+
+  // The catalog is large (~1,300 voices) and rarely changes; cache it per process.
+  const VOICE_CACHE_MS = 60 * 60 * 1000;
+  let voiceCache: { at: number; voices: StockVoice[] } | undefined;
 
   const action = (ccid: string, cmd: string, body: Record<string, unknown> = {}) =>
     api("POST", `/calls/${encodeURIComponent(ccid)}/actions/${cmd}`, body);
@@ -167,7 +171,11 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
     },
 
     async listStockVoices() {
-      return STOCK_VOICES;
+      if (voiceCache && Date.now() - voiceCache.at < VOICE_CACHE_MS) return voiceCache.voices;
+      // Unlike most endpoints this one isn't wrapped in `data`.
+      const res = await api<{ voices: CatalogVoice[] }>("GET", "/text-to-speech/voices?provider=telnyx");
+      voiceCache = { at: Date.now(), voices: toStockVoices(res.voices) };
+      return voiceCache.voices;
     },
 
     maxCloneSampleBytes: 5 * 1024 * 1024,

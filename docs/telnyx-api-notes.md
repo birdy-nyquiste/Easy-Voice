@@ -397,3 +397,11 @@ Docs: https://developers.telnyx.com/api-reference/call-recordings/retrieve-a-cal
   We store `total_cost` as micro-USD on the call for reconciliation. Whether AI Assistant inference is included
   in `cost_parts` is **UNCONFIRMED**. Check against the Telnyx invoice.
 - `DELETE /v2/ai/conversations/{conversation_id}` exists. Retention purge uses it to remove transcripts and insights.
+- `GET /v2/text-to-speech/voices?provider=telnyx` (checked against a live account): each entry's `id` is
+  already the full assistant voice string (e.g. `Telnyx.KokoroTTS.af_heart`, `Telnyx.Ultra.<uuid>`), along with
+  `name`, `language`, `model_id`, `gender`, `label` and an optional `deprecated`. On the live account Mandarin (`zh`)
+  exists **only on the Ultra model** (15 voices, 2 deprecated). KokoroTTS has no Mandarin voices, and `NaturalHD.astra`
+  does not exist. The app loads the catalog live (English: KokoroTTS; Mandarin: Ultra; deprecated voices excluded)
+  instead of using a hard-coded list.
+- Local US number search returned `region_information` types `country_code`, `location`, `rate_center` and
+  `state`, and `cost_information.monthly_cost` of `"1.00000"` USD for 415 numbers.
