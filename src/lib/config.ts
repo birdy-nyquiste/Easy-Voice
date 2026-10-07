@@ -37,7 +37,8 @@ export const config = {
   },
 
   telnyx: {
-    mode: (process.env.TELNYX_MODE ?? "mock") as "mock" | "live",
+    // Production defaults to live so a missing env var can't silently simulate telephony.
+    mode: (process.env.TELNYX_MODE ?? (process.env.NODE_ENV === "production" ? "live" : "mock")) as "mock" | "live",
     apiKey: process.env.TELNYX_API_KEY ?? "",
     publicKey: process.env.TELNYX_PUBLIC_KEY ?? "",
     connectionId: process.env.TELNYX_CONNECTION_ID ?? "",

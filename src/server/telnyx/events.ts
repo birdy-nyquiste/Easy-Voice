@@ -7,6 +7,7 @@ const KNOWN: CallEventType[] = [
   "call.recording.saved",
   "call.conversation.created",
   "call.conversation.start_failed",
+  "call.cost",
 ];
 
 function date(v: unknown): Date | undefined {
@@ -56,5 +57,6 @@ export function parseTelnyxEnvelope(body: unknown): CallEvent {
     endTime: date(p.end_time),
     conversationId: str(p.conversation_id),
     failureReason: str(p.reason),
+    totalCostUsd: str(p.total_cost),
   };
 }

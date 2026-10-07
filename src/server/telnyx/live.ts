@@ -185,9 +185,17 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
     },
 
     async getClonedVoice(voiceId) {
-      // UNCONFIRMED: docs mention GET /voice_clones/{id}; the OpenAPI spec doesn't define it.
-      const res = await api<{ data: Parameters<typeof toClone>[0] }>("GET", `/voice_clones/${encodeURIComponent(voiceId)}`);
-      return toClone(res.data);
+      // Docs mention GET /voice_clones/{id} but the OpenAPI spec only defines it on the list
+      // endpoint, so fall back to scanning the list.
+      try {
+        const res = await api<{ data: Parameters<typeof toClone>[0] }>("GET", `/voice_clones/${encodeURIComponent(voiceId)}`);
+        return toClone(res.data);
+      } catch (err) {
+        if (!(err instanceof TelnyxApiError) || ![404, 405].includes(err.status)) throw err;
+      }
+      const list = await api<{ data: Parameters<typeof toClone>[0][] }>("GET", "/voice_clones?page[size]=250");
+      const found = list.data.find((c) => c.id === voiceId);
+      return found ? toClone(found) : { voiceId, ref: "", status: "failed", failureReason: "Voice not found at the provider." };
     },
 
     async deleteClonedVoice(voiceId) {
@@ -278,8 +286,10 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
       return recs[0]?.download_urls?.mp3 ?? recs[0]?.download_urls?.wav ?? null;
     },
 
-    async deleteRecordings(ref) {
+    async purgeCallData(ref) {
       for (const r of await listRecordings(ref)) await api("DELETE", `/recordings/${encodeURIComponent(r.id)}`);
+      const conversationId = await findConversationId(ref);
+      if (conversationId) await api("DELETE", `/ai/conversations/${encodeURIComponent(conversationId)}`);
     },
 
     async parseWebhook(rawBody, headers) {

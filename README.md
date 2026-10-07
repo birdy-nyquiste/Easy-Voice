@@ -16,7 +16,7 @@ Open http://localhost:3000 and sign in with any email. With `RESEND_API_KEY` uns
 
 Real top-ups always go through Stripe. In dev (`pnpm dev`), the Billing page also has a **dev-only "+$10 / +$50" credit** that skips payment; it's recorded as an adjustment and is disabled in production builds. To exercise the real payment flow, use Stripe **test mode** keys locally, and run `stripe listen --forward-to localhost:3000/api/webhooks/stripe` so the balance is credited (pay with test card `4242 4242 4242 4242`).
 
-With `TELNYX_MODE=mock` (the default), telephony is simulated:
+With `TELNYX_MODE=mock` (the default in dev; production builds default to `live`), telephony is simulated. Mock mode never accepts webhooks over HTTP; simulated events are delivered in-process.
 
 - Number search, purchase, voice cloning and assistants run against an in-memory mock.
 - **Numbers → Simulate an inbound call** runs a full call through the real webhook handler: answer → hangup → billing → transcript.
@@ -29,7 +29,7 @@ pnpm typecheck && pnpm lint
 
 ## Going live with Telnyx
 
-1. In the Telnyx portal, create an **Outbound Voice Profile** and a **Call Control Application**. Set the app's webhook URL to `https://<host>/api/webhooks/telnyx` and **webhook API version to "2"**. Link the outbound profile to the app.
+1. In the Telnyx portal, create an **Outbound Voice Profile** and a **Call Control Application**. Set the app's webhook URL to `https://<host>/api/webhooks/telnyx` and **webhook API version to "2"**. Link the outbound profile to the app, and enable **"call cost in webhooks"** (`call_cost_in_webhooks`) so each call's Telnyx cost is recorded for reconciliation.
 2. Copy the API key, the app id (`TELNYX_CONNECTION_ID`) and the webhook **public key** (`TELNYX_PUBLIC_KEY`) into `.env.local`, and set `TELNYX_MODE=live`.
 3. Optional: create an Insight Group with a summary insight, and set `TELNYX_INSIGHT_GROUP_ID` so call summaries appear.
 4. For local development, expose your dev server with `ngrok http 3000` and set `APP_URL` and the Telnyx webhook URL to the ngrok host.
@@ -42,7 +42,7 @@ Stripe only processes one-time top-up payments; there are no subscriptions. Numb
 
 ## Daily jobs
 
-`GET /api/cron/daily` with `Authorization: Bearer $CRON_SECRET` does four things: charges monthly number renewals, releases numbers after the negative-balance grace period, purges recordings and transcripts older than `RETENTION_DAYS`, and finishes number orders still in progress. On Vercel, `vercel.json` schedules it daily.
+`GET /api/cron/daily` with `Authorization: Bearer $CRON_SECRET` does four things: charges monthly number renewals, releases numbers after the negative-balance grace period, purges recordings, transcripts and the Telnyx AI conversation older than `RETENTION_DAYS`, fetches any transcripts the post-call fetch missed, and finishes number orders still in progress. On Vercel, `vercel.json` schedules it daily.
 
 ## Layout
 

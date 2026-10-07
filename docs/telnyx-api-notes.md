@@ -388,3 +388,12 @@ Docs: https://developers.telnyx.com/api-reference/call-recordings/retrieve-a-cal
   `filter[call_session_id]`, `filter[connection_id]`, `filter[from]`, `filter[to]`,
   `filter[created_at]`), `page[...]`.
 - `DELETE /v2/recordings/{recording_id}` returns `data`. Bulk: `POST /v2/recordings/actions/delete`.
+
+## 11. Confirmed after review (2026-10-07, OpenAPI spec)
+
+- `call.cost` webhook (sent when the Call Control app has `call_cost_in_webhooks` enabled): payload has
+  `call_control_id`, `call_leg_id`, `call_session_id`, `client_state`, `total_cost` (decimal string, e.g.
+  `"0.0106"`), `billed_duration_secs`, and `cost_parts[] {call_part, rate, cost, currency, billed_duration_secs}`.
+  We store `total_cost` as micro-USD on the call for reconciliation. Whether AI Assistant inference is included
+  in `cost_parts` is **UNCONFIRMED**. Check against the Telnyx invoice.
+- `DELETE /v2/ai/conversations/{conversation_id}` exists. Retention purge uses it to remove transcripts and insights.

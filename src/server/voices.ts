@@ -1,14 +1,15 @@
 import "server-only";
-import { and, eq, isNull } from "drizzle-orm";
-import { db } from "@/db";
+import { and, eq, isNull, ne } from "drizzle-orm";
+import { db, withUserLock } from "@/db";
 import { agents, voices, type Voice } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
 import { formatCents } from "@/lib/format";
-import { applyLedger, InsufficientBalanceError } from "./billing/ledger";
+import { chargePurchase, refundPurchase, type Purchase } from "./billing/ledger";
+import type { Language } from "@/lib/language";
 import { voiceProvider, type StockVoice } from "./telnyx";
 
-export async function listStockVoices(language?: "en" | "zh"): Promise<StockVoice[]> {
+export async function listStockVoices(language?: Language): Promise<StockVoice[]> {
   const all = await voiceProvider().listStockVoices();
   if (!language) return all;
   return all.filter((v) => v.language.toLowerCase().startsWith(language));
@@ -20,7 +21,7 @@ export async function listUserVoices(userId: string): Promise<Voice[]> {
 
 export async function cloneVoice(
   userId: string,
-  input: { name: string; language: "en" | "zh"; gender: "male" | "female"; audio: File; consent: boolean },
+  input: { name: string; language: Language; gender: "male" | "female"; audio: File; consent: boolean },
 ): Promise<Voice> {
   const name = input.name.trim();
   if (!name) throw new UserError("Give the voice a name.");
@@ -29,35 +30,25 @@ export async function cloneVoice(
   const maxBytes = voiceProvider().maxCloneSampleBytes;
   if (input.audio.size > maxBytes) throw new UserError(`Audio sample must be under ${Math.floor(maxBytes / 1024 / 1024)} MB.`);
 
-  const existing = await listUserVoices(userId);
-  if (existing.filter((v) => v.status !== "failed").length >= config.limits.clonedVoicesPerUser) {
-    throw new UserError(`You can have up to ${config.limits.clonedVoicesPerUser} cloned voices.`);
-  }
-
-  const [row] = await db
-    .insert(voices)
-    .values({ userId, name, language: input.language, consentAt: new Date(), status: "processing" })
-    .returning();
-
-  const price = config.pricing.voiceCloneCents;
-  try {
-    await applyLedger({
-      userId,
-      amountCents: -price,
-      kind: "voice_clone",
-      idempotencyKey: `voice:${row.id}`,
-      description: `Voice clone "${name}"`,
-      refType: "voice",
-      refId: row.id,
-      requireFunds: true,
-    });
-  } catch (err) {
-    await db.delete(voices).where(eq(voices.id, row.id));
-    if (err instanceof InsufficientBalanceError) {
-      throw new UserError(`Insufficient balance. A voice clone costs ${formatCents(price)} — top up first.`);
+  const row = await withUserLock(userId, async (tx) => {
+    const existing = await tx
+      .select({ id: voices.id })
+      .from(voices)
+      .where(and(eq(voices.userId, userId), isNull(voices.deletedAt), ne(voices.status, "failed")));
+    if (existing.length >= config.limits.clonedVoicesPerUser) {
+      throw new UserError(`You can have up to ${config.limits.clonedVoicesPerUser} cloned voices.`);
     }
-    throw err;
-  }
+    const [inserted] = await tx
+      .insert(voices)
+      .values({ userId, name, language: input.language, consentAt: new Date(), status: "processing" })
+      .returning();
+    await chargePurchase(
+      clonePurchase(inserted),
+      `Insufficient balance. A voice clone costs ${formatCents(config.pricing.voiceCloneCents)} — top up first.`,
+      tx,
+    );
+    return inserted;
+  });
 
   try {
     const res = await voiceProvider().cloneVoice({ name, language: input.language, gender: input.gender, audio: input.audio });
@@ -74,16 +65,20 @@ export async function cloneVoice(
   }
 }
 
-async function failVoice(v: Voice, reason: string): Promise<Voice> {
-  await applyLedger({
+function clonePurchase(v: Pick<Voice, "id" | "userId" | "name">): Purchase {
+  return {
     userId: v.userId,
-    amountCents: config.pricing.voiceCloneCents,
-    kind: "refund",
-    idempotencyKey: `voice:${v.id}:refund`,
-    description: `Refund — voice clone "${v.name}" failed`,
+    priceCents: config.pricing.voiceCloneCents,
+    kind: "voice_clone",
+    key: `voice:${v.id}`,
+    description: `Voice clone "${v.name}"`,
     refType: "voice",
     refId: v.id,
-  });
+  };
+}
+
+async function failVoice(v: Voice, reason: string): Promise<Voice> {
+  await refundPurchase(clonePurchase(v), `Refund — voice clone "${v.name}" failed`);
   const [u] = await db.update(voices).set({ status: "failed", failureReason: reason }).where(eq(voices.id, v.id)).returning();
   return u;
 }

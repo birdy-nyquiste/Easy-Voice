@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { attempt, type ActionState } from "@/lib/action";
 import { UserError } from "@/lib/errors";
+import { toLanguage } from "@/lib/language";
 import { requireUser } from "@/server/auth";
 import { cloneVoice, deleteVoice } from "@/server/voices";
 
@@ -13,7 +14,7 @@ export async function cloneVoiceAction(_: ActionState, form: FormData): Promise<
     if (!(audio instanceof File)) throw new UserError("Upload or record an audio sample.");
     const v = await cloneVoice(user.id, {
       name: String(form.get("name") ?? ""),
-      language: form.get("language") === "zh" ? "zh" : "en",
+      language: toLanguage(form.get("language")),
       gender: form.get("gender") === "male" ? "male" : "female",
       audio,
       consent: form.get("consent") === "on",

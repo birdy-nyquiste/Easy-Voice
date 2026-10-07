@@ -1,3 +1,5 @@
+import type { Language } from "@/lib/language";
+
 /**
  * Provider-neutral voice platform interface. Business code depends on this,
  * never on Telnyx request/response shapes (SPEC §3.8).
@@ -39,7 +41,7 @@ export interface AssistantSpec {
   name: string;
   instructions: string;
   greeting: string;
-  language: "en" | "zh";
+  language: Language;
   voiceRef: string;
 }
 
@@ -60,6 +62,7 @@ export type CallEventType =
   | "call.recording.saved"
   | "call.conversation.created"
   | "call.conversation.start_failed"
+  | "call.cost"
   | "other";
 
 export interface CallEvent {
@@ -80,6 +83,8 @@ export interface CallEvent {
   endTime?: Date;
   conversationId?: string;
   failureReason?: string;
+  /** call.cost: provider's total cost in USD, as sent (decimal string). */
+  totalCostUsd?: string;
 }
 
 export interface AssistantStart {
@@ -105,7 +110,7 @@ export interface VoiceProvider {
   listStockVoices(): Promise<StockVoice[]>;
   /** Max accepted sample size in bytes. */
   readonly maxCloneSampleBytes: number;
-  cloneVoice(input: { name: string; language: "en" | "zh"; gender: "male" | "female"; audio: Blob }): Promise<ClonedVoiceResult>;
+  cloneVoice(input: { name: string; language: Language; gender: "male" | "female"; audio: Blob }): Promise<ClonedVoiceResult>;
   getClonedVoice(voiceId: string): Promise<ClonedVoiceResult>;
   deleteClonedVoice(voiceId: string): Promise<void>;
 
@@ -124,7 +129,8 @@ export interface VoiceProvider {
   getCallResults(call: CallRef): Promise<CallResults | null>;
   /** Short-lived playback URL, or null if no recording exists. */
   getRecordingUrl(call: CallRef): Promise<string | null>;
-  deleteRecordings(call: CallRef): Promise<void>;
+  /** Delete recordings and the AI conversation (transcript, insights) at the provider. */
+  purgeCallData(call: CallRef): Promise<void>;
 
   /** Verify signature and parse; throws on invalid signature. */
   parseWebhook(rawBody: string, headers: Headers): Promise<CallEvent>;

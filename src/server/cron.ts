@@ -1,9 +1,10 @@
 import "server-only";
-import { and, isNotNull, lt, eq } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, lt } from "drizzle-orm";
 import { db } from "@/db";
 import { calls, phoneNumbers, users } from "@/db/schema";
 import { config } from "@/lib/config";
 import { purgeCallContent } from "./calls";
+import { fetchCallResults } from "./calls/results";
 import { chargeNumberRenewals, refreshPendingNumbers, releaseNumber } from "./numbers";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -24,18 +25,22 @@ export async function runDailyJobs(now = new Date()) {
     await releaseNumber(d.userId, d.numberId, "Released: balance stayed negative past the grace period");
   }
 
-  // Retention: drop recordings/transcripts older than RETENTION_DAYS.
+  // Retention: delete recordings/transcripts older than RETENTION_DAYS, here and at the provider.
   const retentionCutoff = new Date(now.getTime() - config.policy.retentionDays * DAY_MS);
   const expired = await db
     .select()
     .from(calls)
-    .where(and(lt(calls.createdAt, retentionCutoff), isNotNull(calls.endedAt)));
+    .where(and(lt(calls.createdAt, retentionCutoff), isNotNull(calls.endedAt), isNull(calls.purgedAt)));
   let purged = 0;
-  for (const c of expired) {
-    if (!c.transcript && !c.summary && !c.hasRecording) continue;
-    await purgeCallContent(c);
-    purged++;
-  }
+  for (const c of expired) if (await purgeCallContent(c)) purged++;
 
-  return { renewed, released: delinquent.length, purged };
+  // Results the post-hangup fetch missed (e.g. on serverless).
+  const missing = await db
+    .select()
+    .from(calls)
+    .where(and(eq(calls.status, "completed"), eq(calls.resultsFetched, false), isNull(calls.purgedAt)))
+    .limit(200);
+  for (const c of missing) await fetchCallResults(c);
+
+  return { renewed, released: delinquent.length, purged, resultsFetched: missing.length };
 }

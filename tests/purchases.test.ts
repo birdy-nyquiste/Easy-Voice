@@ -42,6 +42,14 @@ describe("number purchase", () => {
     await expect(purchaseNumber(u, "+14155551235")).rejects.toThrow(/up to 1/);
   });
 
+  it("lets only one of two simultaneous purchases through", async () => {
+    const u = await makeUser(5000);
+    const results = await Promise.allSettled([purchaseNumber(u, "+14155551234"), purchaseNumber(u, "+14155551235")]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(await db.select().from(phoneNumbers)).toHaveLength(1);
+    expect(await balance(u.id)).toBe(4700);
+  });
+
   it("charges each renewal period once", async () => {
     const u = await makeUser(1000);
     const n = await purchaseNumber(u, "+14155551234");

@@ -1,11 +1,11 @@
 import "server-only";
 import { and, eq, inArray, ne } from "drizzle-orm";
-import { db } from "@/db";
+import { db, withUserLock } from "@/db";
 import { agents, phoneNumbers, type PhoneNumber, type User } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
 import { formatCents } from "@/lib/format";
-import { applyLedger, InsufficientBalanceError } from "./billing/ledger";
+import { applyLedger, chargePurchase, refundPurchase, type Purchase } from "./billing/ledger";
 import { voiceProvider } from "./telnyx";
 
 const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
@@ -22,40 +22,39 @@ export async function searchAvailableNumbers(areaCode: string) {
   return voiceProvider().searchNumbers({ areaCode: areaCode || undefined, limit: 10 });
 }
 
+function numberPurchase(n: Pick<PhoneNumber, "id" | "userId" | "e164">): Purchase {
+  return {
+    userId: n.userId,
+    priceCents: config.pricing.numberMonthlyCents,
+    kind: "number_monthly",
+    key: `number:${n.id}:0`,
+    description: `Phone number ${n.e164} — first month`,
+    refType: "phone_number",
+    refId: n.id,
+  };
+}
+
 /** Buy a number: charges the first month up front, refunds if the order fails. */
 export async function purchaseNumber(user: User, e164: string): Promise<PhoneNumber> {
   if (!/^\+1\d{10}$/.test(e164)) throw new UserError("Invalid US number.");
-  const price = config.pricing.numberMonthlyCents;
 
-  const existing = await db
-    .select({ id: phoneNumbers.id })
-    .from(phoneNumbers)
-    .where(and(eq(phoneNumbers.userId, user.id), inArray(phoneNumbers.status, ["pending", "active"])));
-  if (existing.length >= config.limits.numbersPerUser) {
-    throw new UserError(`You can have up to ${config.limits.numbersPerUser} number(s).`);
-  }
-
-  const [row] = await db.insert(phoneNumbers).values({ userId: user.id, e164, status: "pending" }).returning();
-
-  // Charge first; the ledger locks the user row so concurrent purchases can't overspend.
-  try {
-    await applyLedger({
-      userId: user.id,
-      amountCents: -price,
-      kind: "number_monthly",
-      idempotencyKey: `number:${row.id}:0`,
-      description: `Phone number ${e164} — first month`,
-      refType: "phone_number",
-      refId: row.id,
-      requireFunds: true,
-    });
-  } catch (err) {
-    await db.delete(phoneNumbers).where(eq(phoneNumbers.id, row.id));
-    if (err instanceof InsufficientBalanceError) {
-      throw new UserError(`Insufficient balance. A number costs ${formatCents(price)}/month — top up first.`);
+  // Limit check, row insert and charge commit together under the user's lock.
+  const row = await withUserLock(user.id, async (tx) => {
+    const existing = await tx
+      .select({ id: phoneNumbers.id })
+      .from(phoneNumbers)
+      .where(and(eq(phoneNumbers.userId, user.id), inArray(phoneNumbers.status, ["pending", "active"])));
+    if (existing.length >= config.limits.numbersPerUser) {
+      throw new UserError(`You can have up to ${config.limits.numbersPerUser} number(s).`);
     }
-    throw err;
-  }
+    const [inserted] = await tx.insert(phoneNumbers).values({ userId: user.id, e164, status: "pending" }).returning();
+    await chargePurchase(
+      numberPurchase(inserted),
+      `Insufficient balance. A number costs ${formatCents(config.pricing.numberMonthlyCents)}/month — top up first.`,
+      tx,
+    );
+    return inserted;
+  });
 
   try {
     const order = await voiceProvider().orderNumber(e164);
@@ -84,15 +83,7 @@ async function activateNumber(n: PhoneNumber, numberId?: string): Promise<PhoneN
 }
 
 async function failNumber(n: PhoneNumber, reason: string): Promise<PhoneNumber> {
-  await applyLedger({
-    userId: n.userId,
-    amountCents: config.pricing.numberMonthlyCents,
-    kind: "refund",
-    idempotencyKey: `number:${n.id}:refund`,
-    description: `Refund — number ${n.e164} could not be activated`,
-    refType: "phone_number",
-    refId: n.id,
-  });
+  await refundPurchase(numberPurchase(n), `Refund — number ${n.e164} could not be activated`);
   const [u] = await db
     .update(phoneNumbers)
     .set({ status: "failed", failureReason: reason })

@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
@@ -12,3 +13,17 @@ export const db = drizzle(client, { schema });
 export type Db = typeof db;
 export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 export { schema };
+
+/** Anything that can run queries: the pool or an open transaction. */
+export type Queryable = Db | Tx;
+
+/**
+ * Run `fn` in a transaction holding a per-user advisory lock, so
+ * check-then-insert sequences (resource limits, one active call) can't race.
+ */
+export async function withUserLock<T>(userId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${userId}, 0))`);
+    return fn(tx);
+  });
+}

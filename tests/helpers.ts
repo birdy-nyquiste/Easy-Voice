@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { agents, phoneNumbers, users } from "@/db/schema";
 import { applyLedger } from "@/server/billing/ledger";
@@ -14,7 +14,8 @@ export async function makeUser(balanceCents = 0) {
   if (balanceCents) {
     await applyLedger({ userId: u.id, amountCents: balanceCents, kind: "adjustment", idempotencyKey: `seed:${u.id}`, description: "seed" });
   }
-  return u;
+  const [fresh] = await db.select().from(users).where(eq(users.id, u.id));
+  return fresh;
 }
 
 /** A user with balance, a ready agent, and an active number wired to it. */

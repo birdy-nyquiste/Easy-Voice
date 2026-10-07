@@ -10,6 +10,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { Language } from "@/lib/language";
 
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 const ts = (name: string) => timestamp(name, { withTimezone: true });
@@ -123,7 +124,7 @@ export const voices = pgTable("voices", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().references(() => users.id),
   name: text("name").notNull(),
-  language: text("language").notNull(), // "en" | "zh"
+  language: text("language").$type<Language>().notNull(),
   /** Provider clone id (for status/delete calls). */
   providerVoiceId: text("provider_voice_id"),
   /** Voice string used in assistant voice settings, e.g. "Telnyx.Qwen3TTS.<id>". */
@@ -143,7 +144,7 @@ export const agents = pgTable("agents", {
   name: text("name").notNull(),
   instructions: text("instructions").notNull(),
   greeting: text("greeting").notNull(),
-  language: text("language").notNull(), // "en" | "zh"
+  language: text("language").$type<Language>().notNull(),
   /** Provider voice identifier actually sent to the assistant. */
   voiceRef: text("voice_ref").notNull(),
   /** Set when the voice is one of the user's clones. */
@@ -188,13 +189,17 @@ export const calls = pgTable(
     endedAt: ts("ended_at"),
     durationSec: integer("duration_sec"),
     billedCents: integer("billed_cents"),
-    /** Provider-side cost, recorded for reconciliation only. */
-    providerCostCents: integer("provider_cost_cents"),
+    /** True when the call failed on our side (e.g. agent didn't start); no charge. */
+    chargeWaived: boolean("charge_waived").notNull().default(false),
+    /** Telnyx cost from the call.cost webhook, in micro-USD; reconciliation only, never billed. */
+    providerCostMicros: integer("provider_cost_micros"),
     /** Provider recording URLs expire quickly, so we only remember that one exists and fetch on demand. */
     hasRecording: boolean("has_recording").notNull().default(false),
     transcript: jsonb("transcript").$type<{ role: string; text: string }[]>(),
     summary: text("summary"),
     resultsFetched: boolean("results_fetched").notNull().default(false),
+    /** Set once recording/transcript/summary were deleted here and at the provider. */
+    purgedAt: ts("purged_at"),
     createdAt: createdAt(),
     deletedAt: ts("deleted_at"),
   },

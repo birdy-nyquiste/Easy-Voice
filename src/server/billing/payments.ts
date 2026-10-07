@@ -3,10 +3,11 @@ import "server-only";
 import { and, desc, eq } from "drizzle-orm";
 import Stripe from "stripe";
 import { db } from "@/db";
-import { ledgerEntries, payments, webhookEvents, type User } from "@/db/schema";
+import { ledgerEntries, payments, type User } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
 import { formatCents } from "@/lib/format";
+import { withWebhookDedupe } from "@/server/webhooks";
 import { applyLedger } from "./ledger";
 
 const MAX_TOPUP_CENTS = 50_000;
@@ -96,14 +97,7 @@ export async function failPayment(providerRef: string, reason: string): Promise<
 export async function handleStripeWebhook(rawBody: string, signature: string | null): Promise<void> {
   if (!signature) throw new Error("Missing stripe-signature");
   const event = stripe().webhooks.constructEvent(rawBody, signature, config.stripe.webhookSecret);
-  const [fresh] = await db
-    .insert(webhookEvents)
-    .values({ provider: "stripe", eventId: event.id, eventType: event.type })
-    .onConflictDoNothing()
-    .returning({ id: webhookEvents.id });
-  if (!fresh) return;
-
-  try {
+  await withWebhookDedupe("stripe", event.id, event.type, async () => {
     switch (event.type) {
       case "checkout.session.completed":
       case "checkout.session.async_payment_succeeded": {
@@ -118,10 +112,7 @@ export async function handleStripeWebhook(rawBody: string, signature: string | n
         await failPayment(event.data.object.id, "Checkout expired");
         break;
     }
-  } catch (err) {
-    await db.delete(webhookEvents).where(eq(webhookEvents.id, fresh.id));
-    throw err;
-  }
+  });
 }
 
 export async function listLedger(userId: string, limit = 100) {

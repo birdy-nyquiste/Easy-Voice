@@ -1,13 +1,13 @@
 import "server-only";
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { db } from "@/db";
+import { db, withUserLock } from "@/db";
 import { agents, calls, phoneNumbers, type Call, type User } from "@/db/schema";
 import { UserError } from "@/lib/errors";
 import { toE164US } from "@/lib/format";
 import { hasSpendableBalance } from "@/server/billing/ledger";
 import { voiceProvider } from "@/server/telnyx";
-import { hasOtherActiveCall } from "./events";
-import { callRef, fetchCallResults } from "./results";
+import { callRef, failedCallFields, hasOtherActiveCall } from "./state";
+import { fetchCallResults } from "./results";
 
 export async function listUserCalls(userId: string, limit = 50) {
   return db
@@ -46,19 +46,25 @@ export async function startOutboundCall(user: User, input: { agentId: string; to
     .where(and(eq(phoneNumbers.userId, user.id), eq(phoneNumbers.status, "active")));
   if (!from) throw new UserError("You need an active phone number to call from.");
   if (from.e164 === to) throw new UserError("You can't call your own agent number.");
-  if (await hasOtherActiveCall(user.id)) throw new UserError("Another call is in progress. Wait for it to finish.");
 
-  const [call] = await db
-    .insert(calls)
-    .values({
-      userId: user.id,
-      agentId: agent.id,
-      phoneNumberId: from.id,
-      direction: "outbound",
-      fromNumber: from.e164,
-      toNumber: to,
-    })
-    .returning();
+  // Busy check + insert under the user's lock so two clicks can't start two calls.
+  const call = await withUserLock(user.id, async (tx) => {
+    if (await hasOtherActiveCall(user.id, undefined, tx)) {
+      throw new UserError("Another call is in progress. Wait for it to finish.");
+    }
+    const [inserted] = await tx
+      .insert(calls)
+      .values({
+        userId: user.id,
+        agentId: agent.id,
+        phoneNumberId: from.id,
+        direction: "outbound",
+        fromNumber: from.e164,
+        toNumber: to,
+      })
+      .returning();
+    return inserted;
+  });
 
   try {
     const res = await voiceProvider().dial({ from: from.e164, to, clientState: call.id });
@@ -72,7 +78,7 @@ export async function startOutboundCall(user: User, input: { agentId: string; to
     console.error("dial failed", call.id, err);
     const [u] = await db
       .update(calls)
-      .set({ status: "failed", outcome: "The call could not be placed.", endedAt: new Date(), durationSec: 0, billedCents: 0, resultsFetched: true })
+      .set({ ...failedCallFields(new Date()), status: "failed", outcome: "The call could not be placed." })
       .where(eq(calls.id, call.id))
       .returning();
     return u;
@@ -90,8 +96,9 @@ export async function getRecordingUrl(userId: string, callId: string): Promise<s
     .select()
     .from(calls)
     .where(and(eq(calls.id, callId), eq(calls.userId, userId), isNull(calls.deletedAt)));
-  if (!c?.hasRecording || !c.providerCallControlId) return null;
-  return voiceProvider().getRecordingUrl(callRef(c));
+  const ref = c && callRef(c);
+  if (!c?.hasRecording || !ref) return null;
+  return voiceProvider().getRecordingUrl(ref);
 }
 
 /** User-initiated delete: removes recording at the provider and blanks content; billing rows stay. */
@@ -99,18 +106,24 @@ export async function deleteCallRecord(userId: string, callId: string): Promise<
   const [c] = await db.select().from(calls).where(and(eq(calls.id, callId), eq(calls.userId, userId)));
   if (!c || c.deletedAt) throw new UserError("Call not found.");
   if (!c.endedAt) throw new UserError("Can't delete a call that's still in progress.");
-  await purgeCallContent(c);
+  if (!(await purgeCallContent(c))) throw new UserError("Couldn't delete the recording at the provider. Try again shortly.");
   await db.update(calls).set({ deletedAt: new Date() }).where(eq(calls.id, c.id));
 }
 
-export async function purgeCallContent(c: Call): Promise<void> {
-  if (c.hasRecording && c.providerCallControlId) {
+/** Delete recording, transcript and summary here and at the provider. Retries on the next run if the provider fails. */
+export async function purgeCallContent(c: Call): Promise<boolean> {
+  const ref = callRef(c);
+  if (ref) {
     try {
-      await voiceProvider().deleteRecordings(callRef(c));
+      await voiceProvider().purgeCallData(ref);
     } catch (err) {
-      console.error("deleteRecordings failed", c.id, err);
-      return; // keep hasRecording so the next purge retries
+      console.error("purgeCallData failed", c.id, err);
+      return false;
     }
   }
-  await db.update(calls).set({ transcript: null, summary: null, hasRecording: false }).where(eq(calls.id, c.id));
+  await db
+    .update(calls)
+    .set({ transcript: null, summary: null, hasRecording: false, resultsFetched: true, purgedAt: new Date() })
+    .where(eq(calls.id, c.id));
+  return true;
 }

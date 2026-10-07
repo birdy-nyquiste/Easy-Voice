@@ -1,10 +1,11 @@
 import "server-only";
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/db";
+import { db, withUserLock } from "@/db";
 import { agents, phoneNumbers, voices, type Agent } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
+import { LANGUAGES, type Language } from "@/lib/language";
 import { voiceProvider, type AssistantSpec } from "./telnyx";
 
 export const RECORDING_NOTICE = {
@@ -16,7 +17,7 @@ export const agentInput = z.object({
   name: z.string().trim().min(1, "Name is required").max(80),
   instructions: z.string().trim().min(1, "Instructions are required").max(8000),
   greeting: z.string().trim().min(1, "Greeting is required").max(500),
-  language: z.enum(["en", "zh"]),
+  language: z.enum(LANGUAGES),
   /** "stock:<ref>" or "clone:<voice uuid>" */
   voice: z.string().min(1, "Pick a voice"),
 });
@@ -54,31 +55,35 @@ async function resolveVoice(userId: string, voice: string): Promise<{ voiceRef: 
 }
 
 /** The greeting sent to the provider always starts with the recording notice (SPEC §16). */
-export function providerGreeting(language: "en" | "zh", greeting: string): string {
+export function providerGreeting(language: Language, greeting: string): string {
   const notice = RECORDING_NOTICE[language];
   return greeting.includes(notice) ? greeting : `${notice} ${greeting}`;
 }
 
 function toSpec(a: Pick<Agent, "name" | "instructions" | "greeting" | "language" | "voiceRef">): AssistantSpec {
-  const language = a.language as "en" | "zh";
   return {
     name: a.name,
     instructions: a.instructions,
-    greeting: providerGreeting(language, a.greeting),
-    language,
+    greeting: providerGreeting(a.language, a.greeting),
+    language: a.language,
     voiceRef: a.voiceRef,
   };
 }
 
 export async function createAgent(userId: string, raw: unknown): Promise<Agent> {
   const input = parse(raw);
-  const count = (await listUserAgents(userId)).length;
-  if (count >= config.limits.agentsPerUser) throw new UserError(`You can have up to ${config.limits.agentsPerUser} agents.`);
   const voice = await resolveVoice(userId, input.voice);
-  const [row] = await db
-    .insert(agents)
-    .values({ userId, ...input, ...voice, status: "syncing" })
-    .returning();
+  const row = await withUserLock(userId, async (tx) => {
+    const existing = await tx
+      .select({ id: agents.id })
+      .from(agents)
+      .where(and(eq(agents.userId, userId), isNull(agents.deletedAt)));
+    if (existing.length >= config.limits.agentsPerUser) {
+      throw new UserError(`You can have up to ${config.limits.agentsPerUser} agents.`);
+    }
+    const [inserted] = await tx.insert(agents).values({ userId, ...input, ...voice, status: "syncing" }).returning();
+    return inserted;
+  });
   return syncAgent(row);
 }
 

@@ -55,6 +55,7 @@ function scheduleEnd(callControlId: string, afterMs: number) {
     if (!call?.answeredAt) return;
     void emit("call.hangup", callControlId, { hangup_cause: "normal_clearing", start_time: call.answeredAt.toISOString() });
     void emit("call.recording.saved", callControlId, { call_control_id: undefined, client_state: undefined }, 200);
+    void emit("call.cost", callControlId, { total_cost: "0.0070", billed_duration_secs: 60 }, 400);
   }, afterMs);
 }
 
@@ -174,10 +175,11 @@ export const mockProvider: VoiceProvider = {
     return "/mock-recording.wav";
   },
 
-  async deleteRecordings() {},
+  async purgeCallData() {},
 
-  async parseWebhook(rawBody) {
-    return parseTelnyxEnvelope(JSON.parse(rawBody));
+  async parseWebhook() {
+    // Mock events are delivered in-process; anything arriving over HTTP is unsigned and untrusted.
+    throw new Error("Mock provider does not accept HTTP webhooks");
   },
 };
 

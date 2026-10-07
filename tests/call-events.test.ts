@@ -91,6 +91,44 @@ describe("inbound calls", () => {
     expect(await callByCcid("cc-x")).toBeUndefined();
   });
 
+  it("re-answers when Telnyx redelivers after a failed answer command", async () => {
+    const { number } = await makeLine(1000);
+    vi.mocked(mockProvider.answer).mockRejectedValueOnce(new Error("telnyx 503"));
+    const initiated = inbound(number.e164);
+    await expect(handleCallEvent(initiated)).rejects.toThrow("telnyx 503");
+    await handleCallEvent(initiated); // same event id, redelivered
+    const c = await callByCcid("cc-1");
+    expect(mockProvider.answer).toHaveBeenCalledTimes(2);
+    expect(mockProvider.answer).toHaveBeenLastCalledWith("cc-1", c.id, expect.objectContaining({ assistantId: "assistant-test" }));
+  });
+
+  it("re-issues a reject when Telnyx redelivers after a failed reject command", async () => {
+    const { number } = await makeLine(0);
+    vi.mocked(mockProvider.reject).mockRejectedValueOnce(new Error("telnyx 503"));
+    const initiated = inbound(number.e164);
+    await expect(handleCallEvent(initiated)).rejects.toThrow();
+    await handleCallEvent(initiated);
+    expect(mockProvider.reject).toHaveBeenCalledTimes(2);
+    expect(mockProvider.answer).not.toHaveBeenCalled();
+  });
+
+  it("admits only one of two simultaneous inbound calls", async () => {
+    const { number } = await makeLine(1000);
+    await Promise.all([handleCallEvent(inbound(number.e164, "cc-a")), handleCallEvent(inbound(number.e164, "cc-b"))]);
+    expect(mockProvider.answer).toHaveBeenCalledTimes(1);
+    expect(mockProvider.reject).toHaveBeenCalledTimes(1);
+    expect(mockProvider.reject).toHaveBeenCalledWith(expect.any(String), "USER_BUSY");
+  });
+
+  it("records the provider cost without charging the user for it", async () => {
+    const { user, number } = await makeLine(1000);
+    await handleCallEvent(inbound(number.e164));
+    await handleCallEvent(event("call.cost", { callControlId: "cc-1", totalCostUsd: "0.0106" }));
+    expect((await callByCcid("cc-1")).providerCostMicros).toBe(10_600);
+    const [u] = await db.select().from(users).where(eq(users.id, user.id));
+    expect(u.balanceCents).toBe(1000);
+  });
+
   it("hangs up when the assistant fails to start", async () => {
     const { number } = await makeLine(1000);
     await handleCallEvent(inbound(number.e164));
@@ -98,6 +136,25 @@ describe("inbound calls", () => {
     await handleCallEvent(event("call.conversation.start_failed", { callControlId: "cc-1", clientState: c.id, failureReason: "service_error" }));
     expect(mockProvider.hangup).toHaveBeenCalledWith("cc-1");
     expect((await callByCcid("cc-1")).outcome).toMatch(/failed to start/);
+  });
+
+  it("doesn't charge for a call whose agent failed to start", async () => {
+    const { user, number } = await makeLine(1000);
+    await handleCallEvent(inbound(number.e164));
+    const c = await callByCcid("cc-1");
+    const t0 = new Date("2026-10-07T10:00:00Z");
+    await handleCallEvent(event("call.answered", { callControlId: "cc-1", clientState: c.id, occurredAt: t0 }));
+    await handleCallEvent(event("call.conversation.start_failed", { callControlId: "cc-1", clientState: c.id }));
+    await handleCallEvent(event("call.hangup", { callControlId: "cc-1", clientState: c.id, occurredAt: new Date(t0.getTime() + 20_000) }));
+    expect(await callByCcid("cc-1")).toMatchObject({ status: "failed", billedCents: 0, durationSec: 20 });
+    const [u] = await db.select().from(users).where(eq(users.id, user.id));
+    expect(u.balanceCents).toBe(1000);
+  });
+});
+
+describe("webhook transport", () => {
+  it("mock mode refuses webhooks over HTTP (they would be unsigned)", async () => {
+    await expect(mockProvider.parseWebhook("{}", new Headers())).rejects.toThrow(/does not accept/);
   });
 });
 
