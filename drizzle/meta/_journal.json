@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1791401441664,
+      "tag": "0000_dusty_junta",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791402863683,
+      "tag": "0001_call_review_fixes",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791402864308,
+      "tag": "0002_drop_provider_cost_cents",
+      "breakpoints": true
+    }
+  ]
+}
