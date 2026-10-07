@@ -9,6 +9,8 @@ export interface AvailableNumber {
   e164: string;
   locality?: string;
   region?: string;
+  /** Not in the requested area code; offered as a nearby alternative. */
+  nearby?: boolean;
 }
 
 export type OrderStatus = "pending" | "success" | "failure";

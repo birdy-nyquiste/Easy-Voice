@@ -71,6 +71,7 @@ export const mockProvider: VoiceProvider = {
       e164: `+1${area}555${String(1000 + ((i * 137) % 9000)).padStart(4, "0")}`,
       locality: "Mock City",
       region: "CA",
+      nearby: false,
     }));
   },
 

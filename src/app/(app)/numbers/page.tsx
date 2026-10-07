@@ -1,5 +1,5 @@
 import { ActionForm, SubmitButton } from "@/components/forms";
-import { Card, CardTitle, Empty, PageHeader, StatusBadge, buttonClass, inputClass } from "@/components/ui";
+import { Badge, Card, CardTitle, Empty, PageHeader, StatusBadge, buttonClass, inputClass } from "@/components/ui";
 import { config } from "@/lib/config";
 import { userMessage } from "@/lib/errors";
 import { formatCents, formatDateTime, formatPhone } from "@/lib/format";
@@ -22,6 +22,7 @@ export default async function NumbersPage({ searchParams }: { searchParams: Prom
     try {
       results = await searchAvailableNumbers(area.trim());
     } catch (err) {
+      console.error("Number search failed", { area }, err);
       searchError = userMessage(err, "Number search failed. Try again.");
     }
   }
@@ -100,6 +101,9 @@ export default async function NumbersPage({ searchParams }: { searchParams: Prom
             <button className={buttonClass("secondary")}>Search</button>
           </form>
           {searchError && <p className="mt-3 text-sm text-red-600">{searchError}</p>}
+          {results.length > 0 && results.every((r) => r.nearby) && (
+            <p className="mt-3 text-sm text-stone-500">No numbers left in {area}; these are from nearby area codes.</p>
+          )}
           {area !== undefined && !searchError && results.length === 0 && (
             <p className="mt-3 text-sm text-stone-500">No numbers available for that area code. Try another.</p>
           )}
@@ -110,6 +114,7 @@ export default async function NumbersPage({ searchParams }: { searchParams: Prom
                   <span>
                     <span className="font-mono">{formatPhone(r.e164)}</span>
                     <span className="ml-2 text-sm text-stone-500">{[r.locality, r.region].filter(Boolean).join(", ")}</span>
+                    {r.nearby && <span className="ml-2"><Badge tone="amber">nearby area</Badge></span>}
                   </span>
                   <ActionForm action={buyNumberAction} className="text-right">
                     <input type="hidden" name="e164" value={r.e164} />

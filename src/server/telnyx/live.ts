@@ -139,18 +139,26 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
         "filter[phone_number_type]": "local",
         "filter[features][]": "voice",
         "filter[limit]": String(limit),
+        // Without best_effort, Telnyx answers 400 (10031) when it can't fill the limit
+        // with exact matches; with it, it tops up with numbers from nearby area codes.
+        "filter[best_effort]": "true",
       });
       if (areaCode) q.set("filter[national_destination_code]", areaCode);
-      const res = await api<{
-        data: { phone_number: string; best_effort?: boolean; region_information?: { region_type: string; region_name: string }[] }[];
-      }>("GET", `/available_phone_numbers?${q}`);
+      let res: { data: { phone_number: string; best_effort?: boolean; region_information?: { region_type: string; region_name: string }[] }[] };
+      try {
+        res = await api("GET", `/available_phone_numbers?${q}`);
+      } catch (err) {
+        if (err instanceof TelnyxApiError && err.status === 400 && err.body.includes("10031")) return [];
+        throw err;
+      }
       return res.data
-        .filter((n) => !n.best_effort)
         .map((n) => ({
           e164: n.phone_number,
           locality: n.region_information?.find((r) => r.region_type === "rate_center")?.region_name,
           region: n.region_information?.find((r) => r.region_type === "state")?.region_name,
-        }));
+          nearby: Boolean(n.best_effort),
+        }))
+        .sort((a, b) => Number(a.nearby) - Number(b.nearby));
     },
 
     async orderNumber(e164) {
