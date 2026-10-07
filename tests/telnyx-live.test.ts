@@ -1,5 +1,5 @@
 import { generateKeyPairSync, sign } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTelnyxProvider } from "@/server/telnyx/live";
 
 const { publicKey, privateKey } = generateKeyPairSync("ed25519");
@@ -63,5 +63,36 @@ describe("stock voice catalog", async () => {
       { ref: "Telnyx.KokoroTTS.af_heart", name: "Heart", language: "en-US", gender: "female", provider: "Telnyx" },
       { ref: "Telnyx.Ultra.aaa", name: "Hao - Friendly Guy", language: "zh-CN", gender: "male", provider: "Telnyx" },
     ]);
+  });
+});
+
+describe("number search", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function respond(status: number, body: unknown) {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(body), { status })));
+  }
+
+  it("treats Telnyx 10031 (no matches) as an empty result", async () => {
+    respond(400, { errors: [{ code: "10031", title: "Invalid request filter" }] });
+    await expect(provider.searchNumbers({ areaCode: "999" })).resolves.toEqual([]);
+  });
+
+  it("asks for best-effort results and lists exact matches before nearby ones", async () => {
+    respond(200, {
+      data: [
+        { phone_number: "+16285550001", best_effort: true, region_information: [{ region_type: "state", region_name: "CA" }] },
+        { phone_number: "+14155550001", best_effort: false, region_information: [{ region_type: "rate_center", region_name: "SAN FRANCISCO" }] },
+      ],
+    });
+    const res = await provider.searchNumbers({ areaCode: "415" });
+    expect(res.map((n) => [n.e164, n.nearby])).toEqual([["+14155550001", false], ["+16285550001", true]]);
+    const url = String(vi.mocked(fetch).mock.calls[0][0]);
+    expect(decodeURIComponent(url)).toContain("filter[best_effort]=true");
+  });
+
+  it("still surfaces other API errors", async () => {
+    respond(401, { errors: [{ code: "10009", title: "Authentication failed" }] });
+    await expect(provider.searchNumbers({ areaCode: "415" })).rejects.toThrow(/401/);
   });
 });
