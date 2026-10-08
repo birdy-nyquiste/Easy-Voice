@@ -44,7 +44,10 @@ export function AgentForm({
       : "";
   const bilingual = stock.filter((v) => v.speaks.includes("zh"));
   const englishOnly = stock.filter((v) => !v.speaks.includes("zh"));
-  const readyClones = clones.filter((c) => c.status === "ready");
+  // While cloning is off, keep only the clone this agent already uses (so the picker shows it).
+  const readyClones = clones.filter(
+    (c) => c.status === "ready" && (config.features.voiceCloning || c.id === agent?.voiceId),
+  );
   const ttsByVoice = Object.fromEntries([
     ...stock.map((v) => [`stock:${v.ref}`, ttsModelName(v.ref)]),
     ...readyClones.map((v) => [`clone:${v.id}`, ttsModelName(v.voiceRef ?? "")]),
