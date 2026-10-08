@@ -10,8 +10,8 @@ const provider = createTelnyxProvider({
   apiKey: "test",
   publicKey: rawPub,
   connectionId: "conn",
-  llmModel: "",
-  sttModel: "deepgram/nova-3",
+  llmModel: "moonshotai/Kimi-K2.6",
+  sttModel: "assemblyai/universal-3-5-pro",
   sttLanguage: "auto",
   cloneModel: "Qwen3TTS",
   insightGroupId: "",
@@ -112,5 +112,18 @@ describe("call results", () => {
     expect(res?.transcript.map((m) => m.text)).toEqual(["m1", "m2", "m3"]);
     for (const [url] of fetchMock.mock.calls) expect(new URL(url).searchParams.get("page[size]")).toBe("100");
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("assistant config", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("turns off the assistant's own recording so each call is recorded once", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "assistant-1" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await provider.createAssistant({ name: "A", instructions: "i", greeting: "g", language: "en", voiceRef: "Telnyx.KokoroTTS.af_heart" });
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body));
+    expect(body.telephony_settings).toEqual({ recording_settings: { enabled: false } });
+    expect(body.model).toBe("moonshotai/Kimi-K2.6");
   });
 });

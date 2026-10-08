@@ -49,6 +49,13 @@ describe("platform model settings", () => {
     expect(await resyncStaleAgents()).toBe(0);
   });
 
+  it("re-syncs when what we send to the provider changes (body version)", async () => {
+    const u = await makeUser();
+    const a = await createAgent(u.id, input);
+    await db.update(agents).set({ syncedConfig: "fingerprint-from-older-code" }).where(eq(agents.id, a.id));
+    expect(await resyncStaleAgents()).toBe(1);
+  });
+
   it("can scope the re-sync to one user", async () => {
     const [u1, u2] = [await makeUser(), await makeUser()];
     await createAgent(u1.id, input);
