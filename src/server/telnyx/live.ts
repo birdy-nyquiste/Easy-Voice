@@ -143,7 +143,7 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
       voiceId: d.id,
       ref: `Telnyx.${model}.${d.provider_voice_id ?? d.id}`,
       status: d.status === "active" ? "ready" : d.status === "pending" ? "processing" : "failed",
-      failureReason: d.status === "expired" ? "Voice expired at the provider." : d.status === "failed" ? "Cloning failed." : undefined,
+      failureReason: d.status === "expired" ? "This voice has expired." : d.status === "failed" ? "Cloning failed." : undefined,
     };
   }
 
@@ -261,7 +261,7 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
       }
       const list = await api<{ data: Parameters<typeof toClone>[0][] }>("GET", "/voice_clones?page[size]=250");
       const found = list.data.find((c) => c.id === voiceId);
-      return found ? toClone(found) : { voiceId, ref: "", status: "failed", failureReason: "Voice not found at the provider." };
+      return found ? toClone(found) : { voiceId, ref: "", status: "failed", failureReason: "This voice is no longer available." };
     },
 
     async deleteClonedVoice(voiceId) {

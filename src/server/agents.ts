@@ -159,8 +159,8 @@ export async function syncAgent(a: Agent): Promise<Agent> {
     console.error("syncAgent failed", a.id, err);
     const failureReason =
       err instanceof FeatureNotPermittedError && err.feature === "cloned_voices"
-        ? "Cloned voices can't be used on calls yet: the voice platform account still needs verification. Pick a built-in voice for now."
-        : "Couldn't save the agent to the voice platform. Try saving again.";
+        ? "The cloned voice feature is temporarily unavailable. Pick a built-in voice for now."
+        : "Couldn't save the agent. Try saving again.";
     const [u] = await db
       .update(agents)
       .set({ status: "failed", failureReason })

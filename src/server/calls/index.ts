@@ -112,7 +112,7 @@ export async function deleteCallRecord(userId: string, callId: string): Promise<
   const [c] = await db.select().from(calls).where(and(eq(calls.id, callId), eq(calls.userId, userId)));
   if (!c || c.deletedAt) throw new UserError("Call not found.");
   if (!c.endedAt) throw new UserError("Can't delete a call that's still in progress.");
-  if (!(await purgeCallContent(c))) throw new UserError("Couldn't delete the recording at the provider. Try again shortly.");
+  if (!(await purgeCallContent(c))) throw new UserError("Couldn't delete the recording. Try again shortly.");
   await db.update(calls).set({ deletedAt: new Date() }).where(eq(calls.id, c.id));
 }
 

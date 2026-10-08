@@ -93,7 +93,7 @@ export async function cloneVoice(
 
   try {
     const res = await voiceProvider().cloneVoice({ name, language: input.language, gender: input.gender, audio: input.audio });
-    if (res.status === "failed") return failVoice(row, res.failureReason ?? "The provider rejected the sample.");
+    if (res.status === "failed") return failVoice(row, res.failureReason ?? "The sample couldn't be used. Try a clearer recording.");
     const [u] = await db
       .update(voices)
       .set({ providerVoiceId: res.voiceId, voiceRef: res.ref, status: res.status })

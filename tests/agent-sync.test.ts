@@ -113,11 +113,11 @@ describe("agent model", () => {
     await expect(createAgent(u.id, { ...input, model: "openai/gpt-5.6-sol" })).rejects.toThrow(/isn't available/);
   });
 
-  it("explains when the provider account can't use cloned voices yet", async () => {
+  it("says cloned voices are temporarily unavailable when the provider refuses them", async () => {
     const u = await makeUser();
     vi.spyOn(mockProvider, "createAssistant").mockRejectedValue(new FeatureNotPermittedError("cloned_voices", "403"));
     const a = await createAgent(u.id, input);
     expect(a.status).toBe("failed");
-    expect(a.failureReason).toMatch(/needs verification/);
+    expect(a.failureReason).toBe("The cloned voice feature is temporarily unavailable. Pick a built-in voice for now.");
   });
 });
