@@ -82,7 +82,7 @@ export default async function VoicesPage() {
             <li key={v.ref} className="flex items-center justify-between rounded-lg border border-stone-100 px-3 py-2 text-sm">
               <span className="font-medium">{v.name}</span>
               <span className="flex gap-1.5">
-                <Badge>{v.language}</Badge>
+                {v.speaks.includes("zh") ? <Badge tone="green">Mandarin + English</Badge> : <Badge>English only</Badge>}
                 {v.gender && <Badge>{v.gender}</Badge>}
               </span>
             </li>

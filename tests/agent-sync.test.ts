@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
 import { agents } from "@/db/schema";
 import { config } from "@/lib/config";
-import { createAgent, platformFingerprint, resyncStaleAgents } from "@/server/agents";
+import { createAgent, ENGLISH_ONLY_VOICE_RULE, platformFingerprint, resyncStaleAgents } from "@/server/agents";
 import { mockProvider } from "@/server/telnyx/mock";
 import { makeUser, resetDb } from "./helpers";
 
@@ -63,5 +63,29 @@ describe("platform model settings", () => {
     config.telnyx.sttLanguage = "zh";
     expect(await resyncStaleAgents(u1.id)).toBe(1);
     expect(await resyncStaleAgents()).toBe(1);
+  });
+});
+
+describe("voice languages", () => {
+  const hua = "stock:Telnyx.Ultra.7a5d4663-88ae-47b7-808e-8f9b9ee4127b";
+
+  it("rejects an English-only voice for a Mandarin agent", async () => {
+    const u = await makeUser();
+    await expect(createAgent(u.id, { ...input, language: "zh" })).rejects.toThrow(/can't speak Mandarin/);
+  });
+
+  it("tells agents with an English-only voice to reply in English", async () => {
+    const u = await makeUser();
+    const create = vi.spyOn(mockProvider, "createAssistant");
+    await createAgent(u.id, input);
+    expect(create.mock.calls[0][0].instructions).toBe(`Be helpful\n\n${ENGLISH_ONLY_VOICE_RULE}`);
+  });
+
+  it("leaves instructions untouched for bilingual voices, in either language", async () => {
+    const u = await makeUser();
+    const create = vi.spyOn(mockProvider, "createAssistant");
+    await createAgent(u.id, { ...input, voice: hua });
+    await createAgent(u.id, { ...input, voice: hua, language: "zh", name: "B" });
+    expect(create.mock.calls.map((c) => c[0].instructions)).toEqual(["Be helpful", "Be helpful"]);
   });
 });

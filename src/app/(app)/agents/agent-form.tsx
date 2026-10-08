@@ -3,6 +3,7 @@ import { Field, inputClass } from "@/components/ui";
 import type { Agent, Voice } from "@/db/schema";
 import { OUTBOUND_GREETING, RECORDING_NOTICE } from "@/server/agents";
 import type { StockVoice } from "@/server/telnyx";
+import { DEFAULT_VOICE_REF } from "@/server/telnyx/stock-voices";
 import { saveAgentAction } from "./actions";
 
 const DEFAULT_INSTRUCTIONS = `You are my personal phone assistant. Be concise and warm.
@@ -15,7 +16,15 @@ This call is {{call_direction}}.
 Never make commitments on my behalf beyond what the goal asks for.`;
 
 export function AgentForm({ agent, stock, clones }: { agent?: Agent; stock: StockVoice[]; clones: Voice[] }) {
-  const currentVoice = agent ? (agent.voiceId ? `clone:${agent.voiceId}` : `stock:${agent.voiceRef}`) : "";
+  const currentVoice = agent
+    ? agent.voiceId
+      ? `clone:${agent.voiceId}`
+      : `stock:${agent.voiceRef}`
+    : stock.some((v) => v.ref === DEFAULT_VOICE_REF)
+      ? `stock:${DEFAULT_VOICE_REF}`
+      : "";
+  const bilingual = stock.filter((v) => v.speaks.includes("zh"));
+  const englishOnly = stock.filter((v) => !v.speaks.includes("zh"));
   const readyClones = clones.filter((c) => c.status === "ready");
   return (
     <ActionForm action={saveAgentAction} className="space-y-5">
@@ -31,7 +40,7 @@ export function AgentForm({ agent, stock, clones }: { agent?: Agent; stock: Stoc
           </select>
         </Field>
       </div>
-      <Field label="Voice">
+      <Field label="Voice" hint="Mandarin agents need a Mandarin + English voice. English-only voices always reply in English.">
         <select name="voice" required defaultValue={currentVoice} className={inputClass}>
           <option value="" disabled>Choose a voice…</option>
           {readyClones.length > 0 && (
@@ -41,10 +50,17 @@ export function AgentForm({ agent, stock, clones }: { agent?: Agent; stock: Stoc
               ))}
             </optgroup>
           )}
-          <optgroup label="Built-in voices">
-            {stock.map((v) => (
+          <optgroup label="Mandarin + English">
+            {bilingual.map((v) => (
               <option key={v.ref} value={`stock:${v.ref}`}>
-                {v.name} — {v.language}{v.gender ? `, ${v.gender}` : ""}
+                {v.name}{v.gender ? ` (${v.gender})` : ""}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="English only">
+            {englishOnly.map((v) => (
+              <option key={v.ref} value={`stock:${v.ref}`}>
+                {v.name}{v.gender ? ` (${v.gender})` : ""}
               </option>
             ))}
           </optgroup>

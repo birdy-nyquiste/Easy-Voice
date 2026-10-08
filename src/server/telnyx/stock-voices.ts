@@ -1,8 +1,12 @@
+import type { Language } from "@/lib/language";
 import type { StockVoice } from "./types";
 
 /**
  * Which Telnyx catalog voices we offer, per language. Mandarin is only available
  * on the Ultra model; Kokoro covers English well and is inexpensive.
+ *
+ * Listening test (2026-10-08) on a mixed sentence: Ultra Mandarin voices speak both
+ * Mandarin and English naturally; Kokoro voices can't pronounce Chinese at all.
  */
 export const OFFERED_VOICE_MODELS: Record<string, string[]> = {
   "en-US": ["KokoroTTS"],
@@ -26,11 +30,21 @@ export function toStockVoices(catalog: CatalogVoice[]): StockVoice[] {
       ref: v.id,
       name: displayName(v),
       language: v.language === "zh" ? "zh-CN" : v.language,
+      speaks: voiceSpeaks(v.id),
       gender: v.gender?.toLowerCase(),
       provider: "Telnyx",
     }))
-    .sort((a, b) => a.language.localeCompare(b.language) || a.name.localeCompare(b.name));
+    // Bilingual voices first: they work for every agent.
+    .sort((a, b) => b.speaks.length - a.speaks.length || a.name.localeCompare(b.name));
 }
+
+/** Languages a voice can pronounce, from its "Provider.Model.id" ref. */
+export function voiceSpeaks(ref: string): Language[] {
+  return ref.startsWith("Telnyx.KokoroTTS.") ? ["en"] : ["zh", "en"];
+}
+
+/** Default voice for new agents: bilingual, chosen in the listening test. */
+export const DEFAULT_VOICE_REF = "Telnyx.Ultra.7a5d4663-88ae-47b7-808e-8f9b9ee4127b"; // Hua - Sunny Support
 
 /** Kokoro names look like "af_heart"; Ultra names are already human ("Hao - Friendly Guy"). */
 function displayName(v: CatalogVoice): string {

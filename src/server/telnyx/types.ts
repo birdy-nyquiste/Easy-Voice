@@ -27,6 +27,8 @@ export interface StockVoice {
   ref: string;
   name: string;
   language: string; // BCP-47-ish, e.g. "en-US", "zh-CN"
+  /** Languages this voice can actually pronounce. */
+  speaks: Language[];
   gender?: string;
   provider?: string;
 }
