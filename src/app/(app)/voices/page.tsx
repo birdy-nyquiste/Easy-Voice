@@ -1,7 +1,7 @@
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { Badge, Card, CardTitle, Field, PageHeader, StatusBadge, inputClass } from "@/components/ui";
 import { config } from "@/lib/config";
-import { formatCents } from "@/lib/format";
+import { formatCents, formatMegabytes } from "@/lib/format";
 import { requireUser } from "@/server/auth";
 import { listStockVoices, listUserVoices, refreshProcessingVoices } from "@/server/voices";
 import { cloneVoiceAction, deleteVoiceAction } from "./actions";
@@ -63,7 +63,7 @@ export default async function VoicesPage() {
                 </select>
               </Field>
             </div>
-            <Field label="Audio sample" hint="10–15 seconds of clear speech, one speaker, no background noise. Max 4 MB.">
+            <Field label="Audio sample" hint={`10–15 seconds of clear speech, one speaker, no background noise. Max ${formatMegabytes(config.limits.cloneSampleBytes)}.`}>
               <SampleInput maxBytes={config.limits.cloneSampleBytes} />
             </Field>
             <label className="flex items-start gap-2 text-sm text-stone-700">

@@ -4,7 +4,7 @@ import { db, withUserLock } from "@/db";
 import { agents, voices, type Voice } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
-import { formatCents } from "@/lib/format";
+import { formatCents, formatMegabytes } from "@/lib/format";
 import { chargePurchase, refundPurchase, type Purchase } from "./billing/ledger";
 import type { Language } from "@/lib/language";
 import { voiceProvider, type StockVoice } from "./telnyx";
@@ -28,7 +28,7 @@ export async function cloneVoice(
   if (!input.consent) throw new UserError("You must confirm this is your voice or that you have the speaker's consent.");
   if (!input.audio || input.audio.size === 0) throw new UserError("Upload or record an audio sample.");
   const maxBytes = Math.min(voiceProvider().maxCloneSampleBytes, config.limits.cloneSampleBytes);
-  if (input.audio.size > maxBytes) throw new UserError(`Audio sample must be under ${Math.floor(maxBytes / 1024 / 1024)} MB.`);
+  if (input.audio.size > maxBytes) throw new UserError(`Audio sample must be under ${formatMegabytes(maxBytes)}.`);
 
   const row = await withUserLock(userId, async (tx) => {
     const existing = await tx

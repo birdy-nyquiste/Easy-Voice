@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { buttonClass, inputClass } from "@/components/ui";
+import { formatMegabytes } from "@/lib/format";
 
 /** File input that can also be filled from a microphone recording. */
 export function SampleInput({ maxBytes }: { maxBytes: number }) {
@@ -19,7 +20,7 @@ export function SampleInput({ maxBytes }: { maxBytes: number }) {
   function setSample(file: File | null) {
     setError(null);
     if (file && file.size > maxBytes) {
-      setError(`That sample is ${(file.size / 1024 / 1024).toFixed(1)} MB. The limit is ${Math.floor(maxBytes / 1024 / 1024)} MB — use a shorter clip.`);
+      setError(`That sample is ${formatMegabytes(file.size)}. The limit is ${formatMegabytes(maxBytes)} — use a shorter clip.`);
       file = null;
     }
     const dt = new DataTransfer();
