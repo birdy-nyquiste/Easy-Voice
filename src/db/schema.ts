@@ -180,6 +180,8 @@ export const calls = pgTable(
     direction: callDirection("direction").notNull(),
     fromNumber: text("from_number").notNull(),
     toNumber: text("to_number").notNull(),
+    /** Outbound only: what the user asked the agent to do on this call ({{call_goal}}). */
+    goal: text("goal"),
     providerCallControlId: text("provider_call_control_id").unique(),
     providerCallSessionId: text("provider_call_session_id"),
     providerConversationId: text("provider_conversation_id"),

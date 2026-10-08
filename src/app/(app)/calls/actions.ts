@@ -10,7 +10,11 @@ export async function startCallAction(_: ActionState, form: FormData): Promise<A
   let callId = "";
   const result = await attempt(async () => {
     const user = await requireUser();
-    const call = await startOutboundCall(user, { agentId: String(form.get("agentId")), to: String(form.get("to") ?? "") });
+    const call = await startOutboundCall(user, {
+      agentId: String(form.get("agentId")),
+      to: String(form.get("to") ?? ""),
+      goal: String(form.get("goal") ?? ""),
+    });
     callId = call.id;
   });
   if (callId) redirect(`/calls/${callId}`);

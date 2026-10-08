@@ -38,6 +38,12 @@ export default async function CallPage({ params }: { params: Promise<{ id: strin
           </div>
         </Notice>
       )}
+      {call.goal && (
+        <Card>
+          <CardTitle>Goal for this call</CardTitle>
+          <p className="whitespace-pre-wrap text-sm text-stone-700">{call.goal}</p>
+        </Card>
+      )}
       {call.outcome && <Notice tone={call.status === "completed" ? "amber" : "red"}>{call.outcome}</Notice>}
 
       <Card>

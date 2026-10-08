@@ -3,7 +3,7 @@ import { ActionForm, SubmitButton } from "@/components/forms";
 import { Badge, Card, CardTitle, Empty, Field, Notice, PageHeader, StatusBadge, inputClass } from "@/components/ui";
 import { config } from "@/lib/config";
 import { formatCents, formatDateTime, formatDuration, formatPhone } from "@/lib/format";
-import { listUserAgents } from "@/server/agents";
+import { listUserAgents, MAX_CALL_GOAL_LENGTH } from "@/server/agents";
 import { requireUser } from "@/server/auth";
 import { listUserCalls } from "@/server/calls";
 import { listUserNumbers } from "@/server/numbers";
@@ -31,16 +31,30 @@ export default async function CallsPage() {
             {readyAgents.length === 0 && <Link href="/agents/new" className="underline">a ready agent</Link>} to place calls.
           </Notice>
         ) : (
-          <ActionForm action={startCallAction} className="grid items-end gap-3 sm:grid-cols-[1fr_1fr_auto]">
-            <Field label="Agent">
-              <select name="agentId" defaultValue={activeNumber.agentId ?? readyAgents[0].id} className={inputClass}>
-                {readyAgents.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Number to call">
-              <input name="to" required inputMode="tel" placeholder="(415) 555-0100" className={inputClass} />
+          <ActionForm action={startCallAction} className="space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Agent">
+                <select name="agentId" defaultValue={activeNumber.agentId ?? readyAgents[0].id} className={inputClass}>
+                  {readyAgents.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Number to call">
+                <input name="to" required inputMode="tel" placeholder="(415) 555-0100" className={inputClass} />
+              </Field>
+            </div>
+            <Field
+              label="What should the agent do on this call? (optional)"
+              hint={<>Passed to the agent as <code>{"{{call_goal}}"}</code> for this call only. Its instructions decide how to use it.</>}
+            >
+              <textarea
+                name="goal"
+                rows={2}
+                maxLength={MAX_CALL_GOAL_LENGTH}
+                placeholder="e.g. Call Dr. Lee's office and move my Thursday 3pm appointment to next week."
+                className={inputClass}
+              />
             </Field>
             <SubmitButton pendingText="Dialing…">Call</SubmitButton>
           </ActionForm>

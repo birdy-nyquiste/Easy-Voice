@@ -1,14 +1,18 @@
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { Field, inputClass } from "@/components/ui";
 import type { Agent, Voice } from "@/db/schema";
-import { RECORDING_NOTICE } from "@/server/agents";
+import { OUTBOUND_GREETING, RECORDING_NOTICE } from "@/server/agents";
 import type { StockVoice } from "@/server/telnyx";
 import { saveAgentAction } from "./actions";
 
-const DEFAULT_INSTRUCTIONS = `You are a friendly personal assistant answering phone calls for me.
-Be concise and warm. Ask the caller for their name and the reason for the call.
-If they want to leave a message, confirm the details back to them.
-Never make commitments on my behalf.`;
+const DEFAULT_INSTRUCTIONS = `You are my personal phone assistant. Be concise and warm.
+
+This call is {{call_direction}}.
+- If inbound: someone called me. Ask for their name and why they're calling, and offer to take a message. Confirm the message back to them.
+- If outbound: you are calling on my behalf. Your goal for this call: {{call_goal}}
+  Introduce yourself as my assistant, work toward the goal, and confirm any details you agree on.
+
+Never make commitments on my behalf beyond what the goal asks for.`;
 
 export function AgentForm({ agent, stock, clones }: { agent?: Agent; stock: StockVoice[]; clones: Voice[] }) {
   const currentVoice = agent ? (agent.voiceId ? `clone:${agent.voiceId}` : `stock:${agent.voiceRef}`) : "";
@@ -48,11 +52,14 @@ export function AgentForm({ agent, stock, clones }: { agent?: Agent; stock: Stoc
       </Field>
       <Field
         label="Greeting"
-        hint={`The first thing the agent says. A recording notice ("${RECORDING_NOTICE.en}" / "${RECORDING_NOTICE.zh}") is added automatically.`}
+        hint={`The first thing the agent says when answering. A recording notice ("${RECORDING_NOTICE.en}" / "${RECORDING_NOTICE.zh}") is added automatically. On calls the agent places, it opens with "${OUTBOUND_GREETING.en}" instead.`}
       >
         <input name="greeting" required maxLength={500} defaultValue={agent?.greeting ?? "Hi, you've reached my assistant. How can I help?"} className={inputClass} />
       </Field>
-      <Field label="Instructions" hint="How the agent should behave on calls.">
+      <Field
+        label="Instructions"
+        hint={<>How the agent should behave on calls. Use <code>{"{{call_direction}}"}</code> (inbound or outbound) and <code>{"{{call_goal}}"}</code> (what you ask for when placing a call).</>}
+      >
         <textarea name="instructions" required rows={8} maxLength={8000} defaultValue={agent?.instructions ?? DEFAULT_INSTRUCTIONS} className={`${inputClass} font-mono text-xs leading-relaxed`} />
       </Field>
       <SubmitButton pendingText="Saving…">{agent ? "Save changes" : "Create agent"}</SubmitButton>

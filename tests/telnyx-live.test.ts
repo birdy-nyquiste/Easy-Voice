@@ -124,6 +124,41 @@ describe("assistant config", () => {
     await provider.createAssistant({ name: "A", instructions: "i", greeting: "g", language: "en", voiceRef: "Telnyx.KokoroTTS.af_heart" });
     const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body));
     expect(body.telephony_settings).toEqual({ recording_settings: { enabled: false } });
+    expect(body.dynamic_variables).toEqual({ call_direction: "inbound", call_goal: "" });
     expect(body.model).toBe("moonshotai/Kimi-K2.6");
+  });
+});
+
+describe("per-call variables", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const bodyOf = (m: ReturnType<typeof vi.fn>, i = 0) =>
+    JSON.parse(String((m.mock.calls[i] as unknown as [string, RequestInit])[1].body));
+
+  it("answer sends dynamic variables but keeps the stored voice and greeting", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: { result: "ok" } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await provider.answer("cc", "call-1", {
+      assistantId: "assistant-1",
+      voiceRef: "Telnyx.KokoroTTS.af_heart",
+      variables: { call_direction: "inbound", call_goal: "" },
+    });
+    const body = bodyOf(fetchMock);
+    expect(body.assistant).toEqual({ id: "assistant-1", dynamic_variables: { call_direction: "inbound", call_goal: "" } });
+    expect(body.greeting).toBeUndefined();
+  });
+
+  it("ai_assistant_start sends the goal and the outbound greeting", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: { conversation_id: "conv-9" } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await provider.startAssistant("cc", {
+      assistantId: "assistant-1",
+      voiceRef: "x",
+      variables: { call_direction: "outbound", call_goal: "Book a table for 2" },
+      greetingOverride: "Hi, this is an AI assistant calling.",
+    });
+    expect(res.conversationId).toBe("conv-9");
+    const body = bodyOf(fetchMock);
+    expect(body.assistant.dynamic_variables).toEqual({ call_direction: "outbound", call_goal: "Book a table for 2" });
+    expect(body.greeting).toBe("Hi, this is an AI assistant calling.");
   });
 });

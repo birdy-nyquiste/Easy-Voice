@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
 import { calls, voices } from "@/db/schema";
@@ -67,6 +68,17 @@ describe("per-user isolation", () => {
     const { b, voice } = await twoUsers();
     const input = { name: "x", instructions: "x", greeting: "x", language: "en", voice: `clone:${voice.id}` };
     await expect(updateAgent(b.user.id, b.agent.id, input)).rejects.toThrow(/Unknown voice/);
+  });
+});
+
+describe("outbound call goal", () => {
+  it("stores the goal for the call and rejects overly long goals", async () => {
+    const { user, agent } = await makeLine(1000);
+    vi.spyOn(mockProvider, "dial").mockResolvedValue({ callControlId: "cc-goal" });
+    const call = await startOutboundCall(user, { agentId: agent.id, to: "4155550100", goal: "  Reschedule my haircut  " });
+    expect(call.goal).toBe("Reschedule my haircut");
+    await db.update(calls).set({ status: "completed" }).where(eq(calls.id, call.id));
+    await expect(startOutboundCall(user, { agentId: agent.id, to: "4155550101", goal: "x".repeat(1001) })).rejects.toThrow(/under 1000/);
   });
 });
 

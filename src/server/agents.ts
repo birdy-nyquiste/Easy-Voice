@@ -15,6 +15,18 @@ export const RECORDING_NOTICE = {
   zh: "本次通话可能会被录音。",
 } as const;
 
+/**
+ * Spoken first on calls the agent places: discloses that it's an AI and the recording,
+ * then the agent pursues {{call_goal}} per its instructions. (The agent's own greeting is
+ * written for answering calls, e.g. "you've reached my assistant".)
+ */
+export const OUTBOUND_GREETING = {
+  en: `Hi, this is an AI assistant calling. ${RECORDING_NOTICE.en}`,
+  zh: `您好，我是AI语音助理。${RECORDING_NOTICE.zh}`,
+} as const;
+
+export const MAX_CALL_GOAL_LENGTH = 1000;
+
 export const agentInput = z.object({
   name: z.string().trim().min(1, "Name is required").max(80),
   instructions: z.string().trim().min(1, "Instructions are required").max(8000),

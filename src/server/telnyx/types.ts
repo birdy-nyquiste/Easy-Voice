@@ -89,10 +89,21 @@ export interface CallEvent {
   totalCostUsd?: string;
 }
 
+/**
+ * Per-call values available to an agent's instructions as {{call_direction}} and {{call_goal}}.
+ */
+export interface CallVariables {
+  call_direction: "inbound" | "outbound";
+  /** What the user asked the agent to do on this call (outbound only; may be empty). */
+  call_goal: string;
+}
+
 export interface AssistantStart {
   assistantId: string;
-  greeting: string;
   voiceRef: string;
+  variables: CallVariables;
+  /** Replaces the stored greeting for this call only (used for outbound calls). */
+  greetingOverride?: string;
 }
 
 export interface CallRef {
