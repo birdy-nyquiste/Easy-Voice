@@ -3,6 +3,11 @@ export function formatCents(cents: number): string {
   return `${sign}$${(Math.abs(cents) / 100).toFixed(2)}`;
 }
 
+/** 4613734 → "4.4 MB" */
+export function formatMegabytes(bytes: number): string {
+  return `${Number((bytes / 1024 / 1024).toFixed(1))} MB`;
+}
+
 export function formatPhone(e164: string): string {
   const m = /^\+1(\d{3})(\d{3})(\d{4})$/.exec(e164);
   return m ? `(${m[1]}) ${m[2]}-${m[3]}` : e164;
