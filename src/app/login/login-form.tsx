@@ -1,12 +1,12 @@
 "use client";
 
 import { useActionState } from "react";
-import { SubmitButton } from "@/components/forms";
+import { SubmitButton, safeAction } from "@/components/forms";
 import { inputClass } from "@/components/ui";
 import { loginAction, type LoginState } from "./actions";
 
 export function LoginForm() {
-  const [state, action] = useActionState<LoginState, FormData>(loginAction, { step: "email" });
+  const [state, action] = useActionState<LoginState, FormData>(safeAction(loginAction), { step: "email" });
   return (
     <form action={action} className="space-y-3">
       <input

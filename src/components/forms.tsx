@@ -49,7 +49,7 @@ export function ActionForm({
   children: ReactNode;
   className?: string;
 }) {
-  const [state, formAction, pending] = useActionState(safe(action), undefined);
+  const [state, formAction, pending] = useActionState(safeAction(action), undefined);
   return (
     <form
       className={className}
@@ -68,18 +68,18 @@ export function ActionForm({
 }
 
 /**
- * Turn a rejected action call (network failure, body too large, server crash) into form state;
+ * Turn a rejected action call (network failure, body too large, server crash) into an error state;
  * otherwise useActionState rethrows it and the whole page falls over.
  */
-function safe(action: (state: ActionState, data: FormData) => Promise<ActionState>) {
-  return async (state: ActionState, data: FormData): Promise<ActionState> => {
+export function safeAction<S extends { error?: string } | undefined>(action: (state: S, data: FormData) => Promise<S>) {
+  return async (state: S, data: FormData): Promise<S> => {
     try {
       return await action(state, data);
     } catch (err) {
       // Let Next.js redirect()/notFound() propagate.
       if (err && typeof err === "object" && "digest" in err && String(err.digest).startsWith("NEXT_")) throw err;
       console.error(err);
-      return { error: "Something went wrong submitting the form. Please try again." };
+      return { ...state, error: "Something went wrong. Check your connection and try again." } as S;
     }
   };
 }
