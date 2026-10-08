@@ -67,7 +67,7 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
       name: spec.name,
       instructions: spec.instructions,
       greeting: spec.greeting,
-      ...(cfg.llmModel ? { model: cfg.llmModel } : {}),
+      model: cfg.llmModel,
       voice_settings: { voice: spec.voiceRef },
       transcription: {
         model: cfg.sttModel,

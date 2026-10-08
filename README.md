@@ -38,6 +38,15 @@ CI (`.github/workflows/ci.yml`) runs typecheck, lint, the tests against a Postgr
 
 API details and open questions are in [docs/telnyx-api-notes.md](docs/telnyx-api-notes.md).
 
+## Models
+
+The LLM and speech-to-text models are set for the whole platform, never per user (SPEC §16):
+`TELNYX_LLM_MODEL` (default `moonshotai/Kimi-K2.6`), `TELNYX_STT_MODEL` (default `assemblyai/universal-3-5-pro`) and
+`TELNYX_STT_LANGUAGE` (default `auto`). Voices are picked per agent from the Telnyx catalog (see
+`src/server/telnyx/stock-voices.ts`). Each agent records which settings it was synced with. After you change these
+variables and deploy, existing agents are re-synced by the daily cron, or when their owner opens the Agents page.
+Edits made directly in the Telnyx portal are overwritten the next time the agent syncs.
+
 ## Stripe
 
 Stripe only processes one-time top-up payments; there are no subscriptions. Number rental and usage are deducted from the balance. Set `STRIPE_SECRET_KEY`. Point a webhook at `/api/webhooks/stripe` for the `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed` and `checkout.session.expired` events, then set `STRIPE_WEBHOOK_SECRET`. Locally: `stripe listen --forward-to localhost:3000/api/webhooks/stripe`.

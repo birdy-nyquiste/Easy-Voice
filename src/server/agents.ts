@@ -1,5 +1,6 @@
 import "server-only";
-import { and, eq, isNull } from "drizzle-orm";
+import { createHash } from "node:crypto";
+import { and, eq, isNull, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { db, withUserLock } from "@/db";
 import { agents, phoneNumbers, voices, type Agent } from "@/db/schema";
@@ -108,7 +109,7 @@ export async function syncAgent(a: Agent): Promise<Agent> {
     else assistantId = (await voiceProvider().createAssistant(toSpec(a))).assistantId;
     const [u] = await db
       .update(agents)
-      .set({ providerAssistantId: assistantId, status: "ready", failureReason: null })
+      .set({ providerAssistantId: assistantId, status: "ready", failureReason: null, syncedConfig: platformFingerprint() })
       .where(eq(agents.id, a.id))
       .returning();
     return u;
@@ -121,6 +122,34 @@ export async function syncAgent(a: Agent): Promise<Agent> {
       .returning();
     return u;
   }
+}
+
+/**
+ * Identifies the platform-wide assistant settings (models, insights). When these
+ * change on deploy, agents saved under the old settings are re-synced.
+ */
+export function platformFingerprint(): string {
+  const t = config.telnyx;
+  const settings = { llm: t.llmModel, stt: t.sttModel, sttLanguage: t.sttLanguage, insights: t.insightGroupId };
+  return createHash("sha256").update(JSON.stringify(settings)).digest("hex").slice(0, 16);
+}
+
+/** Re-push agents whose provider copy predates the current platform settings. */
+export async function resyncStaleAgents(userId?: string): Promise<number> {
+  const fp = platformFingerprint();
+  const stale = await db
+    .select()
+    .from(agents)
+    .where(
+      and(
+        isNull(agents.deletedAt),
+        eq(agents.status, "ready"),
+        or(isNull(agents.syncedConfig), ne(agents.syncedConfig, fp)),
+        userId ? eq(agents.userId, userId) : undefined,
+      ),
+    );
+  for (const a of stale) await syncAgent(a);
+  return stale.length;
 }
 
 export async function deleteAgent(userId: string, agentId: string): Promise<void> {
