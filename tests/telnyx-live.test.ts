@@ -96,3 +96,21 @@ describe("number search", () => {
     await expect(provider.searchNumbers({ areaCode: "415" })).rejects.toThrow(/401/);
   });
 });
+
+describe("call results", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("pages through conversation messages at Telnyx's 100-per-page limit", async () => {
+    const msg = (i: number) => ({ role: i % 2 ? "user" : "assistant", text: `m${i}`, sent_at: `2026-10-07T10:00:${String(i).padStart(2, "0")}Z` });
+    const fetchMock = vi.fn(async (url: string) => {
+      const page = Number(new URL(url).searchParams.get("page[number]"));
+      const data = page === 1 ? [msg(2), msg(1)] : [msg(3)];
+      return new Response(JSON.stringify({ data, meta: { total_pages: 2 } }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await provider.getCallResults({ callControlId: "cc", conversationId: "conv-1" });
+    expect(res?.transcript.map((m) => m.text)).toEqual(["m1", "m2", "m3"]);
+    for (const [url] of fetchMock.mock.calls) expect(new URL(url).searchParams.get("page[size]")).toBe("100");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
