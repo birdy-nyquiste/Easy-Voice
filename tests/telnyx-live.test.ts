@@ -51,7 +51,7 @@ describe("Telnyx webhook verification", () => {
 describe("stock voice catalog", async () => {
   const { toStockVoices } = await import("@/server/telnyx/stock-voices");
 
-  it("offers English Kokoro and Mandarin Ultra voices, skipping deprecated and other models", () => {
+  it("offers English Kokoro and bilingual Mandarin Ultra voices (bilingual first), skipping deprecated and other models", () => {
     const voices = toStockVoices([
       { id: "Telnyx.KokoroTTS.af_heart", name: "af_heart", language: "en-US", model_id: "KokoroTTS", gender: "Female" },
       { id: "Telnyx.Ultra.aaa", name: "Hao - Friendly Guy", language: "zh", model_id: "Ultra", gender: "Male" },
@@ -60,8 +60,8 @@ describe("stock voice catalog", async () => {
       { id: "Telnyx.Bayan.ASSY", name: "ASSY", language: "ar-JO", model_id: "Bayan" },
     ]);
     expect(voices).toEqual([
-      { ref: "Telnyx.KokoroTTS.af_heart", name: "Heart", language: "en-US", gender: "female", provider: "Telnyx" },
-      { ref: "Telnyx.Ultra.aaa", name: "Hao - Friendly Guy", language: "zh-CN", gender: "male", provider: "Telnyx" },
+      { ref: "Telnyx.Ultra.aaa", name: "Hao - Friendly Guy", language: "zh-CN", speaks: ["zh", "en"], gender: "male", provider: "Telnyx" },
+      { ref: "Telnyx.KokoroTTS.af_heart", name: "Heart", language: "en-US", speaks: ["en"], gender: "female", provider: "Telnyx" },
     ]);
   });
 });

@@ -8,6 +8,7 @@ import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
 import { LANGUAGES, type Language } from "@/lib/language";
 import { voiceProvider, type AssistantSpec } from "./telnyx";
+import { voiceSpeaks } from "./telnyx/stock-voices";
 import { ASSISTANT_BODY_VERSION } from "./telnyx/version";
 
 export const RECORDING_NOTICE = {
@@ -49,11 +50,19 @@ export async function getUserAgent(userId: string, agentId: string): Promise<Age
   return a ?? null;
 }
 
-async function resolveVoice(userId: string, voice: string): Promise<{ voiceRef: string; voiceId: string | null }> {
+async function resolveVoice(
+  userId: string,
+  voice: string,
+  language: Language,
+): Promise<{ voiceRef: string; voiceId: string | null }> {
   const [kind, value] = [voice.slice(0, voice.indexOf(":")), voice.slice(voice.indexOf(":") + 1)];
   if (kind === "stock") {
     const stock = await voiceProvider().listStockVoices();
-    if (!stock.some((v) => v.ref === value)) throw new UserError("Unknown voice.");
+    const match = stock.find((v) => v.ref === value);
+    if (!match) throw new UserError("Unknown voice.");
+    if (!match.speaks.includes(language)) {
+      throw new UserError(`${match.name} can't speak Mandarin. Pick a voice marked "Mandarin + English".`);
+    }
     return { voiceRef: value, voiceId: null };
   }
   if (kind === "clone") {
@@ -74,10 +83,15 @@ export function providerGreeting(language: Language, greeting: string): string {
   return greeting.includes(notice) ? greeting : `${notice} ${greeting}`;
 }
 
+/** Appended for voices that can't pronounce Chinese, so replies stay speakable. */
+export const ENGLISH_ONLY_VOICE_RULE =
+  "Your voice can only speak English. Always reply in English, even if the caller speaks another language.";
+
 function toSpec(a: Pick<Agent, "name" | "instructions" | "greeting" | "language" | "voiceRef">): AssistantSpec {
+  const englishOnly = !voiceSpeaks(a.voiceRef).includes("zh");
   return {
     name: a.name,
-    instructions: a.instructions,
+    instructions: englishOnly ? `${a.instructions}\n\n${ENGLISH_ONLY_VOICE_RULE}` : a.instructions,
     greeting: providerGreeting(a.language, a.greeting),
     language: a.language,
     voiceRef: a.voiceRef,
@@ -86,7 +100,7 @@ function toSpec(a: Pick<Agent, "name" | "instructions" | "greeting" | "language"
 
 export async function createAgent(userId: string, raw: unknown): Promise<Agent> {
   const input = parse(raw);
-  const voice = await resolveVoice(userId, input.voice);
+  const voice = await resolveVoice(userId, input.voice, input.language);
   const row = await withUserLock(userId, async (tx) => {
     const existing = await tx
       .select({ id: agents.id })
@@ -105,7 +119,7 @@ export async function updateAgent(userId: string, agentId: string, raw: unknown)
   const existing = await getUserAgent(userId, agentId);
   if (!existing) throw new UserError("Agent not found.");
   const input = parse(raw);
-  const voice = await resolveVoice(userId, input.voice);
+  const voice = await resolveVoice(userId, input.voice, input.language);
   const [row] = await db
     .update(agents)
     .set({ ...input, ...voice, status: "syncing", updatedAt: new Date() })
