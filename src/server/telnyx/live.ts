@@ -11,6 +11,8 @@ import type { AssistantSpec, CallRef, ClonedVoiceResult, NumberOrderResult, Orde
 
 const BASE = "https://api.telnyx.com/v2";
 const SIGNATURE_TOLERANCE_SEC = 300;
+/** 100 messages per page; a 30-minute call stays well under this. */
+const MAX_MESSAGE_PAGES = 10;
 // DER prefix that wraps a raw 32-byte Ed25519 key as SPKI.
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 
@@ -275,11 +277,18 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
     async getCallResults(ref) {
       const conversationId = await findConversationId(ref);
       if (!conversationId) return null;
-      const msgs = await api<{ data: { role: string; text?: string; sent_at?: string; created_at?: string }[] }>(
-        "GET",
-        `/ai/conversations/${encodeURIComponent(conversationId)}/messages?page[size]=250`,
-      );
-      const transcript = msgs.data
+      // Telnyx caps page[size] at 100 (larger sizes are rejected with 10015), so page through.
+      type Msg = { role: string; text?: string; sent_at?: string; created_at?: string };
+      const all: Msg[] = [];
+      for (let page = 1; page <= MAX_MESSAGE_PAGES; page++) {
+        const res = await api<{ data: Msg[]; meta?: { total_pages?: number } }>(
+          "GET",
+          `/ai/conversations/${encodeURIComponent(conversationId)}/messages?page[size]=100&page[number]=${page}`,
+        );
+        all.push(...res.data);
+        if (page >= (res.meta?.total_pages ?? 1)) break;
+      }
+      const transcript = all
         .filter((m) => (m.role === "user" || m.role === "assistant") && m.text)
         .sort((a, b) => (a.sent_at ?? a.created_at ?? "").localeCompare(b.sent_at ?? b.created_at ?? ""))
         .map((m) => ({ role: m.role, text: m.text! }));
