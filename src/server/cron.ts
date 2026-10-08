@@ -3,6 +3,7 @@ import { and, eq, isNotNull, isNull, lt } from "drizzle-orm";
 import { db } from "@/db";
 import { calls, phoneNumbers, users } from "@/db/schema";
 import { config } from "@/lib/config";
+import { resyncStaleAgents } from "./agents";
 import { purgeCallContent } from "./calls";
 import { fetchCallResults } from "./calls/results";
 import { chargeNumberRenewals, refreshPendingNumbers, releaseNumber } from "./numbers";
@@ -11,6 +12,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Daily maintenance: renewals, grace-period releases, retention purge, stuck orders. */
 export async function runDailyJobs(now = new Date()) {
+  const resynced = await resyncStaleAgents();
   await refreshPendingNumbers();
   const renewed = await chargeNumberRenewals(now);
 
@@ -42,5 +44,5 @@ export async function runDailyJobs(now = new Date()) {
     .limit(200);
   for (const c of missing) await fetchCallResults(c);
 
-  return { renewed, released: delinquent.length, purged, resultsFetched: missing.length };
+  return { renewed, released: delinquent.length, purged, resultsFetched: missing.length, resynced };
 }

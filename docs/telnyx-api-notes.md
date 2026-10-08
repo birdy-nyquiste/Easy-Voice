@@ -405,3 +405,19 @@ Docs: https://developers.telnyx.com/api-reference/call-recordings/retrieve-a-cal
   instead of using a hard-coded list.
 - Local US number search returned `region_information` types `country_code`, `location`, `rate_center` and
   `state`, and `cost_information.monthly_cost` of `"1.00000"` USD for 415 numbers.
+
+## 12. Model choices verified on live calls (2026-10-07)
+
+- **STT:** `deepgram/nova-3` with `language: "auto"` transcribed spoken Mandarin as English words
+  ("thirty cents chime"), so Mandarin was effectively not understood. `assemblyai/universal-3-5-pro` with `"auto"`
+  correctly transcribed English, Mandarin (`你是谁？`) and mixed sentences (`What message to her. 你好吗？来自Birdie。`).
+  One short utterance was detected as Japanese. If that recurs for Mandarin-first agents, try `language: "zh"`.
+  Per the transcription-settings doc, AssemblyAI universal-3-5-pro is the only model whose listed languages include `zh`.
+- **LLM:** `GET /v2/ai/models` lists 34 models (18 `recommended_for_assistants`), with `pricing` per 1M tokens.
+  An empty `model` currently resolves to `moonshotai/Kimi-K2.6`. We pin it explicitly.
+- **Bringing other models (not used yet):** assistants accept `llm_api_key_ref` (your own key for a provider),
+  `external_llm { base_url, model, llm_api_key_ref, authentication_method, certificate_ref, token_retrieval_url,
+  forward_metadata }` (any OpenAI-compatible chat-completions endpoint) and `fallback_config { model | external_llm }`.
+  TTS catalog providers include aws, azure, elevenlabs (needs `voice_settings.api_key_ref`), minimax
+  (`voice_settings.language_boost`), resemble and xai. STT supports `api_key_ref`/`region` for Azure only. Secrets live in
+  Telnyx Integration Secrets (`/v2/integration_secrets`).

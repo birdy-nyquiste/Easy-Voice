@@ -48,10 +48,15 @@ export const config = {
     apiKey: process.env.TELNYX_API_KEY ?? "",
     publicKey: process.env.TELNYX_PUBLIC_KEY ?? "",
     connectionId: process.env.TELNYX_CONNECTION_ID ?? "",
-    /** Platform-fixed model choices (SPEC §16); empty = Telnyx default. */
-    llmModel: process.env.TELNYX_LLM_MODEL ?? "",
-    sttModel: process.env.TELNYX_STT_MODEL ?? "deepgram/nova-3",
-    sttLanguage: process.env.TELNYX_STT_LANGUAGE ?? "auto",
+    /**
+     * Platform-fixed model choices (SPEC §16). Pinned so a change to Telnyx's own
+     * defaults can't silently change agent behaviour. Empty env values fall back too.
+     * STT: deepgram/nova-3 in "auto" mode transcribed Mandarin as English words in a
+     * live test; AssemblyAI handled English, Mandarin and mixed speech.
+     */
+    llmModel: process.env.TELNYX_LLM_MODEL || "moonshotai/Kimi-K2.6",
+    sttModel: process.env.TELNYX_STT_MODEL || "assemblyai/universal-3-5-pro",
+    sttLanguage: process.env.TELNYX_STT_LANGUAGE || "auto",
     cloneModel: process.env.TELNYX_CLONE_MODEL ?? "Qwen3TTS",
     /** Insight group with a "summary" insight; summaries are skipped when unset. */
     insightGroupId: process.env.TELNYX_INSIGHT_GROUP_ID ?? "",

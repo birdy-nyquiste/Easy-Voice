@@ -150,6 +150,8 @@ export const agents = pgTable("agents", {
   /** Set when the voice is one of the user's clones. */
   voiceId: uuid("voice_id").references(() => voices.id),
   providerAssistantId: text("provider_assistant_id"),
+  /** Fingerprint of the platform model settings last pushed to the provider; see platformFingerprint(). */
+  syncedConfig: text("synced_config"),
   status: agentStatus("status").notNull().default("syncing"),
   failureReason: text("failure_reason"),
   createdAt: createdAt(),

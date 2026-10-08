@@ -2,12 +2,14 @@ import Link from "next/link";
 import { ButtonLink, Card, Empty, PageHeader, StatusBadge } from "@/components/ui";
 import { config } from "@/lib/config";
 import { formatPhone } from "@/lib/format";
-import { listUserAgents } from "@/server/agents";
+import { listUserAgents, resyncStaleAgents } from "@/server/agents";
 import { requireUser } from "@/server/auth";
 import { listUserNumbers } from "@/server/numbers";
 
 export default async function AgentsPage() {
   const user = await requireUser();
+  // Bring agents up to date with changed platform model settings (cheap no-op otherwise).
+  await resyncStaleAgents(user.id);
   const [agents, numbers] = await Promise.all([listUserAgents(user.id), listUserNumbers(user.id)]);
   return (
     <div>
