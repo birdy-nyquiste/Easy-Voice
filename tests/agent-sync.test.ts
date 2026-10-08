@@ -5,6 +5,7 @@ import { agents } from "@/db/schema";
 import { config } from "@/lib/config";
 import { createAgent, ENGLISH_ONLY_VOICE_RULE, platformFingerprint, resyncStaleAgents } from "@/server/agents";
 import { mockProvider } from "@/server/telnyx/mock";
+import { FeatureNotPermittedError } from "@/server/telnyx/types";
 import { makeUser, resetDb } from "./helpers";
 
 const original = { ...config.telnyx };
@@ -87,5 +88,36 @@ describe("voice languages", () => {
     await createAgent(u.id, { ...input, voice: hua });
     await createAgent(u.id, { ...input, voice: hua, language: "zh", name: "B" });
     expect(create.mock.calls.map((c) => c[0].instructions)).toEqual(["Be helpful", "Be helpful"]);
+  });
+});
+
+describe("agent model", () => {
+  it("uses the platform default when none is picked", async () => {
+    const u = await makeUser();
+    const create = vi.spyOn(mockProvider, "createAssistant");
+    const a = await createAgent(u.id, { ...input, model: "" });
+    expect(a.model).toBeNull();
+    expect(create.mock.calls[0][0].model).toBe(config.telnyx.llmModel);
+  });
+
+  it("sends the picked model", async () => {
+    const u = await makeUser();
+    const create = vi.spyOn(mockProvider, "createAssistant");
+    const a = await createAgent(u.id, { ...input, model: "openai/gpt-5.4-mini" });
+    expect(a.model).toBe("openai/gpt-5.4-mini");
+    expect(create.mock.calls[0][0].model).toBe("openai/gpt-5.4-mini");
+  });
+
+  it("rejects models we don't offer", async () => {
+    const u = await makeUser();
+    await expect(createAgent(u.id, { ...input, model: "openai/gpt-5.6-sol" })).rejects.toThrow(/isn't available/);
+  });
+
+  it("explains when the provider account can't use cloned voices yet", async () => {
+    const u = await makeUser();
+    vi.spyOn(mockProvider, "createAssistant").mockRejectedValue(new FeatureNotPermittedError("cloned_voices", "403"));
+    const a = await createAgent(u.id, input);
+    expect(a.status).toBe("failed");
+    expect(a.failureReason).toMatch(/needs verification/);
   });
 });

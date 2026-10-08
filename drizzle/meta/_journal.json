@@ -36,6 +36,13 @@
       "when": 1791491884362,
       "tag": "0004_call_goal",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791496217749,
+      "tag": "0005_agent_model",
+      "breakpoints": true
     }
   ]
 }

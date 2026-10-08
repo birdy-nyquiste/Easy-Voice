@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { encodeClientState, parseTelnyxEnvelope } from "./events";
+import { MOCK_MODELS, toOfferedModels } from "./models";
 import { MOCK_CATALOG, toStockVoices } from "./stock-voices";
 import type { CallResults, ClonedVoiceResult, VoiceProvider } from "./types";
 
@@ -87,6 +90,18 @@ export const mockProvider: VoiceProvider = {
 
   async listStockVoices() {
     return toStockVoices(MOCK_CATALOG);
+  },
+
+  async synthesizePreview() {
+    return mockAudio();
+  },
+
+  async getCloneSample() {
+    return mockAudio();
+  },
+
+  async listModels() {
+    return toOfferedModels(MOCK_MODELS);
   },
 
   maxCloneSampleBytes: 5 * 1024 * 1024,
@@ -183,6 +198,11 @@ export const mockProvider: VoiceProvider = {
     throw new Error("Mock provider does not accept HTTP webhooks");
   },
 };
+
+async function mockAudio() {
+  const buf = await readFile(path.join(process.cwd(), "public/mock-recording.wav"));
+  return { audio: buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer, contentType: "audio/wav" };
+}
 
 /** Dev helper: simulate an inbound PSTN call to one of our numbers. */
 export function simulateInboundCall(from: string, to: string): string {

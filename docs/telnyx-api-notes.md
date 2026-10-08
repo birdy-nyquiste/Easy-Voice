@@ -421,3 +421,17 @@ Docs: https://developers.telnyx.com/api-reference/call-recordings/retrieve-a-cal
   TTS catalog providers include aws, azure, elevenlabs (needs `voice_settings.api_key_ref`), minimax
   (`voice_settings.language_boost`), resemble and xai. STT supports `api_key_ref`/`region` for Azure only. Secrets live in
   Telnyx Integration Secrets (`/v2/integration_secrets`).
+
+## 13. Previews, per-agent models and cloned-voice access (checked live 2026-10-08)
+
+- **TTS preview:** `POST /v2/text-to-speech/speech` `{ text, voice }` (voice = the assistant voice string) returns
+  `audio/mpeg` bytes directly. ~0.5 s for a sentence on KokoroTTS and Ultra.
+- **Clone sample:** `GET /v2/voice_clones/{id}/sample` returns the uploaded sample as-is (`audio/wav` here).
+- **Cloned voices need account verification.** On an unverified account, cloning (`from_upload`, Qwen3TTS) succeeds,
+  but using the clone fails: assistants answer 403 `10010` "Your account is not permitted to use cloned voices. Please
+  complete L2 verification or use a platform voice", and TTS with `Telnyx.Qwen3TTS.<clone id>` answers 403 `10038`
+  "Feature not permitted at this account level". The adapter maps the assistant error to `FeatureNotPermittedError`.
+- **Per-agent LLM:** agents may pick any model with `recommended_for_assistants` whose output price is at most
+  $15 / 1M tokens (`MAX_OUTPUT_PRICE_PER_M`). Calls are billed at a flat per-minute rate, so pricier models are not
+  offered. At this check that excluded only `openai/gpt-5.6-sol`; unpriced entries (`google/gemini-2.5-flash`,
+  `openai/gpt-live-1`) are skipped too.

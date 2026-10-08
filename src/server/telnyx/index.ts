@@ -15,3 +15,4 @@ export function voiceProvider(): VoiceProvider {
 }
 
 export type * from "./types";
+export { FeatureNotPermittedError } from "./types";

@@ -7,12 +7,53 @@ import { UserError } from "@/lib/errors";
 import { formatCents, formatMegabytes } from "@/lib/format";
 import { chargePurchase, refundPurchase, type Purchase } from "./billing/ledger";
 import type { Language } from "@/lib/language";
-import { voiceProvider, type StockVoice } from "./telnyx";
+import { voiceProvider, type PreviewAudio, type StockVoice } from "./telnyx";
 
 export async function listStockVoices(language?: Language): Promise<StockVoice[]> {
   const all = await voiceProvider().listStockVoices();
   if (!language) return all;
   return all.filter((v) => v.language.toLowerCase().startsWith(language));
+}
+
+/** What built-in voices say when previewed; bilingual voices show off both languages. */
+export const PREVIEW_TEXT = {
+  en: "Hi, thanks for calling. I'm your assistant. How can I help you today?",
+  bilingual: "您好，感谢您的来电，我是您的语音助理。Hi, I can speak English too. How can I help?",
+} as const;
+
+// Previews are fixed per voice, so keep them per process instead of paying for TTS on every click.
+const PREVIEW_CACHE_MAX = 100;
+const previewCache = new Map<string, PreviewAudio>();
+
+/** Audio for a voice picker value ("stock:<ref>" or "clone:<voice uuid>"); null if not found. */
+export async function voicePreview(userId: string, voice: string): Promise<PreviewAudio | null> {
+  const [kind, value] = [voice.slice(0, voice.indexOf(":")), voice.slice(voice.indexOf(":") + 1)];
+  let key: string;
+  let load: () => Promise<PreviewAudio>;
+  if (kind === "stock") {
+    // Only catalog voices we offer, so this can't be used to run arbitrary (paid) providers.
+    const match = (await listStockVoices()).find((v) => v.ref === value);
+    if (!match) return null;
+    key = voice;
+    load = () => voiceProvider().synthesizePreview(match.ref, match.speaks.includes("zh") ? PREVIEW_TEXT.bilingual : PREVIEW_TEXT.en);
+  } else if (kind === "clone") {
+    const [v] = await db
+      .select()
+      .from(voices)
+      .where(and(eq(voices.id, value), eq(voices.userId, userId), isNull(voices.deletedAt)));
+    if (!v?.providerVoiceId) return null;
+    key = `clone:${v.providerVoiceId}`;
+    const providerVoiceId = v.providerVoiceId;
+    load = () => voiceProvider().getCloneSample(providerVoiceId);
+  } else {
+    return null;
+  }
+  const hit = previewCache.get(key);
+  if (hit) return hit;
+  const audio = await load();
+  if (previewCache.size >= PREVIEW_CACHE_MAX) previewCache.delete(previewCache.keys().next().value!);
+  previewCache.set(key, audio);
+  return audio;
 }
 
 export async function listUserVoices(userId: string): Promise<Voice[]> {
