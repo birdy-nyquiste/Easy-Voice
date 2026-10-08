@@ -78,6 +78,8 @@ export const config = {
     numbersPerUser: 1,
     agentsPerUser: 3,
     clonedVoicesPerUser: 2,
+    // Vercel rejects function request bodies over 4.5 MB; keep in sync with serverActions.bodySizeLimit.
+    cloneSampleBytes: 4 * 1024 * 1024,
     concurrentCalls: 1,
   },
 };

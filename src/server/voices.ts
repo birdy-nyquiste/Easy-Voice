@@ -27,7 +27,7 @@ export async function cloneVoice(
   if (!name) throw new UserError("Give the voice a name.");
   if (!input.consent) throw new UserError("You must confirm this is your voice or that you have the speaker's consent.");
   if (!input.audio || input.audio.size === 0) throw new UserError("Upload or record an audio sample.");
-  const maxBytes = voiceProvider().maxCloneSampleBytes;
+  const maxBytes = Math.min(voiceProvider().maxCloneSampleBytes, config.limits.cloneSampleBytes);
   if (input.audio.size > maxBytes) throw new UserError(`Audio sample must be under ${Math.floor(maxBytes / 1024 / 1024)} MB.`);
 
   const row = await withUserLock(userId, async (tx) => {

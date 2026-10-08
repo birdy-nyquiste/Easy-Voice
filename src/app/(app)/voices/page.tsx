@@ -63,8 +63,8 @@ export default async function VoicesPage() {
                 </select>
               </Field>
             </div>
-            <Field label="Audio sample" hint="10–15 seconds of clear speech, one speaker, no background noise. Max 5 MB.">
-              <SampleInput />
+            <Field label="Audio sample" hint="10–15 seconds of clear speech, one speaker, no background noise. Max 4 MB.">
+              <SampleInput maxBytes={config.limits.cloneSampleBytes} />
             </Field>
             <label className="flex items-start gap-2 text-sm text-stone-700">
               <input type="checkbox" name="consent" required className="mt-0.5" />
