@@ -20,6 +20,7 @@ function fields(form: FormData) {
 
 export async function saveAgentAction(_: ActionState, form: FormData): Promise<ActionState> {
   let id = String(form.get("id") ?? "");
+  const creating = !id;
   const result = await attempt(async () => {
     const user = await requireUser();
     const agent = id ? await updateAgent(user.id, id, fields(form)) : await createAgent(user.id, fields(form));
@@ -31,6 +32,9 @@ export async function saveAgentAction(_: ActionState, form: FormData): Promise<A
   // The agent page remounts its form after a save (see agents/[id]/page.tsx), which would drop
   // this action's state, so confirm via the URL instead.
   if (result?.ok) redirect(`/agents/${id}?saved=1`);
+  // A create that failed to sync still saved the agent. Go to it (the page shows why it failed)
+  // so saving again updates it instead of creating a duplicate.
+  if (creating && id) redirect(`/agents/${id}`);
   return result;
 }
 
