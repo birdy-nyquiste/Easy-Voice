@@ -149,6 +149,8 @@ export const agents = pgTable("agents", {
   voiceRef: text("voice_ref").notNull(),
   /** Set when the voice is one of the user's clones. */
   voiceId: uuid("voice_id").references(() => voices.id),
+  /** LLM id; null means the platform default (config.telnyx.llmModel). */
+  model: text("model"),
   providerAssistantId: text("provider_assistant_id"),
   /** Fingerprint of the platform model settings last pushed to the provider; see platformFingerprint(). */
   syncedConfig: text("synced_config"),

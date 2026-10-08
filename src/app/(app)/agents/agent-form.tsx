@@ -1,8 +1,10 @@
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { Field, inputClass } from "@/components/ui";
+import { VoiceSelect } from "@/components/voice-preview";
+import { config } from "@/lib/config";
 import type { Agent, Voice } from "@/db/schema";
 import { OUTBOUND_GREETING, RECORDING_NOTICE } from "@/server/agents";
-import type { StockVoice } from "@/server/telnyx";
+import type { LlmModel, StockVoice } from "@/server/telnyx";
 import { DEFAULT_VOICE_REF } from "@/server/telnyx/stock-voices";
 import { saveAgentAction } from "./actions";
 
@@ -15,7 +17,23 @@ This call is {{call_direction}}.
 
 Never make commitments on my behalf beyond what the goal asks for.`;
 
-export function AgentForm({ agent, stock, clones }: { agent?: Agent; stock: StockVoice[]; clones: Voice[] }) {
+export function AgentForm({
+  agent,
+  stock,
+  clones,
+  models,
+}: {
+  agent?: Agent;
+  stock: StockVoice[];
+  clones: Voice[];
+  models: LlmModel[];
+}) {
+  const defaultModel = config.telnyx.llmModel;
+  const otherModels = models.filter((m) => m.id !== defaultModel);
+  // Keep a previously saved model selectable even if it's no longer offered.
+  if (agent?.model && !otherModels.some((m) => m.id === agent.model)) {
+    otherModels.push({ id: agent.model, name: agent.model.slice(agent.model.indexOf("/") + 1), inputPricePerM: 0, outputPricePerM: 0 });
+  }
   const currentVoice = agent
     ? agent.voiceId
       ? `clone:${agent.voiceId}`
@@ -41,7 +59,7 @@ export function AgentForm({ agent, stock, clones }: { agent?: Agent; stock: Stoc
         </Field>
       </div>
       <Field label="Voice" hint="Mandarin agents need a Mandarin + English voice. English-only voices always reply in English.">
-        <select name="voice" required defaultValue={currentVoice} className={inputClass}>
+        <VoiceSelect defaultValue={currentVoice}>
           <option value="" disabled>Choose a voice…</option>
           {readyClones.length > 0 && (
             <optgroup label="Your cloned voices">
@@ -64,6 +82,14 @@ export function AgentForm({ agent, stock, clones }: { agent?: Agent; stock: Stoc
               </option>
             ))}
           </optgroup>
+        </VoiceSelect>
+      </Field>
+      <Field label="Model" hint="The AI model that decides what the agent says. Calls cost the same with any model.">
+        <select name="model" defaultValue={agent?.model ?? ""} className={inputClass}>
+          <option value="">{defaultModel.slice(defaultModel.indexOf("/") + 1)} (default)</option>
+          {otherModels.map((m) => (
+            <option key={m.id} value={m.id}>{m.name}</option>
+          ))}
         </select>
       </Field>
       <Field

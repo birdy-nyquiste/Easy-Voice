@@ -7,7 +7,7 @@ import { agents, phoneNumbers, voices, type Agent } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
 import { LANGUAGES, type Language } from "@/lib/language";
-import { voiceProvider, type AssistantSpec } from "./telnyx";
+import { FeatureNotPermittedError, voiceProvider, type AssistantSpec } from "./telnyx";
 import { voiceSpeaks } from "./telnyx/stock-voices";
 import { ASSISTANT_BODY_VERSION } from "./telnyx/version";
 
@@ -35,6 +35,8 @@ export const agentInput = z.object({
   language: z.enum(LANGUAGES),
   /** "stock:<ref>" or "clone:<voice uuid>" */
   voice: z.string().min(1, "Pick a voice"),
+  /** LLM id from listModels(); empty means the platform default. */
+  model: z.string().trim().optional().transform((m) => m || null),
 });
 export type AgentInput = z.infer<typeof agentInput>;
 
@@ -77,6 +79,16 @@ async function resolveVoice(
   throw new UserError("Unknown voice.");
 }
 
+export async function listModels() {
+  return voiceProvider().listModels();
+}
+
+async function resolveModel(model: string | null): Promise<string | null> {
+  if (!model || model === config.telnyx.llmModel) return null;
+  if (!(await listModels()).some((m) => m.id === model)) throw new UserError("That model isn't available. Pick another.");
+  return model;
+}
+
 /** The greeting sent to the provider always starts with the recording notice (SPEC §16). */
 export function providerGreeting(language: Language, greeting: string): string {
   const notice = RECORDING_NOTICE[language];
@@ -87,7 +99,7 @@ export function providerGreeting(language: Language, greeting: string): string {
 export const ENGLISH_ONLY_VOICE_RULE =
   "Your voice can only speak English. Always reply in English, even if the caller speaks another language.";
 
-function toSpec(a: Pick<Agent, "name" | "instructions" | "greeting" | "language" | "voiceRef">): AssistantSpec {
+function toSpec(a: Pick<Agent, "name" | "instructions" | "greeting" | "language" | "voiceRef" | "model">): AssistantSpec {
   const englishOnly = !voiceSpeaks(a.voiceRef).includes("zh");
   return {
     name: a.name,
@@ -95,12 +107,14 @@ function toSpec(a: Pick<Agent, "name" | "instructions" | "greeting" | "language"
     greeting: providerGreeting(a.language, a.greeting),
     language: a.language,
     voiceRef: a.voiceRef,
+    model: a.model ?? config.telnyx.llmModel,
   };
 }
 
 export async function createAgent(userId: string, raw: unknown): Promise<Agent> {
   const input = parse(raw);
   const voice = await resolveVoice(userId, input.voice, input.language);
+  input.model = await resolveModel(input.model);
   const row = await withUserLock(userId, async (tx) => {
     const existing = await tx
       .select({ id: agents.id })
@@ -120,6 +134,7 @@ export async function updateAgent(userId: string, agentId: string, raw: unknown)
   if (!existing) throw new UserError("Agent not found.");
   const input = parse(raw);
   const voice = await resolveVoice(userId, input.voice, input.language);
+  input.model = await resolveModel(input.model);
   const [row] = await db
     .update(agents)
     .set({ ...input, ...voice, status: "syncing", updatedAt: new Date() })
@@ -142,9 +157,13 @@ export async function syncAgent(a: Agent): Promise<Agent> {
     return u;
   } catch (err) {
     console.error("syncAgent failed", a.id, err);
+    const failureReason =
+      err instanceof FeatureNotPermittedError && err.feature === "cloned_voices"
+        ? "Cloned voices can't be used on calls yet: the voice platform account still needs verification. Pick a built-in voice for now."
+        : "Couldn't save the agent to the voice platform. Try saving again.";
     const [u] = await db
       .update(agents)
-      .set({ status: "failed", failureReason: "Couldn't save the agent to the voice platform. Try saving again." })
+      .set({ status: "failed", failureReason })
       .where(eq(agents.id, a.id))
       .returning();
     return u;

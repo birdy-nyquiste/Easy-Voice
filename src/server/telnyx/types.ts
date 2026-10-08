@@ -33,6 +33,31 @@ export interface StockVoice {
   provider?: string;
 }
 
+export interface LlmModel {
+  /** Value sent as the assistant's model. */
+  id: string;
+  name: string;
+  /** USD per 1M tokens. */
+  inputPricePerM: number;
+  outputPricePerM: number;
+}
+
+export interface PreviewAudio {
+  audio: ArrayBuffer;
+  contentType: string;
+}
+
+/** The provider account isn't allowed to use a feature (e.g. cloned voices before verification). */
+export class FeatureNotPermittedError extends Error {
+  name = "FeatureNotPermittedError";
+  constructor(
+    public feature: "cloned_voices",
+    detail: string,
+  ) {
+    super(detail);
+  }
+}
+
 export interface ClonedVoiceResult {
   voiceId: string;
   /** Value used as the assistant voice. */
@@ -47,6 +72,8 @@ export interface AssistantSpec {
   greeting: string;
   language: Language;
   voiceRef: string;
+  /** LLM id; see listModels(). */
+  model: string;
 }
 
 export interface DialResult {
@@ -123,6 +150,12 @@ export interface VoiceProvider {
   releaseNumber(numberId: string): Promise<void>;
 
   listStockVoices(): Promise<StockVoice[]>;
+  /** Speak `text` with a catalog voice (the voice ref as used by assistants). */
+  synthesizePreview(voiceRef: string, text: string): Promise<PreviewAudio>;
+  /** The audio a clone was made from. */
+  getCloneSample(voiceId: string): Promise<PreviewAudio>;
+  /** LLMs offered for agents (see models.ts for the selection rules). */
+  listModels(): Promise<LlmModel[]>;
   /** Max accepted sample size in bytes. */
   readonly maxCloneSampleBytes: number;
   cloneVoice(input: { name: string; language: Language; gender: "male" | "female"; audio: Blob }): Promise<ClonedVoiceResult>;

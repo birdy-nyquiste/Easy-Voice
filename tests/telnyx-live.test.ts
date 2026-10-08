@@ -1,6 +1,8 @@
 import { generateKeyPairSync, sign } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTelnyxProvider } from "@/server/telnyx/live";
+import { MOCK_MODELS, toOfferedModels } from "@/server/telnyx/models";
+import { FeatureNotPermittedError } from "@/server/telnyx/types";
 
 const { publicKey, privateKey } = generateKeyPairSync("ed25519");
 const rawPub = publicKey.export({ format: "der", type: "spki" }).subarray(-32).toString("base64");
@@ -118,14 +120,48 @@ describe("call results", () => {
 describe("assistant config", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  const spec = { name: "A", instructions: "i", greeting: "g", language: "en", voiceRef: "Telnyx.KokoroTTS.af_heart", model: "openai/gpt-5.4-mini" } as const;
+
   it("turns off the assistant's own recording so each call is recorded once", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "assistant-1" }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
-    await provider.createAssistant({ name: "A", instructions: "i", greeting: "g", language: "en", voiceRef: "Telnyx.KokoroTTS.af_heart" });
+    await provider.createAssistant(spec);
     const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body));
     expect(body.telephony_settings).toEqual({ recording_settings: { enabled: false } });
     expect(body.dynamic_variables).toEqual({ call_direction: "inbound", call_goal: "" });
-    expect(body.model).toBe("moonshotai/Kimi-K2.6");
+    expect(body.model).toBe("openai/gpt-5.4-mini");
+  });
+
+  it("reports Telnyx's cloned-voice restriction as FeatureNotPermittedError", async () => {
+    const detail = "Your account is not permitted to use cloned voices. Please complete L2 verification or use a platform voice.";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ errors: [{ code: "10010", detail }] }), { status: 403 })));
+    await expect(provider.createAssistant(spec)).rejects.toBeInstanceOf(FeatureNotPermittedError);
+  });
+});
+
+describe("LLM catalog", () => {
+  it("offers recommended, priced models up to the output price cap", () => {
+    expect(toOfferedModels(MOCK_MODELS).map((m) => m.id)).toEqual([
+      "anthropic/claude-haiku-4-5",
+      "zai-org/GLM-5.3-Flash",
+      "openai/gpt-5.4-mini",
+      "moonshotai/Kimi-K2.6",
+    ]);
+  });
+});
+
+describe("voice previews", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("synthesizes with the catalog voice and returns the audio", async () => {
+    const fetchMock = vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "audio/mpeg" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await provider.synthesizePreview("Telnyx.KokoroTTS.af_heart", "Hello");
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toMatch(/\/text-to-speech\/speech$/);
+    expect(JSON.parse(String(init.body))).toEqual({ text: "Hello", voice: "Telnyx.KokoroTTS.af_heart" });
+    expect(res.contentType).toBe("audio/mpeg");
+    expect(res.audio.byteLength).toBe(3);
   });
 });
 

@@ -1,5 +1,6 @@
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { Badge, Card, CardTitle, Field, PageHeader, StatusBadge, inputClass } from "@/components/ui";
+import { PreviewButton } from "@/components/voice-preview";
 import { config } from "@/lib/config";
 import { formatCents, formatMegabytes } from "@/lib/format";
 import { requireUser } from "@/server/auth";
@@ -32,10 +33,13 @@ export default async function VoicesPage() {
                   <StatusBadge status={v.status} />
                   {v.failureReason && <span className="text-red-600">{v.failureReason}</span>}
                 </span>
-                <ActionForm action={deleteVoiceAction}>
-                  <input type="hidden" name="voiceId" value={v.id} />
-                  <SubmitButton variant="danger" confirm={`Delete voice "${v.name}"?`}>Delete</SubmitButton>
-                </ActionForm>
+                <span className="flex items-center gap-1">
+                  {v.providerVoiceId && v.status !== "failed" && <PreviewButton voice={`clone:${v.id}`} compact />}
+                  <ActionForm action={deleteVoiceAction}>
+                    <input type="hidden" name="voiceId" value={v.id} />
+                    <SubmitButton variant="danger" confirm={`Delete voice "${v.name}"?`}>Delete</SubmitButton>
+                  </ActionForm>
+                </span>
               </li>
             ))}
           </ul>
@@ -79,9 +83,12 @@ export default async function VoicesPage() {
         <CardTitle>Built-in voices</CardTitle>
         <ul className="grid gap-2 sm:grid-cols-2">
           {stock.map((v) => (
-            <li key={v.ref} className="flex items-center justify-between rounded-lg border border-stone-100 px-3 py-2 text-sm">
-              <span className="font-medium">{v.name}</span>
-              <span className="flex gap-1.5">
+            <li key={v.ref} className="flex items-center justify-between gap-2 rounded-lg border border-stone-100 px-3 py-2 text-sm">
+              <span className="flex min-w-0 items-center gap-1">
+                <PreviewButton voice={`stock:${v.ref}`} compact />
+                <span className="truncate font-medium">{v.name}</span>
+              </span>
+              <span className="flex shrink-0 gap-1.5">
                 {v.speaks.includes("zh") ? <Badge tone="green">Mandarin + English</Badge> : <Badge>English only</Badge>}
                 {v.gender && <Badge>{v.gender}</Badge>}
               </span>

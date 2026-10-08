@@ -1,8 +1,20 @@
 import { createPublicKey, verify } from "node:crypto";
 import { config } from "@/lib/config";
 import { encodeClientState, parseTelnyxEnvelope } from "./events";
+import { toOfferedModels, type CatalogModel } from "./models";
 import { toStockVoices, type CatalogVoice } from "./stock-voices";
-import type { AssistantSpec, CallRef, ClonedVoiceResult, NumberOrderResult, OrderStatus, StockVoice, VoiceProvider } from "./types";
+import {
+  FeatureNotPermittedError,
+  type AssistantSpec,
+  type CallRef,
+  type ClonedVoiceResult,
+  type LlmModel,
+  type NumberOrderResult,
+  type OrderStatus,
+  type PreviewAudio,
+  type StockVoice,
+  type VoiceProvider,
+} from "./types";
 
 /**
  * Telnyx v2 REST adapter. Field names follow docs/telnyx-api-notes.md; items
@@ -39,25 +51,41 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
     type: "spki",
   });
 
-  async function api<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
+  async function request(method: string, path: string, body?: unknown, accept = "application/json"): Promise<Response> {
     const isForm = body instanceof FormData;
     const res = await fetch(`${BASE}${path}`, {
       method,
       headers: {
         Authorization: `Bearer ${cfg.apiKey}`,
-        Accept: "application/json",
+        Accept: accept,
         ...(body && !isForm ? { "Content-Type": "application/json" } : {}),
       },
       body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
     });
-    const text = await res.text();
-    if (!res.ok) throw new TelnyxApiError(res.status, text, path);
+    if (!res.ok) {
+      const text = await res.text();
+      // Unverified (pre-L2) accounts can clone voices but not use them in assistants or TTS.
+      if (res.status === 403 && /cloned voices/i.test(text)) {
+        throw new FeatureNotPermittedError("cloned_voices", `Telnyx 403 on ${path}: ${text.slice(0, 500)}`);
+      }
+      throw new TelnyxApiError(res.status, text, path);
+    }
+    return res;
+  }
+
+  async function api<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
+    const text = await (await request(method, path, body)).text();
     return (text ? JSON.parse(text) : {}) as T;
+  }
+
+  async function audio(res: Response): Promise<PreviewAudio> {
+    return { audio: await res.arrayBuffer(), contentType: res.headers.get("content-type")?.split(";")[0] || "audio/mpeg" };
   }
 
   // The catalog is large (~1,300 voices) and rarely changes; cache it per process.
   const VOICE_CACHE_MS = 60 * 60 * 1000;
   let voiceCache: { at: number; voices: StockVoice[] } | undefined;
+  let modelCache: { at: number; models: LlmModel[] } | undefined;
 
   const action = (ccid: string, cmd: string, body: Record<string, unknown> = {}) =>
     api("POST", `/calls/${encodeURIComponent(ccid)}/actions/${cmd}`, body);
@@ -69,7 +97,7 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
       name: spec.name,
       instructions: spec.instructions,
       greeting: spec.greeting,
-      model: cfg.llmModel,
+      model: spec.model,
       voice_settings: { voice: spec.voiceRef },
       transcription: {
         model: cfg.sttModel,
@@ -190,6 +218,21 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
       const res = await api<{ voices: CatalogVoice[] }>("GET", "/text-to-speech/voices?provider=telnyx");
       voiceCache = { at: Date.now(), voices: toStockVoices(res.voices) };
       return voiceCache.voices;
+    },
+
+    async synthesizePreview(voiceRef, text) {
+      return audio(await request("POST", "/text-to-speech/speech", { text, voice: voiceRef }, "audio/mpeg"));
+    },
+
+    async getCloneSample(voiceId) {
+      return audio(await request("GET", `/voice_clones/${encodeURIComponent(voiceId)}/sample`, undefined, "audio/*"));
+    },
+
+    async listModels() {
+      if (modelCache && Date.now() - modelCache.at < VOICE_CACHE_MS) return modelCache.models;
+      const res = await api<{ data: CatalogModel[] }>("GET", "/ai/models");
+      modelCache = { at: Date.now(), models: toOfferedModels(res.data) };
+      return modelCache.models;
     },
 
     maxCloneSampleBytes: 5 * 1024 * 1024,

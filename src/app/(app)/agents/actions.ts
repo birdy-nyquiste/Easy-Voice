@@ -14,6 +14,7 @@ function fields(form: FormData) {
     greeting: form.get("greeting"),
     language: form.get("language"),
     voice: form.get("voice"),
+    model: form.get("model") ?? undefined,
   };
 }
 
