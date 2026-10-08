@@ -7,9 +7,16 @@ import { listStockVoices, listUserVoices } from "@/server/voices";
 import { deleteAgentAction } from "../actions";
 import { AgentForm } from "../agent-form";
 
-export default async function AgentPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function AgentPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ saved?: string }>;
+}) {
   const user = await requireUser();
   const { id } = await params;
+  const { saved } = await searchParams;
   const agent = await getUserAgent(user.id, id);
   if (!agent) notFound();
   const [stock, clones] = await Promise.all([listStockVoices(), listUserVoices(user.id)]);
@@ -17,8 +24,11 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
     <div className="space-y-6">
       <PageHeader title={agent.name} action={<StatusBadge status={agent.status} />} />
       {agent.status === "failed" && <Notice tone="red">{agent.failureReason}</Notice>}
+      {saved && agent.status === "ready" && <Notice tone="green">Saved.</Notice>}
       <Card>
-        <AgentForm agent={agent} stock={stock} clones={clones} />
+        {/* Keyed on updatedAt: React resets a form to its initial defaults after an action, so
+            without a remount the fields would show pre-save values (and a second save would revert). */}
+        <AgentForm key={agent.updatedAt.toISOString()} agent={agent} stock={stock} clones={clones} />
       </Card>
       <Card>
         <CardTitle>Danger zone</CardTitle>
