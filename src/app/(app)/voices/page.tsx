@@ -1,10 +1,10 @@
 import { ActionForm, SubmitButton } from "@/components/forms";
-import { Badge, Card, CardTitle, Field, PageHeader, StatusBadge, inputClass } from "@/components/ui";
+import { Badge, Card, CardTitle, Field, Notice, PageHeader, StatusBadge, inputClass } from "@/components/ui";
 import { PreviewButton } from "@/components/voice-preview";
 import { config } from "@/lib/config";
 import { formatCents, formatMegabytes } from "@/lib/format";
 import { requireUser } from "@/server/auth";
-import { listStockVoices, listUserVoices, refreshProcessingVoices } from "@/server/voices";
+import { CLONING_UNAVAILABLE, listStockVoices, listUserVoices, refreshProcessingVoices } from "@/server/voices";
 import { cloneVoiceAction, deleteVoiceAction } from "./actions";
 import { SampleInput } from "./sample-input";
 
@@ -13,11 +13,14 @@ export default async function VoicesPage() {
   await refreshProcessingVoices(user.id);
   const [stock, clones] = await Promise.all([listStockVoices(), listUserVoices(user.id)]);
   const activeClones = clones.filter((c) => c.status !== "failed");
-  const canClone = activeClones.length < config.limits.clonedVoicesPerUser;
+  const cloning = config.features.voiceCloning;
+  const canClone = cloning && activeClones.length < config.limits.clonedVoicesPerUser;
 
   return (
     <div className="space-y-6">
       <PageHeader title="Voices" description="Use a built-in voice for your agent, or clone your own." />
+
+      {!cloning && <Notice>{CLONING_UNAVAILABLE}</Notice>}
 
       <Card>
         <CardTitle>Your cloned voices</CardTitle>

@@ -74,6 +74,17 @@ export const config = {
     retentionDays: int("RETENTION_DAYS", 30),
   },
 
+  features: {
+    /**
+     * Cloning and using cloned voices. Off by default in live mode until the Telnyx account
+     * passes L2 verification (unverified accounts can clone but not use clones). VOICE_CLONING=on|off.
+     */
+    get voiceCloning() {
+      const v = process.env.VOICE_CLONING;
+      return v ? v === "on" : config.telnyx.mode !== "live";
+    },
+  },
+
   limits: {
     numbersPerUser: 1,
     agentsPerUser: 3,

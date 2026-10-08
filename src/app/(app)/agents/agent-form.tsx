@@ -1,12 +1,13 @@
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { Field, inputClass } from "@/components/ui";
-import { VoiceSelect } from "@/components/voice-preview";
 import { config } from "@/lib/config";
 import type { Agent, Voice } from "@/db/schema";
 import { OUTBOUND_GREETING, RECORDING_NOTICE } from "@/server/agents";
 import type { LlmModel, StockVoice } from "@/server/telnyx";
-import { DEFAULT_VOICE_REF } from "@/server/telnyx/stock-voices";
+import { modelName, sttModelName } from "@/server/telnyx/models";
+import { DEFAULT_VOICE_REF, ttsModelName } from "@/server/telnyx/stock-voices";
 import { saveAgentAction } from "./actions";
+import { VoiceModelFields } from "./voice-model-fields";
 
 const DEFAULT_INSTRUCTIONS = `You are my personal phone assistant. Be concise and warm.
 
@@ -32,7 +33,7 @@ export function AgentForm({
   const otherModels = models.filter((m) => m.id !== defaultModel);
   // Keep a previously saved model selectable even if it's no longer offered.
   if (agent?.model && !otherModels.some((m) => m.id === agent.model)) {
-    otherModels.push({ id: agent.model, name: agent.model.slice(agent.model.indexOf("/") + 1), inputPricePerM: 0, outputPricePerM: 0 });
+    otherModels.push({ id: agent.model, name: modelName(agent.model), inputPricePerM: 0, outputPricePerM: 0 });
   }
   const currentVoice = agent
     ? agent.voiceId
@@ -43,7 +44,14 @@ export function AgentForm({
       : "";
   const bilingual = stock.filter((v) => v.speaks.includes("zh"));
   const englishOnly = stock.filter((v) => !v.speaks.includes("zh"));
-  const readyClones = clones.filter((c) => c.status === "ready");
+  // While cloning is off, keep only the clone this agent already uses (so the picker shows it).
+  const readyClones = clones.filter(
+    (c) => c.status === "ready" && (config.features.voiceCloning || c.id === agent?.voiceId),
+  );
+  const ttsByVoice = Object.fromEntries([
+    ...stock.map((v) => [`stock:${v.ref}`, ttsModelName(v.ref)]),
+    ...readyClones.map((v) => [`clone:${v.id}`, ttsModelName(v.voiceRef ?? "")]),
+  ]);
   return (
     <ActionForm action={saveAgentAction} className="space-y-5">
       {agent && <input type="hidden" name="id" value={agent.id} />}
@@ -58,40 +66,45 @@ export function AgentForm({
           </select>
         </Field>
       </div>
-      <Field label="Voice" hint="Mandarin agents need a Mandarin + English voice. English-only voices always reply in English.">
-        <VoiceSelect defaultValue={currentVoice}>
-          <option value="" disabled>Choose a voice…</option>
-          {readyClones.length > 0 && (
-            <optgroup label="Your cloned voices">
-              {readyClones.map((v) => (
-                <option key={v.id} value={`clone:${v.id}`}>{v.name}</option>
+      <VoiceModelFields
+        defaultVoice={currentVoice}
+        ttsByVoice={ttsByVoice}
+        sttName={sttModelName(config.telnyx.sttModel)}
+        voiceOptions={
+          <>
+            <option value="" disabled>Choose a voice…</option>
+            {readyClones.length > 0 && (
+              <optgroup label="Your cloned voices">
+                {readyClones.map((v) => (
+                  <option key={v.id} value={`clone:${v.id}`}>{v.name}</option>
+                ))}
+              </optgroup>
+            )}
+            <optgroup label="Mandarin + English">
+              {bilingual.map((v) => (
+                <option key={v.ref} value={`stock:${v.ref}`}>
+                  {v.name}{v.gender ? ` (${v.gender})` : ""}
+                </option>
               ))}
             </optgroup>
-          )}
-          <optgroup label="Mandarin + English">
-            {bilingual.map((v) => (
-              <option key={v.ref} value={`stock:${v.ref}`}>
-                {v.name}{v.gender ? ` (${v.gender})` : ""}
-              </option>
+            <optgroup label="English only">
+              {englishOnly.map((v) => (
+                <option key={v.ref} value={`stock:${v.ref}`}>
+                  {v.name}{v.gender ? ` (${v.gender})` : ""}
+                </option>
+              ))}
+            </optgroup>
+          </>
+        }
+        modelSelect={
+          <select name="model" defaultValue={agent?.model ?? ""} className={inputClass}>
+            <option value="">{modelName(defaultModel)} (default)</option>
+            {otherModels.map((m) => (
+              <option key={m.id} value={m.id}>{m.name}</option>
             ))}
-          </optgroup>
-          <optgroup label="English only">
-            {englishOnly.map((v) => (
-              <option key={v.ref} value={`stock:${v.ref}`}>
-                {v.name}{v.gender ? ` (${v.gender})` : ""}
-              </option>
-            ))}
-          </optgroup>
-        </VoiceSelect>
-      </Field>
-      <Field label="Model" hint="The AI model that decides what the agent says. Calls cost the same with any model.">
-        <select name="model" defaultValue={agent?.model ?? ""} className={inputClass}>
-          <option value="">{defaultModel.slice(defaultModel.indexOf("/") + 1)} (default)</option>
-          {otherModels.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
-          ))}
-        </select>
-      </Field>
+          </select>
+        }
+      />
       <Field
         label="Greeting"
         hint={`The first thing the agent says when answering. A recording notice ("${RECORDING_NOTICE.en}" / "${RECORDING_NOTICE.zh}") is added automatically. On calls the agent places, it opens with "${OUTBOUND_GREETING.en}" instead.`}

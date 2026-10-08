@@ -25,8 +25,20 @@ export function toOfferedModels(catalog: CatalogModel[]): LlmModel[] {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+const STT_MODEL_NAMES: Record<string, string> = {
+  "assemblyai/universal-3-5-pro": "AssemblyAI Universal-3.5 Pro",
+  "deepgram/nova-3": "Deepgram Nova-3",
+  "deepgram/nova-2": "Deepgram Nova-2",
+  "deepgram/flux": "Deepgram Flux",
+};
+
+/** Display name of a speech-recognition model id. */
+export function sttModelName(id: string): string {
+  return STT_MODEL_NAMES[id] ?? id;
+}
+
 /** "moonshotai/Kimi-K2.6" → "Kimi-K2.6" */
-function modelName(id: string): string {
+export function modelName(id: string): string {
   return id.slice(id.indexOf("/") + 1);
 }
 

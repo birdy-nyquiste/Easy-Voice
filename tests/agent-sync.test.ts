@@ -1,11 +1,12 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
-import { agents } from "@/db/schema";
+import { agents, voices } from "@/db/schema";
 import { config } from "@/lib/config";
 import { createAgent, ENGLISH_ONLY_VOICE_RULE, platformFingerprint, resyncStaleAgents } from "@/server/agents";
 import { mockProvider } from "@/server/telnyx/mock";
 import { FeatureNotPermittedError } from "@/server/telnyx/types";
+import { CLONING_UNAVAILABLE, cloneVoice } from "@/server/voices";
 import { makeUser, resetDb } from "./helpers";
 
 const original = { ...config.telnyx };
@@ -113,11 +114,35 @@ describe("agent model", () => {
     await expect(createAgent(u.id, { ...input, model: "openai/gpt-5.6-sol" })).rejects.toThrow(/isn't available/);
   });
 
-  it("explains when the provider account can't use cloned voices yet", async () => {
+  it("says cloned voices are temporarily unavailable when the provider refuses them", async () => {
     const u = await makeUser();
     vi.spyOn(mockProvider, "createAssistant").mockRejectedValue(new FeatureNotPermittedError("cloned_voices", "403"));
     const a = await createAgent(u.id, input);
     expect(a.status).toBe("failed");
-    expect(a.failureReason).toMatch(/needs verification/);
+    expect(a.failureReason).toBe("The cloned voice feature is temporarily unavailable. Pick a built-in voice for now.");
+  });
+});
+
+describe("voice cloning switched off", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("refuses new clones without charging", async () => {
+    vi.stubEnv("VOICE_CLONING", "off");
+    const u = await makeUser(1000);
+    const audio = new File([new Uint8Array(5000)], "s.wav", { type: "audio/wav" });
+    await expect(cloneVoice(u.id, { name: "Me", language: "en", gender: "female", audio, consent: true })).rejects.toThrow(
+      CLONING_UNAVAILABLE,
+    );
+    expect(await db.select().from(voices)).toHaveLength(0);
+  });
+
+  it("refuses cloned voices for agents before contacting the provider", async () => {
+    const u = await makeUser(1000);
+    const audio = new File([new Uint8Array(5000)], "s.wav", { type: "audio/wav" });
+    const clone = await cloneVoice(u.id, { name: "Me", language: "en", gender: "female", audio, consent: true });
+    vi.stubEnv("VOICE_CLONING", "off");
+    const create = vi.spyOn(mockProvider, "createAssistant");
+    await expect(createAgent(u.id, { ...input, voice: `clone:${clone.id}` })).rejects.toThrow(CLONING_UNAVAILABLE);
+    expect(create).not.toHaveBeenCalled();
   });
 });

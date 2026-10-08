@@ -10,6 +10,7 @@ import { LANGUAGES, type Language } from "@/lib/language";
 import { FeatureNotPermittedError, voiceProvider, type AssistantSpec } from "./telnyx";
 import { voiceSpeaks } from "./telnyx/stock-voices";
 import { ASSISTANT_BODY_VERSION } from "./telnyx/version";
+import { CLONING_UNAVAILABLE } from "./voices";
 
 export const RECORDING_NOTICE = {
   en: "This call may be recorded.",
@@ -68,6 +69,7 @@ async function resolveVoice(
     return { voiceRef: value, voiceId: null };
   }
   if (kind === "clone") {
+    if (!config.features.voiceCloning) throw new UserError(`${CLONING_UNAVAILABLE} Pick a built-in voice for now.`);
     const [v] = await db
       .select()
       .from(voices)
@@ -159,8 +161,8 @@ export async function syncAgent(a: Agent): Promise<Agent> {
     console.error("syncAgent failed", a.id, err);
     const failureReason =
       err instanceof FeatureNotPermittedError && err.feature === "cloned_voices"
-        ? "Cloned voices can't be used on calls yet: the voice platform account still needs verification. Pick a built-in voice for now."
-        : "Couldn't save the agent to the voice platform. Try saving again.";
+        ? `${CLONING_UNAVAILABLE} Pick a built-in voice for now.`
+        : "Couldn't save the agent. Try saving again.";
     const [u] = await db
       .update(agents)
       .set({ status: "failed", failureReason })

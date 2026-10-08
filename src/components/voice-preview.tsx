@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
-import { buttonClass, inputClass } from "./ui";
+import { useEffect, useSyncExternalStore, type ReactNode } from "react";
+import { buttonClass } from "./ui";
 
 // One player for the whole page, so starting a preview stops whichever one was playing.
 type PlayerState = { voice: string | null; status: "idle" | "loading" | "playing" | "error" };
@@ -67,18 +67,5 @@ export function PreviewButton({ voice, compact }: { voice: string; compact?: boo
     >
       {label[status]}
     </button>
-  );
-}
-
-/** The agent form's voice <select> with a preview of the current choice. */
-export function VoiceSelect({ defaultValue, children }: { defaultValue: string; children: ReactNode }) {
-  const [voice, setVoice] = useState(defaultValue);
-  return (
-    <div className="flex gap-2">
-      <select name="voice" required value={voice} onChange={(e) => setVoice(e.target.value)} className={inputClass}>
-        {children}
-      </select>
-      <PreviewButton voice={voice} />
-    </div>
   );
 }

@@ -60,10 +60,13 @@ export async function listUserVoices(userId: string): Promise<Voice[]> {
   return db.select().from(voices).where(and(eq(voices.userId, userId), isNull(voices.deletedAt)));
 }
 
+export const CLONING_UNAVAILABLE = "The cloned voice feature is temporarily unavailable.";
+
 export async function cloneVoice(
   userId: string,
   input: { name: string; language: Language; gender: "male" | "female"; audio: File; consent: boolean },
 ): Promise<Voice> {
+  if (!config.features.voiceCloning) throw new UserError(CLONING_UNAVAILABLE);
   const name = input.name.trim();
   if (!name) throw new UserError("Give the voice a name.");
   if (!input.consent) throw new UserError("You must confirm this is your voice or that you have the speaker's consent.");
@@ -93,7 +96,7 @@ export async function cloneVoice(
 
   try {
     const res = await voiceProvider().cloneVoice({ name, language: input.language, gender: input.gender, audio: input.audio });
-    if (res.status === "failed") return failVoice(row, res.failureReason ?? "The provider rejected the sample.");
+    if (res.status === "failed") return failVoice(row, res.failureReason ?? "The sample couldn't be used. Try a clearer recording.");
     const [u] = await db
       .update(voices)
       .set({ providerVoiceId: res.voiceId, voiceRef: res.ref, status: res.status })

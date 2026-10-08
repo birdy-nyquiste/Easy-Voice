@@ -43,6 +43,14 @@ export function voiceSpeaks(ref: string): Language[] {
   return ref.startsWith("Telnyx.KokoroTTS.") ? ["en"] : ["zh", "en"];
 }
 
+const TTS_MODEL_NAMES: Record<string, string> = { KokoroTTS: "Kokoro", Ultra: "Ultra", Qwen3TTS: "Qwen3-TTS" };
+
+/** Display name of the speech model behind a "Provider.Model.id" voice ref. */
+export function ttsModelName(ref: string): string {
+  const model = ref.split(".")[1] ?? "";
+  return TTS_MODEL_NAMES[model] ?? model;
+}
+
 /** Default voice for new agents: bilingual, chosen in the listening test. */
 export const DEFAULT_VOICE_REF = "Telnyx.Ultra.7a5d4663-88ae-47b7-808e-8f9b9ee4127b"; // Hua - Sunny Support
 
