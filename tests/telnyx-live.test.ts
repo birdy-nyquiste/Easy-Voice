@@ -163,6 +163,16 @@ describe("voice previews", () => {
     expect(res.contentType).toBe("audio/mpeg");
     expect(res.audio.byteLength).toBe(3);
   });
+
+  it("fetches a clone's sample with Accept: */* (Telnyx answers 406 to audio/*)", async () => {
+    const fetchMock = vi.fn(async () => new Response(new Uint8Array([1]), { status: 200, headers: { "content-type": "audio/wav; charset=utf-8" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await provider.getCloneSample("clone-1");
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toMatch(/\/voice_clones\/clone-1\/sample$/);
+    expect((init.headers as Record<string, string>).Accept).toBe("*/*");
+    expect(res.contentType).toBe("audio/wav");
+  });
 });
 
 describe("per-call variables", () => {

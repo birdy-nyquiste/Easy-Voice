@@ -225,7 +225,8 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
     },
 
     async getCloneSample(voiceId) {
-      return audio(await request("GET", `/voice_clones/${encodeURIComponent(voiceId)}/sample`, undefined, "audio/*"));
+      // This endpoint answers 406 to any Accept but */* (even audio/wav, which it returns).
+      return audio(await request("GET", `/voice_clones/${encodeURIComponent(voiceId)}/sample`, undefined, "*/*"));
     },
 
     async listModels() {
