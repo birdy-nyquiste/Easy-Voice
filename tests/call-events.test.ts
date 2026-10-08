@@ -31,7 +31,12 @@ describe("inbound calls", () => {
     await handleCallEvent(inbound(number.e164));
     const created = await callByCcid("cc-1");
     expect(created.status).toBe("initiated");
-    expect(mockProvider.answer).toHaveBeenCalledWith("cc-1", created.id, expect.objectContaining({ assistantId: "assistant-test" }));
+    expect(mockProvider.answer).toHaveBeenCalledWith("cc-1", created.id, {
+      assistantId: "assistant-test",
+      voiceRef: "Telnyx.KokoroTTS.af_heart",
+      variables: { call_direction: "inbound", call_goal: "" },
+      greetingOverride: undefined, // inbound keeps the agent's own greeting
+    });
 
     const t0 = new Date("2026-10-07T10:00:00Z");
     await handleCallEvent(event("call.answered", { callControlId: "cc-1", clientState: created.id, occurredAt: t0 }));
@@ -169,14 +174,19 @@ describe("outbound calls", () => {
     expect(await callByCcid("cc-out")).toMatchObject({ status: "failed", outcome: "No answer.", billedCents: 0 });
   });
 
-  it("starts the assistant when answered and stores the conversation id", async () => {
+  it("starts the assistant with the call's goal and an outbound greeting", async () => {
     const { user, agent, number } = await makeLine(1000);
     const [c] = await db
       .insert(calls)
-      .values({ userId: user.id, agentId: agent.id, phoneNumberId: number.id, direction: "outbound", fromNumber: number.e164, toNumber: "+14155550100", providerCallControlId: "cc-out" })
+      .values({ userId: user.id, agentId: agent.id, phoneNumberId: number.id, direction: "outbound", fromNumber: number.e164, toNumber: "+14155550100", providerCallControlId: "cc-out", goal: "Move my Thursday appointment" })
       .returning();
     await handleCallEvent(event("call.answered", { callControlId: "cc-out", clientState: c.id }));
-    expect(mockProvider.startAssistant).toHaveBeenCalledWith("cc-out", expect.objectContaining({ assistantId: "assistant-test" }));
+    expect(mockProvider.startAssistant).toHaveBeenCalledWith("cc-out", {
+      assistantId: "assistant-test",
+      voiceRef: "Telnyx.KokoroTTS.af_heart",
+      variables: { call_direction: "outbound", call_goal: "Move my Thursday appointment" },
+      greetingOverride: "Hi, this is an AI assistant calling. This call may be recorded.",
+    });
     expect(await callByCcid("cc-out")).toMatchObject({ status: "answered", providerConversationId: "conv-1" });
   });
 });

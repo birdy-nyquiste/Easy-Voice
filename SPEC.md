@@ -252,6 +252,7 @@ API 请求已接受、资源已创建、资源已可用和实际操作成功，�
 | 号码范围 | 仅美国本地号码（不含免费号码），按区号搜索。每用户最多 1 个号码。 |
 | 资源数量 | 每用户 1 个号码、最多 3 个 Agent（同时仅 1 个关联号码）、最多 2 个克隆声音；并发通话 1。 |
 | Agent 配置 | 名称、指令（system prompt）、开场白、主语言、声音（预置或克隆）。其他 Telnyx 配置使用平台默认值。 |
+| 通话方向与外呼目标 | 每次通话向 Agent 传入 `{{call_direction}}`（inbound / outbound）；用户发起外呼时可填写本次通话目标，作为 `{{call_goal}}` 仅用于该次通话。如何使用由用户在 Agent 指令中决定；默认指令同时覆盖接听与外呼。外呼开场白固定为 AI 身份与录音告知（"Hi, this is an AI assistant calling. This call may be recorded." / 中文对应），Agent 自身开场白仅用于接听。 |
 | 声音克隆 | 用户上传或录制样本，并勾选声明“本人声音或已取得说话人同意”；记录声明时间。 |
 | 数据策略 | 开启录音；保存录音、转写、摘要 30 天后自动删除；用户可手动删除通话记录。开场白中包含录音告知。 |
 | 技术实现 | Next.js（App Router，TypeScript）+ Postgres（Drizzle ORM）。先本地运行（Telnyx Webhook 经 ngrok），后续部署 Vercel。Telnyx 通过适配器接口接入，并提供 mock 实现，便于无凭证开发与测试。 |

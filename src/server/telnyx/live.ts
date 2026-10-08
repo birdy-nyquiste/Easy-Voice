@@ -76,6 +76,7 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
         // "auto" tolerates EN/ZH mixing; fall back to the agent's primary language otherwise.
         language: cfg.sttLanguage === "primary" ? spec.language : cfg.sttLanguage,
       },
+      dynamic_variables: { call_direction: "inbound", call_goal: "" },
       enabled_features: ["telephony"],
       privacy_settings: { data_retention: true },
       // Calls are recorded by our answer/dial commands. The assistant's own recording is on by
@@ -250,12 +251,12 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
     },
 
     async answer(ccid, clientState, assistant) {
-      // The stored assistant already carries voice/greeting; per-call overrides would
-      // replace (not merge) voice_settings, so only the id is sent.
+      // The stored assistant already carries voice/greeting; per-call voice overrides would
+      // replace (not merge) voice_settings, so only id + dynamic variables (which merge) are sent.
       await action(ccid, "answer", {
         client_state: encodeClientState(clientState),
         command_id: `${clientState}:answer`,
-        assistant: { id: assistant.assistantId },
+        assistant: { id: assistant.assistantId, dynamic_variables: assistant.variables },
         ...recordOpts,
       });
     },
@@ -272,7 +273,11 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
       const res = await api<{ data: { conversation_id?: string } }>(
         "POST",
         `/calls/${encodeURIComponent(ccid)}/actions/ai_assistant_start`,
-        { assistant: { id: assistant.assistantId }, command_id: `${ccid}:assistant` },
+        {
+          assistant: { id: assistant.assistantId, dynamic_variables: assistant.variables },
+          ...(assistant.greetingOverride ? { greeting: assistant.greetingOverride } : {}),
+          command_id: `${ccid}:assistant`,
+        },
       );
       return { conversationId: res.data?.conversation_id };
     },

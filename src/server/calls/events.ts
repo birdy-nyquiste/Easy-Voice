@@ -4,7 +4,7 @@ import { db, withUserLock, type Queryable } from "@/db";
 import { agents, calls, phoneNumbers, users, type Agent, type Call } from "@/db/schema";
 import { applyLedger, callChargeCents, hasSpendableBalance } from "@/server/billing/ledger";
 import { voiceProvider, type AssistantStart, type CallEvent } from "@/server/telnyx";
-import { providerGreeting } from "@/server/agents";
+import { OUTBOUND_GREETING } from "@/server/agents";
 import { withWebhookDedupe } from "@/server/webhooks";
 import { fetchCallResultsSoon } from "./results";
 import { failedCallFields, hasOtherActiveCall } from "./state";
@@ -52,11 +52,14 @@ async function findCall(event: CallEvent): Promise<Call | undefined> {
   return undefined;
 }
 
-function assistantStart(agent: Agent): AssistantStart {
+function assistantStart(agent: Agent, call: Call): AssistantStart {
+  const outbound = call.direction === "outbound";
   return {
     assistantId: agent.providerAssistantId!,
-    greeting: providerGreeting(agent.language, agent.greeting),
     voiceRef: agent.voiceRef,
+    variables: { call_direction: call.direction, call_goal: call.goal ?? "" },
+    // Inbound calls use the agent's stored greeting (which already includes the recording notice).
+    greetingOverride: outbound ? OUTBOUND_GREETING[agent.language] : undefined,
   };
 }
 
@@ -122,7 +125,7 @@ async function onInitiated(e: CallEvent) {
     await voiceProvider().reject(callControlId, decision.cause);
   } else {
     // Answer + start assistant in one command (avoids dead air). Telnyx dedupes by command_id on retry.
-    await voiceProvider().answer(callControlId, decision.call.id, assistantStart(decision.agent));
+    await voiceProvider().answer(callControlId, decision.call.id, assistantStart(decision.agent, decision.call));
   }
 }
 
@@ -158,7 +161,7 @@ async function onAnswered(e: CallEvent) {
     return;
   }
   try {
-    const { conversationId } = await voiceProvider().startAssistant(call.providerCallControlId, assistantStart(agent));
+    const { conversationId } = await voiceProvider().startAssistant(call.providerCallControlId, assistantStart(agent, call));
     if (conversationId) {
       await db.update(calls).set({ providerConversationId: conversationId }).where(eq(calls.id, call.id));
     }

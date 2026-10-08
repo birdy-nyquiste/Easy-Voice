@@ -5,6 +5,7 @@ import { agents, calls, phoneNumbers, type Call, type User } from "@/db/schema";
 import { UserError } from "@/lib/errors";
 import { toE164US } from "@/lib/format";
 import { hasSpendableBalance } from "@/server/billing/ledger";
+import { MAX_CALL_GOAL_LENGTH } from "@/server/agents";
 import { voiceProvider } from "@/server/telnyx";
 import { callRef, failedCallFields, hasOtherActiveCall } from "./state";
 import { fetchCallResults } from "./results";
@@ -28,9 +29,13 @@ export async function getUserCall(userId: string, callId: string): Promise<Call 
   return fetchCallResults(c);
 }
 
-export async function startOutboundCall(user: User, input: { agentId: string; to: string }): Promise<Call> {
+export async function startOutboundCall(user: User, input: { agentId: string; to: string; goal?: string }): Promise<Call> {
   const to = toE164US(input.to);
   if (!to) throw new UserError("Enter a valid US phone number.");
+  const goal = input.goal?.trim() || null;
+  if (goal && goal.length > MAX_CALL_GOAL_LENGTH) {
+    throw new UserError(`Keep the call goal under ${MAX_CALL_GOAL_LENGTH} characters.`);
+  }
   if (!hasSpendableBalance(user.balanceCents)) throw new UserError("Your balance is empty. Top up to make calls.");
 
   const [agent] = await db
@@ -61,6 +66,7 @@ export async function startOutboundCall(user: User, input: { agentId: string; to
         direction: "outbound",
         fromNumber: from.e164,
         toNumber: to,
+        goal,
       })
       .returning();
     return inserted;
