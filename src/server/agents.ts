@@ -8,6 +8,7 @@ import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
 import { LANGUAGES, type Language } from "@/lib/language";
 import { voiceProvider, type AssistantSpec } from "./telnyx";
+import { ASSISTANT_BODY_VERSION } from "./telnyx/version";
 
 export const RECORDING_NOTICE = {
   en: "This call may be recorded.",
@@ -125,12 +126,18 @@ export async function syncAgent(a: Agent): Promise<Agent> {
 }
 
 /**
- * Identifies the platform-wide assistant settings (models, insights). When these
- * change on deploy, agents saved under the old settings are re-synced.
+ * Identifies the platform-wide assistant settings (models, insights, and the shape of
+ * what we send). When these change on deploy, agents saved under the old settings are re-synced.
  */
 export function platformFingerprint(): string {
   const t = config.telnyx;
-  const settings = { llm: t.llmModel, stt: t.sttModel, sttLanguage: t.sttLanguage, insights: t.insightGroupId };
+  const settings = {
+    body: ASSISTANT_BODY_VERSION,
+    llm: t.llmModel,
+    stt: t.sttModel,
+    sttLanguage: t.sttLanguage,
+    insights: t.insightGroupId,
+  };
   return createHash("sha256").update(JSON.stringify(settings)).digest("hex").slice(0, 16);
 }
 

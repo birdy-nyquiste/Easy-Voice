@@ -78,6 +78,9 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
       },
       enabled_features: ["telephony"],
       privacy_settings: { data_retention: true },
+      // Calls are recorded by our answer/dial commands. The assistant's own recording is on by
+      // default and produced a second, duplicate recording on outbound calls.
+      telephony_settings: { recording_settings: { enabled: false } },
       ...(cfg.insightGroupId ? { insight_settings: { insight_group_id: cfg.insightGroupId } } : {}),
     };
   }
