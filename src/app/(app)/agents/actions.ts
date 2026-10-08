@@ -27,7 +27,9 @@ export async function saveAgentAction(_: ActionState, form: FormData): Promise<A
     if (agent.status === "failed") throw new UserError(agent.failureReason ?? "Saving failed.");
     return "Saved.";
   });
-  if (result?.ok && !form.get("id")) redirect(`/agents/${id}`);
+  // The agent page remounts its form after a save (see agents/[id]/page.tsx), which would drop
+  // this action's state, so confirm via the URL instead.
+  if (result?.ok) redirect(`/agents/${id}?saved=1`);
   return result;
 }
 
