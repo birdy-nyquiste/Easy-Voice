@@ -93,8 +93,8 @@ describe("inbound texts", () => {
 
     const rows = await db.select().from(messages).where(eq(messages.userId, user.id));
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ body: "hello", parts: 3, billedCents: 3, providerCostMicros: 12_000, phoneNumberId: number.id });
-    expect(await balance(user.id)).toBe(997);
+    expect(rows[0]).toMatchObject({ body: "hello", parts: 3, billedCents: 6, providerCostMicros: 12_000, phoneNumberId: number.id });
+    expect(await balance(user.id)).toBe(994);
     const charges = await db.select().from(ledgerEntries).where(eq(ledgerEntries.kind, "sms"));
     expect(charges).toHaveLength(1);
   });
@@ -102,7 +102,7 @@ describe("inbound texts", () => {
   it("still receives and bills when the balance is empty", async () => {
     const { user, number } = await makeLine(0);
     await handleInboundMessage(text(number.e164));
-    expect(await balance(user.id)).toBe(-1);
+    expect(await balance(user.id)).toBe(-2);
     const [u] = await db.select().from(users).where(eq(users.id, user.id));
     expect(u.negativeSince).not.toBeNull();
   });
@@ -151,7 +151,7 @@ describe("conversations", () => {
     const deleted = await db.select().from(messages).where(eq(messages.fromNumber, "+12025550001"));
     expect(deleted.every((m) => m.body === null && m.deletedAt)).toBe(true);
     // Billing stays.
-    expect(await balance(user.id)).toBe(997);
+    expect(await balance(user.id)).toBe(994);
   });
 
   it("purges text content past retention", async () => {

@@ -68,7 +68,11 @@ export const config = {
     callPerMinuteCents: int("PRICE_CALL_PER_MINUTE_CENTS", 15),
     numberMonthlyCents: int("PRICE_NUMBER_MONTHLY_CENTS", 300),
     voiceCloneCents: int("PRICE_VOICE_CLONE_CENTS", 500),
-    smsInboundPerPartCents: int("PRICE_SMS_INBOUND_PER_PART_CENTS", 1),
+    /**
+     * Telnyx charges $0.004/segment plus up to $0.0045 in carrier fees for inbound texts, and may add
+     * an unregistered (non-10DLC) carrier fee of ~$0.012; 2¢ stays above the worst case.
+     */
+    smsInboundPerPartCents: int("PRICE_SMS_INBOUND_PER_PART_CENTS", 2),
     minTopupCents: int("MIN_TOPUP_CENTS", 1000),
   },
 
