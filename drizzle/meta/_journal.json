@@ -50,6 +50,13 @@
       "when": 1792160347437,
       "tag": "0006_inbound_sms",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792162460466,
+      "tag": "0007_contact_names",
+      "breakpoints": true
     }
   ]
 }

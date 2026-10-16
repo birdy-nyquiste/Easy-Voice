@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, desc, eq, isNull, lt, lte } from "drizzle-orm";
 import { db } from "@/db";
-import { messages, phoneNumbers, type Message, type PhoneNumber } from "@/db/schema";
+import { contacts, messages, phoneNumbers, type Message, type PhoneNumber } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
 import { applyLedger } from "./billing/ledger";
@@ -90,6 +90,8 @@ export async function enablePendingInboundSms(): Promise<number> {
 
 export interface Conversation {
   from: string;
+  /** The user's name for this sender, if they set one. */
+  name?: string;
   last: Message;
   count: number;
   unread: number;
@@ -103,9 +105,10 @@ export async function listConversations(userId: string, limit = 500): Promise<Co
     .where(and(eq(messages.userId, userId), isNull(messages.deletedAt)))
     .orderBy(desc(messages.receivedAt))
     .limit(limit);
+  const names = await getContactNames(userId);
   const byFrom = new Map<string, Conversation>();
   for (const m of rows) {
-    const c = byFrom.get(m.fromNumber) ?? { from: m.fromNumber, last: m, count: 0, unread: 0 };
+    const c = byFrom.get(m.fromNumber) ?? { from: m.fromNumber, name: names.get(m.fromNumber), last: m, count: 0, unread: 0 };
     c.count++;
     if (!m.readAt) c.unread++;
     byFrom.set(m.fromNumber, c);
@@ -163,4 +166,37 @@ export async function purgeExpiredMessages(cutoff: Date): Promise<number> {
     .where(and(lt(messages.receivedAt, cutoff), isNull(messages.purgedAt)))
     .returning({ id: messages.id });
   return purged.length;
+}
+
+export const MAX_CONTACT_NAME_LENGTH = 60;
+
+/** The user's names for senders, keyed by number. */
+export async function getContactNames(userId: string): Promise<Map<string, string>> {
+  const rows = await db.select().from(contacts).where(eq(contacts.userId, userId));
+  return new Map(rows.map((c) => [c.number, c.name]));
+}
+
+export async function getContactName(userId: string, number: string): Promise<string | undefined> {
+  const [c] = await db
+    .select({ name: contacts.name })
+    .from(contacts)
+    .where(and(eq(contacts.userId, userId), eq(contacts.number, number)));
+  return c?.name;
+}
+
+/** Name a sender; an empty name removes it. */
+export async function setContactName(userId: string, number: string, rawName: string): Promise<void> {
+  const name = rawName.trim().replace(/\s+/g, " ");
+  if (!number) throw new UserError("Missing number.");
+  if (name.length > MAX_CONTACT_NAME_LENGTH) {
+    throw new UserError(`Keep the name under ${MAX_CONTACT_NAME_LENGTH} characters.`);
+  }
+  if (!name) {
+    await db.delete(contacts).where(and(eq(contacts.userId, userId), eq(contacts.number, number)));
+    return;
+  }
+  await db
+    .insert(contacts)
+    .values({ userId, number, name })
+    .onConflictDoUpdate({ target: [contacts.userId, contacts.number], set: { name, updatedAt: new Date() } });
 }

@@ -245,6 +245,21 @@ export const messages = pgTable(
   (t) => [index("messages_user_idx").on(t.userId, t.receivedAt)],
 );
 
+/** A user's own label for a number that texts them. */
+export const contacts = pgTable(
+  "contacts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    /** As it appears on messages.from_number. */
+    number: text("number").notNull(),
+    name: text("name").notNull(),
+    createdAt: createdAt(),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("contacts_user_number_idx").on(t.userId, t.number)],
+);
+
 // ---------- Webhook dedupe ----------
 
 export const webhookEvents = pgTable(
@@ -265,4 +280,5 @@ export type Voice = typeof voices.$inferSelect;
 export type Agent = typeof agents.$inferSelect;
 export type Call = typeof calls.$inferSelect;
 export type Message = typeof messages.$inferSelect;
+export type Contact = typeof contacts.$inferSelect;
 export type LedgerEntry = typeof ledgerEntries.$inferSelect;
