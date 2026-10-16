@@ -20,6 +20,7 @@ With `TELNYX_MODE=mock` (the default in dev; production builds default to `live`
 
 - Number search, purchase, voice cloning and assistants run against an in-memory mock.
 - **Numbers → Simulate an inbound call** runs a full call through the real webhook handler: answer → hangup → billing → transcript.
+- **Numbers → Simulate an inbound text** delivers a text through the real handler: stored, billed per segment, shown under **Messages**.
 - Outbound calls to numbers ending in `0000` never answer, so you can test the failure path. Other numbers answer and hang up after a few seconds.
 
 ```bash
@@ -33,8 +34,9 @@ CI (`.github/workflows/ci.yml`) runs typecheck, lint, the tests against a Postgr
 
 1. In the Telnyx portal, create an **Outbound Voice Profile** and a **Call Control Application**. Set the app's webhook URL to `https://<host>/api/webhooks/telnyx` and **webhook API version to "2"**. Link the outbound profile to the app, and enable **"call cost in webhooks"** (`call_cost_in_webhooks`) so each call's Telnyx cost is recorded for reconciliation.
 2. Copy the API key, the app id (`TELNYX_CONNECTION_ID`) and the webhook **public key** (`TELNYX_PUBLIC_KEY`) into `.env.local`, and set `TELNYX_MODE=live`.
-3. Optional: create an Insight Group with a summary insight, and set `TELNYX_INSIGHT_GROUP_ID` so call summaries appear.
-4. For local development, expose your dev server with `ngrok http 3000` and set `APP_URL` and the Telnyx webhook URL to the ngrok host.
+3. Optional, to receive texts: create a **Messaging Profile** with webhook URL `https://<host>/api/webhooks/telnyx` and API version 2, and set `TELNYX_MESSAGING_PROFILE_ID`. Texting is **receive only** (SPEC §17). We never send, so no 10DLC registration is needed. Numbers are put on the profile when they activate. Numbers bought earlier are added by the daily cron. Never enable `messaging` on the assistants: they would start replying to texts.
+4. Optional: create an Insight Group with a summary insight, and set `TELNYX_INSIGHT_GROUP_ID` so call summaries appear.
+5. For local development, expose your dev server with `ngrok http 3000` and set `APP_URL` and the Telnyx webhook URL to the ngrok host.
 
 API details and open questions are in [docs/telnyx-api-notes.md](docs/telnyx-api-notes.md).
 
@@ -61,7 +63,7 @@ Stripe only processes one-time top-up payments; there are no subscriptions. Numb
 
 ## Daily jobs
 
-`GET /api/cron/daily` with `Authorization: Bearer $CRON_SECRET` does four things: charges monthly number renewals, releases numbers after the negative-balance grace period, purges recordings, transcripts and the Telnyx AI conversation older than `RETENTION_DAYS`, fetches any transcripts the post-call fetch missed, and finishes number orders still in progress. On Vercel, `vercel.json` schedules it daily.
+`GET /api/cron/daily` with `Authorization: Bearer $CRON_SECRET` charges monthly number renewals, releases numbers after the negative-balance grace period, purges recordings, transcripts, the Telnyx AI conversation and text message content older than `RETENTION_DAYS`, fetches any transcripts the post-call fetch missed, finishes number orders still in progress, and puts active numbers on the messaging profile if they aren't yet. On Vercel, `vercel.json` schedules it daily.
 
 ## Layout
 
@@ -69,6 +71,7 @@ Stripe only processes one-time top-up payments; there are no subscriptions. Numb
 | --- | --- |
 | `src/server/telnyx/` | Provider-neutral `VoiceProvider` interface, plus `live.ts` (Telnyx REST) and `mock.ts` |
 | `src/server/calls/events.ts` | Call webhook state machine: answer or reject, start the assistant, bill on hangup |
+| `src/server/messages.ts` | Inbound texts (receive only): store, bill per segment, conversations, retention |
 | `src/server/billing/ledger.ts` | Idempotent balance ledger, the only way the balance changes |
 | `src/server/{numbers,voices,agents}.ts` | Resource services (ownership checks, charges, refunds) |
 | `src/app/(app)/` | Signed-in pages |

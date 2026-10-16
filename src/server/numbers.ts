@@ -6,6 +6,7 @@ import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
 import { formatCents } from "@/lib/format";
 import { applyLedger, chargePurchase, refundPurchase, type Purchase } from "./billing/ledger";
+import { enableInboundSms } from "./messages";
 import { voiceProvider } from "./telnyx";
 
 const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
@@ -79,6 +80,8 @@ async function activateNumber(n: PhoneNumber, numberId?: string): Promise<PhoneN
     .set({ status: "active", providerNumberId: numberId ?? n.providerNumberId, failureReason: null })
     .where(eq(phoneNumbers.id, n.id))
     .returning();
+  // Receiving texts is a bonus; a failure here must not fail the purchase (the daily cron retries).
+  if (await enableInboundSms(u)) return { ...u, smsEnabledAt: new Date() };
   return u;
 }
 

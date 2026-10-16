@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { encodeClientState, parseTelnyxEnvelope } from "./events";
+import { encodeClientState, parseCallEnvelope, parseTelnyxEnvelope } from "./events";
 import { MOCK_MODELS, toOfferedModels } from "./models";
 import { MOCK_CATALOG, toStockVoices } from "./stock-voices";
 import type { CallResults, ClonedVoiceResult, VoiceProvider } from "./types";
@@ -28,7 +28,7 @@ async function emit(type: string, callControlId: string, extra: Record<string, u
   if (!call) return;
   setTimeout(async () => {
     const { handleCallEvent } = await import("@/server/calls/events");
-    const event = parseTelnyxEnvelope({
+    const event = parseCallEnvelope({
       data: {
         id: randomUUID(),
         event_type: type,
@@ -87,6 +87,8 @@ export const mockProvider: VoiceProvider = {
   },
 
   async releaseNumber() {},
+
+  async enableInboundMessaging() {},
 
   async listStockVoices() {
     return toStockVoices(MOCK_CATALOG);
@@ -210,4 +212,30 @@ export function simulateInboundCall(from: string, to: string): string {
   state.calls.set(id, { from, to, direction: "inbound", sessionId: randomUUID() });
   void emit("call.initiated", id);
   return id;
+}
+
+/** Dev helper: simulate a text arriving at one of our numbers, through the real webhook handler. */
+export async function simulateInboundMessage(from: string, to: string, text: string): Promise<void> {
+  const { handleInboundMessage } = await import("@/server/messages");
+  const event = parseTelnyxEnvelope({
+    data: {
+      id: randomUUID(),
+      event_type: "message.received",
+      occurred_at: new Date().toISOString(),
+      payload: {
+        id: randomUUID(),
+        direction: "inbound",
+        type: "SMS",
+        from: { phone_number: from },
+        to: [{ phone_number: to, status: "webhook_delivered" }],
+        text,
+        media: [],
+        // GSM-7 fits 160 chars in one segment, 153 per segment once split.
+        parts: text.length <= 160 ? 1 : Math.ceil(text.length / 153),
+        cost: { amount: "0.0040", currency: "USD" },
+      },
+    },
+  });
+  if (event.type !== "message.received") throw new Error("Simulated text did not parse as message.received");
+  await handleInboundMessage(event);
 }

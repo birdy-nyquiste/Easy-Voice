@@ -2,12 +2,14 @@ import Link from "next/link";
 import { requireUser } from "@/server/auth";
 import { formatCents } from "@/lib/format";
 import { config } from "@/lib/config";
+import { countUnreadMessages } from "@/server/messages";
 import { logoutAction } from "../login/actions";
 import { NavLinks } from "./nav-links";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
   const low = user.balanceCents <= 0;
+  const unread = await countUnreadMessages(user.id);
   return (
     <div className="min-h-screen md:flex">
       <aside className="border-b border-stone-200 bg-white md:sticky md:top-0 md:h-screen md:w-56 md:shrink-0 md:border-b-0 md:border-r">
@@ -24,7 +26,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             {formatCents(user.balanceCents)}
           </Link>
         </div>
-        <NavLinks />
+        <NavLinks unread={unread} />
         <div className="flex items-center justify-between gap-3 px-4 pb-3 text-xs text-stone-500 md:absolute md:bottom-0 md:block md:w-full md:py-4">
           <div className="truncate">{user.email}</div>
           <form action={logoutAction}>
@@ -35,7 +37,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 md:px-8">
         {config.telnyx.mode === "mock" && (
           <div className="mb-6 rounded-lg border border-sky-200 bg-sky-50 px-4 py-2 text-xs text-sky-800">
-            Mock mode: phone numbers, voices and calls are simulated. Set <code>TELNYX_MODE=live</code> to use Telnyx.
+            Mock mode: phone numbers, voices, calls and texts are simulated. Set <code>TELNYX_MODE=live</code> to use Telnyx.
           </div>
         )}
         {children}

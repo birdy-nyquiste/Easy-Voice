@@ -45,3 +45,14 @@ export async function simulateInboundAction(_: ActionState, form: FormData): Pro
     return "Simulated call placed — check Calls in a few seconds.";
   });
 }
+
+export async function simulateTextAction(_: ActionState, form: FormData): Promise<ActionState> {
+  return attempt(async () => {
+    await requireUser();
+    if (config.telnyx.mode !== "mock") throw new UserError("Only available in mock mode.");
+    const { simulateInboundMessage } = await import("@/server/telnyx/mock");
+    await simulateInboundMessage("+12025550123", String(form.get("e164")), "Hi! Your table for 2 at 7pm tonight is confirmed. Reply C to cancel.");
+    revalidatePath("/", "layout");
+    return "Simulated text received — see Messages.";
+  });
+}

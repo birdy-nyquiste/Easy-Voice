@@ -118,6 +118,27 @@ export interface CallEvent {
   totalCostUsd?: string;
 }
 
+/** A text that arrived at one of our numbers (message.received). We never send texts. */
+export interface InboundMessageEvent {
+  /** Provider event id, used for dedupe. */
+  id: string;
+  type: "message.received";
+  rawType: string;
+  occurredAt: Date;
+  messageId: string;
+  from: string;
+  /** Our number the text was sent to. */
+  to: string;
+  text: string;
+  /** SMS segments. */
+  parts: number;
+  mediaCount: number;
+  /** Provider cost in USD, as sent (decimal string), when present. */
+  costUsd?: string;
+}
+
+export type ProviderEvent = CallEvent | InboundMessageEvent;
+
 /**
  * Per-call values available to an agent's instructions as {{call_direction}} and {{call_goal}}.
  */
@@ -148,6 +169,8 @@ export interface VoiceProvider {
   orderNumber(e164: string): Promise<NumberOrderResult>;
   getNumberOrder(orderId: string): Promise<NumberOrderResult>;
   releaseNumber(numberId: string): Promise<void>;
+  /** Put a number on the platform messaging profile so it can receive texts. Idempotent. */
+  enableInboundMessaging(e164: string): Promise<void>;
 
   listStockVoices(): Promise<StockVoice[]>;
   /** Speak `text` with a catalog voice (the voice ref as used by assistants). */
@@ -181,5 +204,5 @@ export interface VoiceProvider {
   purgeCallData(call: CallRef): Promise<void>;
 
   /** Verify signature and parse; throws on invalid signature. */
-  parseWebhook(rawBody: string, headers: Headers): Promise<CallEvent>;
+  parseWebhook(rawBody: string, headers: Headers): Promise<ProviderEvent>;
 }
