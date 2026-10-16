@@ -212,6 +212,13 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
       await api("DELETE", `/phone_numbers/${encodeURIComponent(numberId)}`);
     },
 
+    async enableInboundMessaging(e164) {
+      if (!cfg.messagingProfileId) throw new Error("TELNYX_MESSAGING_PROFILE_ID is not set");
+      await api("PATCH", `/messaging_phone_numbers/${encodeURIComponent(e164)}`, {
+        messaging_profile_id: cfg.messagingProfileId,
+      });
+    },
+
     async listStockVoices() {
       if (voiceCache && Date.now() - voiceCache.at < VOICE_CACHE_MS) return voiceCache.voices;
       // Unlike most endpoints this one isn't wrapped in `data`.

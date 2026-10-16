@@ -6,15 +6,17 @@ import { config } from "@/lib/config";
 import { resyncStaleAgents } from "./agents";
 import { purgeCallContent } from "./calls";
 import { fetchCallResults } from "./calls/results";
+import { enablePendingInboundSms, purgeExpiredMessages } from "./messages";
 import { chargeNumberRenewals, refreshPendingNumbers, releaseNumber } from "./numbers";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Daily maintenance: renewals, grace-period releases, retention purge, stuck orders. */
+/** Daily maintenance: renewals, grace-period releases, retention purge, stuck orders, texting setup. */
 export async function runDailyJobs(now = new Date()) {
   const resynced = await resyncStaleAgents();
   await refreshPendingNumbers();
   const renewed = await chargeNumberRenewals(now);
+  const smsEnabled = await enablePendingInboundSms();
 
   // Release numbers of users whose balance has been negative past the grace period.
   const cutoff = new Date(now.getTime() - config.policy.negativeBalanceReleaseDays * DAY_MS);
@@ -35,6 +37,7 @@ export async function runDailyJobs(now = new Date()) {
     .where(and(lt(calls.createdAt, retentionCutoff), isNotNull(calls.endedAt), isNull(calls.purgedAt)));
   let purged = 0;
   for (const c of expired) if (await purgeCallContent(c)) purged++;
+  const messagesPurged = await purgeExpiredMessages(retentionCutoff);
 
   // Results the post-hangup fetch missed (e.g. on serverless).
   const missing = await db
@@ -44,5 +47,5 @@ export async function runDailyJobs(now = new Date()) {
     .limit(200);
   for (const c of missing) await fetchCallResults(c);
 
-  return { renewed, released: delinquent.length, purged, resultsFetched: missing.length, resynced };
+  return { renewed, released: delinquent.length, purged, messagesPurged, resultsFetched: missing.length, resynced, smsEnabled };
 }

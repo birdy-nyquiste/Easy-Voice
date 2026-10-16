@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { Badge, Card, CardTitle, Empty, PageHeader, StatusBadge, buttonClass, inputClass } from "@/components/ui";
 import { config } from "@/lib/config";
@@ -6,7 +7,7 @@ import { formatCents, formatDateTime, formatPhone } from "@/lib/format";
 import { listUserAgents } from "@/server/agents";
 import { requireUser } from "@/server/auth";
 import { listUserNumbers, refreshPendingNumbers, searchAvailableNumbers } from "@/server/numbers";
-import { assignAgentAction, buyNumberAction, releaseNumberAction, simulateInboundAction } from "./actions";
+import { assignAgentAction, buyNumberAction, releaseNumberAction, simulateInboundAction, simulateTextAction } from "./actions";
 
 export default async function NumbersPage({ searchParams }: { searchParams: Promise<{ area?: string }> }) {
   const user = await requireUser();
@@ -49,6 +50,15 @@ export default async function NumbersPage({ searchParams }: { searchParams: Prom
                   {n.status === "active" && n.paidThrough && (
                     <p className="mt-1 text-xs text-stone-500">Renews {formatDateTime(n.paidThrough)}</p>
                   )}
+                  {n.status === "active" && config.features.inboundSms && (
+                    <p className="mt-1 text-xs text-stone-500">
+                      {n.smsEnabledAt ? (
+                        <>Receives texts ({formatCents(config.pricing.smsInboundPerPartCents)}/segment) in <Link href="/messages" className="underline">Messages</Link>. Replies aren&apos;t supported.</>
+                      ) : (
+                        "Texting is being set up for this number."
+                      )}
+                    </p>
+                  )}
                   {n.status === "pending" && <p className="mt-1 text-xs text-stone-500">Activating with the carrier… refresh in a moment.</p>}
                   {n.failureReason && n.status === "failed" && <p className="mt-1 text-sm text-red-600">{n.failureReason}</p>}
                 </div>
@@ -83,10 +93,18 @@ export default async function NumbersPage({ searchParams }: { searchParams: Prom
                 )}
               </div>
               {config.telnyx.mode === "mock" && n.status === "active" && (
-                <ActionForm action={simulateInboundAction} className="mt-4 border-t border-stone-100 pt-3">
-                  <input type="hidden" name="e164" value={n.e164} />
-                  <SubmitButton variant="secondary">Simulate an inbound call</SubmitButton>
-                </ActionForm>
+                <div className="mt-4 flex flex-wrap gap-2 border-t border-stone-100 pt-3">
+                  <ActionForm action={simulateInboundAction}>
+                    <input type="hidden" name="e164" value={n.e164} />
+                    <SubmitButton variant="secondary">Simulate an inbound call</SubmitButton>
+                  </ActionForm>
+                  {n.smsEnabledAt && (
+                    <ActionForm action={simulateTextAction}>
+                      <input type="hidden" name="e164" value={n.e164} />
+                      <SubmitButton variant="secondary">Simulate an inbound text</SubmitButton>
+                    </ActionForm>
+                  )}
+                </div>
               )}
             </Card>
           ))}

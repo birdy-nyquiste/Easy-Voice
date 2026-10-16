@@ -435,3 +435,81 @@ Docs: https://developers.telnyx.com/api-reference/call-recordings/retrieve-a-cal
   $15 / 1M tokens (`MAX_OUTPUT_PRICE_PER_M`). Calls are billed at a flat per-minute rate, so pricier models are not
   offered. At this check that excluded only `openai/gpt-5.6-sol`; unpriced entries (`google/gemini-2.5-flash`,
   `openai/gpt-live-1`) are skipped too.
+
+## 14. Messaging (SMS/MMS) — researched 2026-10-16, not built
+
+Background for SPEC §17. Docs only; nothing here has been checked against a live account yet.
+
+**Scope decision (2026-10-16): receive only.** We can't do 10DLC for now, so nothing is ever sent: no
+`POST /v2/messages`, no assistant replies, no scheduled SMS events. What we use: a platform messaging profile whose
+webhook points at `/api/webhooks/telnyx`, numbers assigned to it, and `message.received`. Assistants must **not** get
+`messaging` in `enabled_features`, because the assistant would then reply to texts. The send, 10DLC and
+assistant-messaging notes below are kept as reference for later.
+
+### Send: `POST /v2/messages`
+Doc: https://developers.telnyx.com/api-reference/messages/send-a-message
+- Body: `to` (required, E.164 string), `from` (our number), `text` (SMS) or `media_urls[]` (MMS, total < 1 MB),
+  `subject`, `type` (`SMS|MMS`), `messaging_profile_id` (only needed for number pools / alphanumeric senders),
+  `webhook_url`, `webhook_failover_url`, `use_profile_webhooks` (default `true`), `send_at` (ISO 8601, minute
+  precision), `encoding` (`auto|gsm7|ucs2`).
+- Response `data`: `id`, `direction: "outbound"`, `from {phone_number, carrier, line_type}`,
+  `to[] {phone_number, status, carrier, line_type}` (**array in the response, string in the request**), `text`,
+  `media`, `num_chars`, `parts`, `encoding`, `cost`, `cost_breakdown`, `sent_at`, `completed_at`, `errors`.
+- Mandarin text is UCS-2: 70 chars per segment (67 when concatenated) vs 160/153 for GSM-7, so Chinese messages
+  cost ~2x more segments for the same length.
+
+### Webhooks
+Doc: https://developers.telnyx.com/docs/messaging/messages/receiving-webhooks
+- Events: `message.received` (inbound), `message.sent` (handed to carrier), `message.finalized` (terminal:
+  delivered or failed).
+- `data.payload`: `id`, `direction`, `from.phone_number`, `to[] {phone_number, status}`, `text`,
+  `media[] {url, content_type, sha256, size}` (media URLs expire after 30 days), `cost {amount, currency}`, `parts`,
+  `errors`. `data.id` is the event id (use it for `webhook_events` idempotency, as with calls).
+- Same Ed25519 signing as calls (§7), so `parseWebhook` can be reused. Webhook URL is set on the **messaging
+  profile** (or per message via `webhook_url`), not on the Call Control app.
+
+### Messaging profiles and number setup
+Docs: https://developers.telnyx.com/docs/messaging/messages/messaging-profiles-overview ,
+https://developers.telnyx.com/docs/messaging/messages/phone-number-configuration
+- A number can send and receive messages only once it's assigned to a messaging profile. The profile holds the
+  webhook URLs, number pooling, smart encoding and spend limits.
+- Assign: `PATCH /v2/messaging_phone_numbers/{number}` `{ messaging_profile_id }`. The 10DLC doc uses
+  `PATCH /v2/phone_numbers/{number}` for the same field. **UNCONFIRMED** which one is canonical.
+- `messaging_profile_id` can also be set at order time on `POST /v2/number_orders` (§2).
+
+### 10DLC (US A2P on local numbers)
+Docs: https://developers.telnyx.com/docs/messaging/10dlc/brand-registration ,
+https://developers.telnyx.com/docs/messaging/10dlc/sole-proprietor ,
+https://developers.telnyx.com/docs/messaging/10dlc/phone-number-assignment
+- Carriers filter or block unregistered A2P traffic from local numbers. Texts to other Telnyx numbers are on-net
+  and don't need a campaign. That's useful for testing, not for production.
+- Flow: brand (`/v2/10dlc/brand`) → campaign (`/v2/10dlc/campaignBuilder`) → number assignment
+  `POST /v2/10dlc/phoneNumberCampaign { phoneNumber, campaignId }` (remove: `DELETE .../{phoneNumber}`; list:
+  `GET ...?filter[campaignId]=`). The number must already be on a messaging profile. One campaign per number.
+  The campaign must be `ACTIVE` (`GET /v2/10dlc/campaignBuilder/{campaignId}`).
+- Timing: carrier approval typically 1–5 business days, then 24–72 h propagation after number assignment.
+- Fees (support article): $4 one-time brand registration, $15 campaign vetting. Monthly campaign fees and
+  per-message carrier surcharges: **UNCONFIRMED**.
+- **Sole proprietor** brands (no EIN): the registrant's name, address, mobile number and last 4 of SSN; verified
+  by an SMS PIN to that mobile within 24 h. Limits: 1 campaign per brand, 1 number per campaign, low volume
+  (support article says ~1,000 msgs/day; API docs only say "low-volume").
+
+### AI Assistants and messaging
+- Assistant fields: `enabled_features[]` (`telephony`, `messaging`; with `messaging` "the assistant will be able
+  to send and receive messages") and `messaging_settings { default_messaging_profile_id,
+  delivery_status_webhook_url, conversation_inactivity_minutes }`. The doc says a default messaging profile is
+  created with the assistant.
+- Outbound text from the assistant: `POST /v2/ai/assistants/{id}/scheduled_events` with
+  `telnyx_conversation_channel: "sms_chat"`, `telnyx_end_user_target`, `telnyx_agent_target` (our number),
+  `scheduled_at_fixed_datetime` (must be in the future), `text` (required for SMS), optional
+  `conversation_metadata`, `dynamic_variables`. Retry fields are rejected (400) for SMS. Status:
+  `pending|in_progress|completed|failed`.
+- **UNCONFIRMED:**
+  - How an inbound text to a number reaches the assistant: assigning the number to the assistant's
+    `default_messaging_profile_id`, or something else.
+  - Whether our app still gets `message.received`/`message.finalized` (with `cost`, `parts`) for
+    assistant-handled texts.
+  - Whether `scheduled_at_fixed_datetime` can be "now".
+  - Whether SMS conversations appear in `/v2/ai/conversations` like calls do.
+  - Whether a "send message" tool exists that lets the assistant text during a voice call (a Telnyx release note
+    URL for it now 404s).

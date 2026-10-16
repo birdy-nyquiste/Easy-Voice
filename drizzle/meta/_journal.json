@@ -43,6 +43,13 @@
       "when": 1791496217749,
       "tag": "0005_agent_model",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792160347437,
+      "tag": "0006_inbound_sms",
+      "breakpoints": true
     }
   ]
 }

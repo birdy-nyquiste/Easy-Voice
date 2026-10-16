@@ -60,12 +60,15 @@ export const config = {
     cloneModel: process.env.TELNYX_CLONE_MODEL ?? "Qwen3TTS",
     /** Insight group with a "summary" insight; summaries are skipped when unset. */
     insightGroupId: process.env.TELNYX_INSIGHT_GROUP_ID ?? "",
+    /** Messaging profile whose webhook points at us; numbers are put on it to receive texts. Unset = no texts. */
+    messagingProfileId: process.env.TELNYX_MESSAGING_PROFILE_ID ?? "",
   },
 
   pricing: {
     callPerMinuteCents: int("PRICE_CALL_PER_MINUTE_CENTS", 15),
     numberMonthlyCents: int("PRICE_NUMBER_MONTHLY_CENTS", 300),
     voiceCloneCents: int("PRICE_VOICE_CLONE_CENTS", 500),
+    smsInboundPerPartCents: int("PRICE_SMS_INBOUND_PER_PART_CENTS", 1),
     minTopupCents: int("MIN_TOPUP_CENTS", 1000),
   },
 
@@ -82,6 +85,12 @@ export const config = {
     get voiceCloning() {
       const v = process.env.VOICE_CLONING;
       return v ? v === "on" : config.telnyx.mode !== "live";
+    },
+    /**
+     * Receiving texts (never sending: no 10DLC registration; SPEC §17). Live mode needs a messaging profile.
+     */
+    get inboundSms() {
+      return config.telnyx.mode !== "live" || Boolean(config.telnyx.messagingProfileId);
     },
   },
 

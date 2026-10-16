@@ -17,6 +17,7 @@ const provider = createTelnyxProvider({
   sttLanguage: "auto",
   cloneModel: "Qwen3TTS",
   insightGroupId: "",
+  messagingProfileId: "mp-1",
 });
 
 const body = JSON.stringify({
@@ -206,5 +207,31 @@ describe("per-call variables", () => {
     const body = bodyOf(fetchMock);
     expect(body.assistant.dynamic_variables).toEqual({ call_direction: "outbound", call_goal: "Book a table for 2" });
     expect(body.greeting).toBe("Hi, this is an AI assistant calling.");
+  });
+});
+
+describe("inbound messaging", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("assigns the number to the platform messaging profile", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ data: {} }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await provider.enableInboundMessaging("+14155550100");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.telnyx.com/v2/messaging_phone_numbers/%2B14155550100");
+    expect(init?.method).toBe("PATCH");
+    expect(JSON.parse(String(init?.body))).toEqual({ messaging_profile_id: "mp-1" });
+  });
+
+  it("verifies and parses signed message.received webhooks", async () => {
+    const payload = JSON.stringify({
+      data: {
+        id: "evt-m",
+        event_type: "message.received",
+        payload: { id: "msg", direction: "inbound", from: { phone_number: "+1202" }, to: [{ phone_number: "+1415" }], text: "hi", parts: 1 },
+      },
+    });
+    const e = await provider.parseWebhook(payload, headers(Math.floor(Date.now() / 1000), payload));
+    expect(e).toMatchObject({ type: "message.received", messageId: "msg", from: "+1202", to: "+1415", text: "hi" });
   });
 });

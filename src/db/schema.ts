@@ -71,6 +71,7 @@ export const ledgerKind = pgEnum("ledger_kind", [
   "call",
   "number_monthly",
   "voice_clone",
+  "sms",
   "refund",
   "adjustment",
 ]);
@@ -111,6 +112,8 @@ export const phoneNumbers = pgTable(
     agentId: uuid("agent_id").references(() => agents.id, { onDelete: "set null" }),
     /** Monthly rental is paid up to this instant. */
     paidThrough: ts("paid_through"),
+    /** When the number was put on the platform messaging profile (it can receive texts from then on). */
+    smsEnabledAt: ts("sms_enabled_at"),
     createdAt: createdAt(),
     releasedAt: ts("released_at"),
   },
@@ -212,6 +215,36 @@ export const calls = pgTable(
   (t) => [index("calls_user_idx").on(t.userId, t.createdAt), index("calls_session_idx").on(t.providerCallSessionId)],
 );
 
+// ---------- Text messages (receive only; SPEC §17) ----------
+
+export const messages = pgTable(
+  "messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    phoneNumberId: uuid("phone_number_id").references(() => phoneNumbers.id),
+    /** Sender: usually E.164, but short codes send texts too. */
+    fromNumber: text("from_number").notNull(),
+    toNumber: text("to_number").notNull(),
+    /** Null once purged (retention or deleted by the user). */
+    body: text("body"),
+    /** SMS segments, as billed. */
+    parts: integer("parts").notNull().default(1),
+    /** MMS attachments are counted, never downloaded. */
+    mediaCount: integer("media_count").notNull().default(0),
+    providerMessageId: text("provider_message_id").notNull().unique(),
+    billedCents: integer("billed_cents").notNull().default(0),
+    /** Telnyx cost from the webhook, in micro-USD; reconciliation only. */
+    providerCostMicros: integer("provider_cost_micros"),
+    receivedAt: ts("received_at").notNull(),
+    readAt: ts("read_at"),
+    purgedAt: ts("purged_at"),
+    createdAt: createdAt(),
+    deletedAt: ts("deleted_at"),
+  },
+  (t) => [index("messages_user_idx").on(t.userId, t.receivedAt)],
+);
+
 // ---------- Webhook dedupe ----------
 
 export const webhookEvents = pgTable(
@@ -231,4 +264,5 @@ export type PhoneNumber = typeof phoneNumbers.$inferSelect;
 export type Voice = typeof voices.$inferSelect;
 export type Agent = typeof agents.$inferSelect;
 export type Call = typeof calls.$inferSelect;
+export type Message = typeof messages.$inferSelect;
 export type LedgerEntry = typeof ledgerEntries.$inferSelect;
