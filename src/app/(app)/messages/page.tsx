@@ -41,7 +41,8 @@ export default async function MessagesPage() {
                 <Link href={threadHref(c.from)} className="flex items-start justify-between gap-4 px-5 py-3 hover:bg-stone-50">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <span className={`whitespace-nowrap ${c.unread ? "font-semibold" : "font-medium"}`}>{formatPhone(c.from)}</span>
+                      <span className={`whitespace-nowrap ${c.unread ? "font-semibold" : "font-medium"}`}>{c.name ?? formatPhone(c.from)}</span>
+                      {c.name && <span className="whitespace-nowrap text-xs text-stone-500">{formatPhone(c.from)}</span>}
                       {c.unread > 0 && <span className="whitespace-nowrap"><Badge tone="blue">{c.unread} new</Badge></span>}
                       {c.count > 1 && <span className="whitespace-nowrap text-xs text-stone-400">{c.count} texts</span>}
                     </div>

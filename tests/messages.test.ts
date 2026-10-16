@@ -6,11 +6,13 @@ import {
   countUnreadMessages,
   deleteConversation,
   enablePendingInboundSms,
+  getContactName,
   handleInboundMessage,
   getConversation,
   listConversations,
   markConversationRead,
   purgeExpiredMessages,
+  setContactName,
 } from "@/server/messages";
 import { parseTelnyxEnvelope } from "@/server/telnyx/events";
 import { mockProvider } from "@/server/telnyx/mock";
@@ -176,5 +178,29 @@ describe("messaging profile setup", () => {
     [n] = await db.select().from(phoneNumbers).where(eq(phoneNumbers.id, number.id));
     expect(n.smsEnabledAt).not.toBeNull();
     expect(await enablePendingInboundSms()).toBe(0); // already done
+  });
+});
+
+describe("contact names", () => {
+  it("names a sender per user, renames, and clears with an empty name", async () => {
+    const { user, number } = await makeLine(1000);
+    const other = await makeUser();
+    await handleInboundMessage(text(number.e164, { from: "+12025550001" }));
+
+    await setContactName(user.id, "+12025550001", "  Dr.   Lee's office ");
+    expect((await listConversations(user.id))[0].name).toBe("Dr. Lee's office");
+    expect(await getContactName(other.id, "+12025550001")).toBeUndefined();
+
+    await setContactName(user.id, "+12025550001", "Dentist");
+    expect(await getContactName(user.id, "+12025550001")).toBe("Dentist");
+
+    await setContactName(user.id, "+12025550001", "   ");
+    expect(await getContactName(user.id, "+12025550001")).toBeUndefined();
+    expect((await listConversations(user.id))[0].name).toBeUndefined();
+  });
+
+  it("rejects overly long names", async () => {
+    const user = await makeUser();
+    await expect(setContactName(user.id, "+12025550001", "x".repeat(61))).rejects.toThrow("under 60");
   });
 });

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { attempt, type ActionState } from "@/lib/action";
 import { requireUser } from "@/server/auth";
-import { deleteConversation, markConversationRead } from "@/server/messages";
+import { deleteConversation, markConversationRead, setContactName } from "@/server/messages";
 
 /** Called once a thread is on screen, so the nav badge (rendered alongside the page) catches up. */
 export async function markReadAction(from: string, upTo: string): Promise<void> {
@@ -22,4 +22,14 @@ export async function deleteConversationAction(_: ActionState, form: FormData): 
   });
   if (!result?.error) redirect("/messages");
   return result;
+}
+
+export async function saveContactNameAction(_: ActionState, form: FormData): Promise<ActionState> {
+  return attempt(async () => {
+    const user = await requireUser();
+    const name = String(form.get("name") ?? "");
+    await setContactName(user.id, String(form.get("number") ?? ""), name);
+    revalidatePath("/messages", "layout");
+    return name.trim() ? "Name saved." : "Name removed.";
+  });
 }

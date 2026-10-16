@@ -64,8 +64,11 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
             <div className="flex justify-between"><dt>Calls (in or out)</dt><dd className="font-medium">{formatCents(p.callPerMinuteCents)} / min</dd></div>
             <div className="flex justify-between"><dt>Phone number</dt><dd className="font-medium">{formatCents(p.numberMonthlyCents)} / month</dd></div>
             <div className="flex justify-between"><dt>Voice clone</dt><dd className="font-medium">{formatCents(p.voiceCloneCents)} each</dd></div>
+            {config.features.inboundSms && (
+              <div className="flex justify-between"><dt>Text received</dt><dd className="font-medium">{formatCents(p.smsInboundPerPartCents)} / segment</dd></div>
+            )}
           </dl>
-          <p className="mt-4 text-xs text-stone-500">Payments are processed by Stripe. There are no subscriptions — number rental is deducted from your balance every 30 days. Call minutes are rounded up. Unanswered calls are free. Failed purchases are refunded automatically.</p>
+          <p className="mt-4 text-xs text-stone-500">Payments are processed by Stripe. There are no subscriptions — number rental is deducted from your balance every 30 days. Call minutes are rounded up. Unanswered calls are free. Failed purchases are refunded automatically.{config.features.inboundSms && " A text segment holds up to 160 characters, or 70 when it contains Chinese characters or emoji."}</p>
         </Card>
       </div>
 
