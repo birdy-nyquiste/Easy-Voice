@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { Card, PageHeader, inputClass } from "@/components/ui";
@@ -23,8 +22,8 @@ export default async function ThreadPage({ searchParams }: { searchParams: Promi
     <div className="space-y-6">
       <AutoRefresh everyMs={10_000} />
       <MarkRead from={from} upTo={texts[texts.length - 1].receivedAt.toISOString()} hasUnread={texts.some((m) => !m.readAt)} />
-      <Link href="/messages" className="text-sm text-stone-500 hover:text-stone-900">← Messages</Link>
       <PageHeader
+        back={{ href: "/messages", label: "All messages" }}
         title={`Texts from ${name ?? formatPhone(from)}`}
         description={[name && formatPhone(from), `${texts.length} text${texts.length === 1 ? "" : "s"}`, `${formatCents(billed)} billed`].filter(Boolean).join(" · ")}
         action={

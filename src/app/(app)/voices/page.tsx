@@ -92,14 +92,15 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
           ) : (
             <ul className="grid gap-2 sm:grid-cols-2">
               {stock.map((v) => (
-                <li key={v.ref} className="flex items-center justify-between gap-2 rounded-lg border border-stone-100 px-3 py-2 text-sm">
-                  <span className="flex min-w-0 items-center gap-1">
-                    <PreviewButton voice={`stock:${v.ref}`} compact />
-                    <span className="truncate font-medium">{v.name}</span>
-                  </span>
-                  <span className="flex shrink-0 gap-1.5">
-                    {v.speaks.includes("zh") ? <Badge tone="green">Mandarin + English</Badge> : <Badge>English only</Badge>}
-                    {v.gender && <Badge>{v.gender}</Badge>}
+                // Name on its own line, badges under it: side by side, the badges squeezed long names to a letter or two.
+                <li key={v.ref} className="flex items-start gap-1 rounded-lg border border-stone-100 px-3 py-2 text-sm">
+                  <PreviewButton voice={`stock:${v.ref}`} compact />
+                  <span className="min-w-0 space-y-1">
+                    <span className="block font-medium">{v.name}</span>
+                    <span className="flex flex-wrap gap-1.5">
+                      {v.speaks.includes("zh") ? <Badge tone="green">Mandarin + English</Badge> : <Badge>English only</Badge>}
+                      {v.gender && <Badge>{v.gender}</Badge>}
+                    </span>
                   </span>
                 </li>
               ))}
@@ -114,10 +115,11 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
         <Tabs tabs={[{ href: "/voices", label: "Clone from a sample", active: true }]} />
         <div className="space-y-4 pt-4">
           <p className="text-sm text-stone-500">Record or upload someone speaking, and get a voice that sounds like them.</p>
-          {!cloning && elevenLabs && (
+          {/* Once ElevenLabs is connected the Easy Voice option simply isn't offered; no notice needed. */}
+          {!cloning && canAddService && (
             <Notice>
-              {CLONING_UNAVAILABLE}
-              {!elKey && " You can still clone with your own ElevenLabs account: use “Add a service” below."}
+              Cloning with Easy Voice is temporarily unavailable. You can still clone with your own ElevenLabs account: use
+              “Add a service” below.
             </Notice>
           )}
           {providers.length === 0 && !canAddService ? (
