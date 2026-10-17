@@ -2,19 +2,12 @@ import "server-only";
 import { and, eq, gt, inArray, ne } from "drizzle-orm";
 import { db, type Queryable } from "@/db";
 import { calls, type Call } from "@/db/schema";
-import { storedColumns, type StoredText } from "@/lib/stored-text";
 
 const STALE_CALL_MS = 4 * 60 * 60 * 1000;
 
 /** Columns for a call that ended without a billable conversation. */
 export function failedCallFields(endedAt: Date) {
   return { endedAt, durationSec: 0, billedCents: 0, resultsFetched: true } satisfies Partial<Call>;
-}
-
-/** The outcome columns: English text plus the message it came from. */
-export function outcomeColumns(outcome: StoredText) {
-  const o = storedColumns(outcome);
-  return { outcome: o.text, outcomeMsg: o.msg } satisfies Partial<Call>;
 }
 
 /** Whether the user already has a call in flight (we allow one at a time). */

@@ -1,6 +1,5 @@
 import type { Locale } from "@/i18n/locales";
-import { MESSAGES, type Messages } from "@/i18n/messages";
-import { createTranslator } from "next-intl";
+import { translator, type Messages } from "@/i18n/messages";
 import type { ErrorKey, ErrorValues, UserError } from "./errors";
 
 /**
@@ -29,6 +28,18 @@ export function storedColumns(text: StoredText): { text: string; msg: StoredMess
   return typeof text === "string" ? { text, msg: null } : { text: render("en", text) ?? text.key, msg: text };
 }
 
+/** The failure columns (agents, voices, numbers, payments): English text plus the message. */
+export function failureColumns(reason: StoredText) {
+  const r = storedColumns(reason);
+  return { failureReason: r.text, failureMsg: r.msg };
+}
+
+/** A call's outcome columns: English text plus the message. */
+export function outcomeColumns(outcome: StoredText) {
+  const o = storedColumns(outcome);
+  return { outcome: o.text, outcomeMsg: o.msg };
+}
+
 /** What to show for a stored text: the message in `locale` when there is one, else the stored English. */
 export function showStored(locale: Locale, text: string, msg: StoredMessage | null | undefined): string;
 export function showStored(locale: Locale, text: string | null, msg: StoredMessage | null | undefined): string | null;
@@ -37,8 +48,10 @@ export function showStored(locale: Locale, text: string | null, msg: StoredMessa
 }
 
 function render(locale: Locale, msg: StoredMessage): string | null {
-  const t = createTranslator({ locale, messages: MESSAGES[locale] });
+  const [namespace, key] = msg.key.split(".") as ["stored" | "errors", string];
+  // Keys come from the database, so they're checked at runtime rather than by the compiler.
+  const t = translator(locale, namespace) as unknown as { (key: string, values: ErrorValues): string; has(key: string): boolean };
   // A key renamed or removed since the row was written falls back to the stored English.
-  if (!t.has(msg.key)) return null;
-  return t(msg.key, msg.values ?? {});
+  if (!t.has(key)) return null;
+  return t(key, msg.values ?? {});
 }

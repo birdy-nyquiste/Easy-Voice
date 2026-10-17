@@ -3,14 +3,14 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { db, withUserLock } from "@/db";
 import { agents, calls, phoneNumbers, type Call, type User } from "@/db/schema";
 import { UserError } from "@/lib/errors";
-import { stored } from "@/lib/stored-text";
+import { outcomeColumns, stored } from "@/lib/stored-text";
 import { toE164US } from "@/lib/format";
 import { hasSpendableBalance } from "@/server/billing/ledger";
 import { MAX_CALL_GOAL_LENGTH } from "@/server/agents";
 import { elevenLabsKeyUsable } from "@/server/elevenlabs-keys";
 import { voiceProvider } from "@/server/telnyx";
 import { isElevenLabsVoice } from "@/server/telnyx/stock-voices";
-import { callRef, failedCallFields, hasOtherActiveCall, outcomeColumns } from "./state";
+import { callRef, failedCallFields, hasOtherActiveCall } from "./state";
 import { fetchCallResults } from "./results";
 
 export async function listUserCalls(userId: string, limit = 50) {

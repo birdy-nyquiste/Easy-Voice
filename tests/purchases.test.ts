@@ -2,9 +2,9 @@ import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
 import { ledgerEntries, payments, phoneNumbers, users } from "@/db/schema";
-import { showStored } from "@/lib/stored-text";
+import { showStored, stored } from "@/lib/stored-text";
 import { UserError } from "@/lib/errors";
-import { addDevCredit, completePayment, createTopup } from "@/server/billing/payments";
+import { addDevCredit, completePayment, createTopup, failPayment } from "@/server/billing/payments";
 import { chargeNumberRenewals, purchaseNumber } from "@/server/numbers";
 import { mockProvider } from "@/server/telnyx/mock";
 import { makeUser, resetDb } from "./helpers";
@@ -97,5 +97,16 @@ describe("payments", () => {
     await completePayment("cs_1");
     await completePayment("cs_1");
     expect(await balance(u.id)).toBe(2500);
+  });
+});
+
+describe("failed payments", () => {
+  it("records why, in English and in the viewer's language", async () => {
+    const u = await makeUser(0);
+    await db.insert(payments).values({ userId: u.id, provider: "stripe", providerRef: "cs_expired", amountCents: 2500 });
+    await failPayment("cs_expired", stored("checkoutExpired"));
+    const [p] = await db.select().from(payments).where(eq(payments.providerRef, "cs_expired"));
+    expect(p).toMatchObject({ status: "failed", failureReason: "Checkout expired" });
+    expect(showStored("zh", p.failureReason!, p.failureMsg)).toBe("付款已过期");
   });
 });

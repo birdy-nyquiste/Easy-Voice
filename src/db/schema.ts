@@ -65,6 +65,7 @@ export const payments = pgTable("payments", {
   amountCents: integer("amount_cents").notNull(),
   status: paymentStatus("status").notNull().default("pending"),
   failureReason: text("failure_reason"),
+  failureMsg: jsonb("failure_msg").$type<StoredMessage>(),
   createdAt: createdAt(),
   completedAt: ts("completed_at"),
 });

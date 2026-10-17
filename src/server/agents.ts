@@ -6,7 +6,7 @@ import { db, withUserLock } from "@/db";
 import { agents, elevenLabsKeys, phoneNumbers, voices, type Agent } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError, type ErrorKey } from "@/lib/errors";
-import { stored, storedColumns, storedFromError } from "@/lib/stored-text";
+import { failureColumns, stored, storedFromError } from "@/lib/stored-text";
 import { LANGUAGES, type Language } from "@/lib/language";
 import { FeatureNotPermittedError, voiceProvider, type AssistantSpec } from "./telnyx";
 import { isElevenLabsVoice, voiceSpeaks } from "./telnyx/stock-voices";
@@ -178,7 +178,7 @@ export async function syncAgent(a: Agent): Promise<Agent> {
     return u;
   } catch (err) {
     console.error("syncAgent failed", a.id, err);
-    const reason = storedColumns(
+    const reason = failureColumns(
       err instanceof FeatureNotPermittedError && err.feature === "cloned_voices"
         ? storedFromError(new UserError("cloningUnavailablePickBuiltIn"))
         : err instanceof UserError
@@ -187,7 +187,7 @@ export async function syncAgent(a: Agent): Promise<Agent> {
     );
     const [u] = await db
       .update(agents)
-      .set({ status: "failed", failureReason: reason.text, failureMsg: reason.msg })
+      .set({ status: "failed", ...reason })
       .where(eq(agents.id, a.id))
       .returning();
     return u;

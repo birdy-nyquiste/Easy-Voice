@@ -6,7 +6,7 @@ import { db } from "@/db";
 import { ledgerEntries, payments, type User } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
-import { stored } from "@/lib/stored-text";
+import { failureColumns, stored, type StoredText } from "@/lib/stored-text";
 import { formatCents } from "@/lib/format";
 import { withWebhookDedupe } from "@/server/webhooks";
 import { applyLedger } from "./ledger";
@@ -88,10 +88,10 @@ export async function completePayment(providerRef: string): Promise<void> {
   });
 }
 
-export async function failPayment(providerRef: string, reason: string): Promise<void> {
+export async function failPayment(providerRef: string, reason: StoredText): Promise<void> {
   await db
     .update(payments)
-    .set({ status: "failed", failureReason: reason, completedAt: new Date() })
+    .set({ status: "failed", ...failureColumns(reason), completedAt: new Date() })
     .where(and(eq(payments.providerRef, providerRef), eq(payments.status, "pending")));
 }
 
@@ -107,10 +107,10 @@ export async function handleStripeWebhook(rawBody: string, signature: string | n
         break;
       }
       case "checkout.session.async_payment_failed":
-        await failPayment(event.data.object.id, "Payment failed");
+        await failPayment(event.data.object.id, stored("paymentFailed"));
         break;
       case "checkout.session.expired":
-        await failPayment(event.data.object.id, "Checkout expired");
+        await failPayment(event.data.object.id, stored("checkoutExpired"));
         break;
     }
   });

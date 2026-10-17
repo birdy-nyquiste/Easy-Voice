@@ -6,7 +6,17 @@ import type { Locale } from "./locales";
 export type Messages = typeof en;
 export const MESSAGES: Record<Locale, Messages> = { en, zh };
 
-/** A translator for code that runs outside a request render (errors, emails). */
-export function translator<N extends keyof Messages>(locale: Locale, namespace: N) {
+function create<N extends keyof Messages>(locale: Locale, namespace: N) {
   return createTranslator({ locale, messages: MESSAGES[locale], namespace });
+}
+
+// Translators are reused: errors and stored text are rendered once per row on list pages.
+const cache = new Map<string, unknown>();
+
+/** A translator for code that runs outside a request render (errors, emails, stored text). */
+export function translator<N extends keyof Messages>(locale: Locale, namespace: N): ReturnType<typeof create<N>> {
+  const key = `${locale}:${namespace}`;
+  let t = cache.get(key) as ReturnType<typeof create<N>> | undefined;
+  if (!t) cache.set(key, (t = create(locale, namespace)));
+  return t;
 }

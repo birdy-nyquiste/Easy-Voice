@@ -85,6 +85,13 @@
       "when": 1792254126531,
       "tag": "0011_stored_text_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792254793680,
+      "tag": "0012_payment_failure_msg",
+      "breakpoints": true
     }
   ]
 }

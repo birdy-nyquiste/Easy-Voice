@@ -372,7 +372,13 @@
     "numberCouldNotOrder": "The number could not be ordered (it may no longer be available).",
     "numberReleasedByUser": "Released by user",
     "numberReleasedNegative": "Released: balance stayed negative past the grace period",
-    "agentSaveFailed": "Couldn't save the agent. Try saving again."
+    "agentSaveFailed": "Couldn't save the agent. Try saving again.",
+    "numberOrderStatus": "Order {status}",
+    "voiceExpired": "This voice has expired.",
+    "voiceUnavailable": "This voice is no longer available.",
+    "voiceSampleTooShort": "Audio sample too short.",
+    "paymentFailed": "Payment failed",
+    "checkoutExpired": "Checkout expired"
   },
   "errors": {
     "generic": "Something went wrong. Please try again.",

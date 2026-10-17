@@ -1,4 +1,5 @@
 import type { Language } from "@/lib/language";
+import type { StoredText } from "@/lib/stored-text";
 
 /**
  * Provider-neutral voice platform interface. Business code depends on this,
@@ -19,7 +20,7 @@ export interface NumberOrderResult {
   orderId: string;
   status: OrderStatus;
   numberId?: string;
-  failureReason?: string;
+  failureReason?: StoredText;
 }
 
 export interface StockVoice {
@@ -63,7 +64,7 @@ export interface ClonedVoiceResult {
   /** Value used as the assistant voice. */
   ref: string;
   status: "processing" | "ready" | "failed";
-  failureReason?: string;
+  failureReason?: StoredText;
 }
 
 export interface AssistantSpec {

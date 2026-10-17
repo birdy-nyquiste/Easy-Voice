@@ -105,7 +105,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
               <li key={x.id} className="flex items-center justify-between py-2">
                 <span>{formatDateTime(x.createdAt, locale)} · {formatCents(x.amountCents)}</span>
                 <span className="flex items-center gap-2">
-                  {x.failureReason && <span className="text-stone-500">{x.failureReason}</span>}
+                  {x.failureReason && <span className="text-stone-500">{showStored(locale, x.failureReason, x.failureMsg)}</span>}
                   <StatusBadge status={x.status} />
                 </span>
               </li>

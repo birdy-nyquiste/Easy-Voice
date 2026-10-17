@@ -2,7 +2,7 @@ import "server-only";
 import { and, eq } from "drizzle-orm";
 import { db, withUserLock, type Queryable } from "@/db";
 import { agents, calls, phoneNumbers, users, type Agent, type Call } from "@/db/schema";
-import { stored, type StoredMessage } from "@/lib/stored-text";
+import { outcomeColumns, stored, type StoredMessage } from "@/lib/stored-text";
 import { applyLedger, callChargeCents, hasSpendableBalance } from "@/server/billing/ledger";
 import { voiceProvider, type AssistantStart, type CallEvent } from "@/server/telnyx";
 import { OUTBOUND_GREETING } from "@/server/agents";
@@ -10,7 +10,7 @@ import { elevenLabsKeyUsable } from "@/server/elevenlabs-keys";
 import { isElevenLabsVoice } from "@/server/telnyx/stock-voices";
 import { withWebhookDedupe } from "@/server/webhooks";
 import { fetchCallResultsSoon } from "./results";
-import { failedCallFields, hasOtherActiveCall, outcomeColumns } from "./state";
+import { failedCallFields, hasOtherActiveCall } from "./state";
 
 /**
  * Process one provider call event. Safe to call repeatedly with the same

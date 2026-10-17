@@ -4,7 +4,7 @@ import { db, withUserLock, type Tx } from "@/db";
 import { agents, voices, type Voice } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
-import { stored, storedColumns, storedFromError, type StoredText } from "@/lib/stored-text";
+import { failureColumns, stored, storedFromError, type StoredText } from "@/lib/stored-text";
 import { formatCents, formatMegabytes } from "@/lib/format";
 import { chargePurchase, refundPurchase, type Purchase } from "./billing/ledger";
 import { elevenLabs } from "./elevenlabs";
@@ -200,10 +200,9 @@ function clonePurchase(v: Pick<Voice, "id" | "userId" | "name">): Purchase {
 
 async function failVoice(v: Voice, reason: StoredText): Promise<Voice> {
   if (v.provider === "telnyx") await refundPurchase(clonePurchase(v), stored("ledgerVoiceCloneRefund", { name: v.name }));
-  const r = storedColumns(reason);
   const [u] = await db
     .update(voices)
-    .set({ status: "failed", failureReason: r.text, failureMsg: r.msg })
+    .set({ status: "failed", ...failureColumns(reason) })
     .where(eq(voices.id, v.id))
     .returning();
   return u;

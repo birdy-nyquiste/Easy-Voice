@@ -4,7 +4,7 @@ import { db, withUserLock } from "@/db";
 import { agents, phoneNumbers, type PhoneNumber, type User } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
-import { stored, storedColumns, type StoredText } from "@/lib/stored-text";
+import { failureColumns, stored, type StoredText } from "@/lib/stored-text";
 import { formatCents } from "@/lib/format";
 import { applyLedger, chargePurchase, refundPurchase, type Purchase } from "./billing/ledger";
 import { enableInboundSms } from "./messages";
@@ -88,10 +88,9 @@ async function activateNumber(n: PhoneNumber, numberId?: string): Promise<PhoneN
 
 async function failNumber(n: PhoneNumber, reason: StoredText): Promise<PhoneNumber> {
   await refundPurchase(numberPurchase(n), stored("ledgerNumberRefund", { number: n.e164 }));
-  const r = storedColumns(reason);
   const [u] = await db
     .update(phoneNumbers)
-    .set({ status: "failed", failureReason: r.text, failureMsg: r.msg })
+    .set({ status: "failed", ...failureColumns(reason) })
     .where(eq(phoneNumbers.id, n.id))
     .returning();
   return u;
@@ -128,7 +127,8 @@ export async function releaseNumber(userId: string, numberId: string, reason: St
       status: "released",
       agentId: null,
       releasedAt: new Date(),
-      ...(n.status === "failed" ? {} : { failureReason: storedColumns(reason).text, failureMsg: storedColumns(reason).msg }),
+      // A failed number keeps the reason it failed.
+      ...(n.status === "failed" ? {} : failureColumns(reason)),
     })
     .where(eq(phoneNumbers.id, n.id));
 }

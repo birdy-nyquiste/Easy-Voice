@@ -372,7 +372,13 @@
     "numberCouldNotOrder": "无法订购该号码（可能已不再可用）。",
     "numberReleasedByUser": "用户已释放",
     "numberReleasedNegative": "已释放：余额为负超过宽限期",
-    "agentSaveFailed": "无法保存助理，请重新保存。"
+    "agentSaveFailed": "无法保存助理，请重新保存。",
+    "numberOrderStatus": "订单状态：{status}",
+    "voiceExpired": "该声音已过期。",
+    "voiceUnavailable": "该声音已不再可用。",
+    "voiceSampleTooShort": "音频样本太短。",
+    "paymentFailed": "付款失败",
+    "checkoutExpired": "付款已过期"
   },
   "errors": {
     "generic": "出了点问题，请重试。",
