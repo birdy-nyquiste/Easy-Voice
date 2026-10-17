@@ -209,7 +209,13 @@ No OEM agreement is needed. There is no OAuth (**UNCONFIRMED**), so users paste 
 - **Disconnecting:** removes the key, the secret and the ElevenLabs voices here (not in ElevenLabs). It is refused
   while an agent uses one of them.
 - **Calls:** billed at the normal per-minute rate.
-- **Not built:** a check of key health before calls.
+- **Key health:** before an outbound call, and before answering an inbound call, agents with an ElevenLabs voice
+  check the key with `GET /v1/user`, at most every 5 minutes (`key_checked_at`). Only a 401 blocks calls: it sets
+  `key_invalid_at`, outbound calls are refused and inbound calls declined, and warnings show on Account → API keys
+  and on the agent. Network errors don't block calls. Rejections during cloning or previews set the flag too. A
+  successful check or replacing the key clears it.
+- **Not handled:** running out of ElevenLabs credits isn't a 401 (`GET /v1/user` still succeeds), so it still only
+  shows up mid-call.
 
 ## 9. Recommendation and open questions
 

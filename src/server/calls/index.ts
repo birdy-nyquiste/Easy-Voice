@@ -6,7 +6,9 @@ import { UserError } from "@/lib/errors";
 import { toE164US } from "@/lib/format";
 import { hasSpendableBalance } from "@/server/billing/ledger";
 import { MAX_CALL_GOAL_LENGTH } from "@/server/agents";
+import { ELEVENLABS_KEY_REJECTED, elevenLabsKeyUsable } from "@/server/elevenlabs-keys";
 import { voiceProvider } from "@/server/telnyx";
+import { isElevenLabsVoice } from "@/server/telnyx/stock-voices";
 import { callRef, failedCallFields, hasOtherActiveCall } from "./state";
 import { fetchCallResults } from "./results";
 
@@ -44,6 +46,9 @@ export async function startOutboundCall(user: User, input: { agentId: string; to
     .where(and(eq(agents.id, input.agentId), eq(agents.userId, user.id), isNull(agents.deletedAt)));
   if (!agent) throw new UserError("Agent not found.");
   if (agent.status !== "ready") throw new UserError("This agent isn't ready. Open it and save again.");
+  if (isElevenLabsVoice(agent.voiceRef) && !(await elevenLabsKeyUsable(user.id))) {
+    throw new UserError(`This agent's voice can't speak. ${ELEVENLABS_KEY_REJECTED}`);
+  }
 
   const [from] = await db
     .select()

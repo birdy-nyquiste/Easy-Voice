@@ -1,8 +1,10 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
-import { agents, elevenLabsKeys, ledgerEntries, users, voices } from "@/db/schema";
+import { agents, calls, elevenLabsKeys, ledgerEntries, users, voices } from "@/db/schema";
 import { createAgent, updateAgent } from "@/server/agents";
+import { startOutboundCall } from "@/server/calls";
+import { handleCallEvent } from "@/server/calls/events";
 import { connectElevenLabs, disconnectElevenLabs } from "@/server/elevenlabs-keys";
 import { liveElevenLabs } from "@/server/elevenlabs/live";
 import { mockElevenLabs } from "@/server/elevenlabs/mock";
@@ -10,7 +12,7 @@ import { ElevenLabsError } from "@/server/elevenlabs/types";
 import { decryptSecret, encryptSecret } from "@/server/secrets";
 import { mockProvider } from "@/server/telnyx/mock";
 import { cloneVoice, deleteVoice, voicePreview } from "@/server/voices";
-import { makeUser, resetDb } from "./helpers";
+import { event, makeLine, makeUser, resetDb } from "./helpers";
 
 beforeEach(resetDb);
 afterEach(() => {
@@ -243,5 +245,92 @@ describe("ElevenLabs REST adapter", () => {
     expect(JSON.parse(String(form.get("labels")))).toEqual({ language: "zh", gender: "male" });
 
     await expect(liveElevenLabs.deleteVoice("sk_1", "v123")).resolves.toBeUndefined();
+  });
+});
+
+describe("key health before calls", () => {
+  async function elevenLabsLine() {
+    const line = await makeLine(1000);
+    await connectElevenLabs(line.user.id, KEY);
+    await db.update(agents).set({ voiceRef: "ElevenLabs.eleven_flash_v2_5.v1" }).where(eq(agents.id, line.agent.id));
+    // Make the connect-time check stale so the next call asks ElevenLabs again.
+    await db.update(elevenLabsKeys).set({ keyCheckedAt: new Date(Date.now() - 10 * 60 * 1000) });
+    return line;
+  }
+  const rejected = () => new ElevenLabsError(401, "invalid_api_key", "Invalid API key");
+  const keyRow = async () => (await db.select().from(elevenLabsKeys))[0];
+
+  beforeEach(() => {
+    vi.spyOn(mockProvider, "dial").mockResolvedValue({ callControlId: "cc-out" });
+    vi.spyOn(mockProvider, "answer").mockResolvedValue();
+    vi.spyOn(mockProvider, "reject").mockResolvedValue();
+  });
+
+  it("refuses an outbound call when ElevenLabs rejects the key, and flags the key", async () => {
+    const { user, agent } = await elevenLabsLine();
+    vi.spyOn(mockElevenLabs, "checkKey").mockRejectedValue(rejected());
+    await expect(startOutboundCall(user, { agentId: agent.id, to: "2025550188" })).rejects.toThrow(/ElevenLabs rejected your API key/);
+    expect(mockProvider.dial).not.toHaveBeenCalled();
+    expect((await keyRow()).keyInvalidAt).not.toBeNull();
+  });
+
+  it("places the call when the key works, and trusts that answer for a few minutes", async () => {
+    const { user, agent } = await elevenLabsLine();
+    const check = vi.spyOn(mockElevenLabs, "checkKey");
+    await startOutboundCall(user, { agentId: agent.id, to: "2025550188" });
+    expect(mockProvider.dial).toHaveBeenCalledTimes(1);
+    await db.delete(calls); // let a second call through the busy check
+    await startOutboundCall(user, { agentId: agent.id, to: "2025550188" });
+    expect(check).toHaveBeenCalledTimes(1);
+    expect((await keyRow()).keyInvalidAt).toBeNull();
+  });
+
+  it("doesn't block calls when ElevenLabs can't be reached", async () => {
+    const { user, agent } = await elevenLabsLine();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(mockElevenLabs, "checkKey").mockRejectedValue(new TypeError("fetch failed"));
+    await startOutboundCall(user, { agentId: agent.id, to: "2025550188" });
+    expect(mockProvider.dial).toHaveBeenCalled();
+  });
+
+  it("declines an inbound call with a clear outcome when the key is rejected", async () => {
+    const { number } = await elevenLabsLine();
+    vi.spyOn(mockElevenLabs, "checkKey").mockRejectedValue(rejected());
+    await handleCallEvent(event("call.initiated", { callControlId: "cc-in", direction: "inbound", from: "+12025550123", to: number.e164 }));
+    expect(mockProvider.reject).toHaveBeenCalledWith("cc-in", "CALL_REJECTED");
+    expect(mockProvider.answer).not.toHaveBeenCalled();
+    const [c] = await db.select().from(calls);
+    expect(c).toMatchObject({ status: "rejected", outcome: expect.stringMatching(/ElevenLabs rejected your API key/) });
+  });
+
+  it("doesn't check agents with other voices", async () => {
+    const { user, agent } = await makeLine(1000);
+    await connectElevenLabs(user.id, KEY);
+    const check = vi.spyOn(mockElevenLabs, "checkKey");
+    await startOutboundCall(user, { agentId: agent.id, to: "2025550188" });
+    expect(check).not.toHaveBeenCalled();
+  });
+
+  it("clears the flag when the key works again, or when it's replaced", async () => {
+    const { user, agent } = await elevenLabsLine();
+    vi.spyOn(mockElevenLabs, "checkKey").mockRejectedValueOnce(rejected());
+    await expect(startOutboundCall(user, { agentId: agent.id, to: "2025550188" })).rejects.toThrow();
+    expect((await keyRow()).keyInvalidAt).not.toBeNull();
+
+    await connectElevenLabs(user.id, "sk_acct_alice_2222");
+    expect((await keyRow()).keyInvalidAt).toBeNull();
+
+    await db.update(elevenLabsKeys).set({ keyInvalidAt: new Date(), keyCheckedAt: new Date(0) });
+    await startOutboundCall(user, { agentId: agent.id, to: "2025550188" });
+    expect((await keyRow()).keyInvalidAt).toBeNull();
+  });
+
+  it("flags the key when ElevenLabs rejects it during a clone", async () => {
+    const u = await makeUser();
+    await connectElevenLabs(u.id, KEY);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(mockElevenLabs, "cloneVoice").mockRejectedValue(rejected());
+    await elevenLabsClone(u.id);
+    expect((await keyRow()).keyInvalidAt).not.toBeNull();
   });
 });

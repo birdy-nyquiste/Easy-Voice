@@ -51,6 +51,10 @@ export const liveElevenLabs: ElevenLabsClient = {
     return { accountId: user.user_id, tier: sub.tier ?? "unknown", canClone: sub.can_use_instant_voice_cloning !== false };
   },
 
+  async checkKey(apiKey) {
+    await request(apiKey, "GET", "/v1/user");
+  },
+
   async cloneVoice(apiKey, { name, language, gender, audio }) {
     const form = new FormData();
     form.set("name", name);

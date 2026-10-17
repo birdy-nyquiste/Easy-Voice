@@ -38,6 +38,11 @@ export function toStockVoices(catalog: CatalogVoice[]): StockVoice[] {
     .sort((a, b) => b.speaks.length - a.speaks.length || a.name.localeCompare(b.name));
 }
 
+/** Voices on a user's own ElevenLabs account; Telnyx needs their key (api_key_ref) to speak with them. */
+export function isElevenLabsVoice(ref: string): boolean {
+  return ref.startsWith("ElevenLabs.");
+}
+
 /** Languages a voice can pronounce, from its "Provider.Model.id" ref. ElevenLabs Flash/Multilingual speak both. */
 export function voiceSpeaks(ref: string): Language[] {
   return ref.startsWith("Telnyx.KokoroTTS.") ? ["en"] : ["zh", "en"];

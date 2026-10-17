@@ -27,6 +27,10 @@ export const mockElevenLabs: ElevenLabsClient = {
     return { accountId: acct, tier: free ? "free" : "starter", canClone: !free };
   },
 
+  async checkKey(apiKey) {
+    check(apiKey);
+  },
+
   async cloneVoice(apiKey, { audio }) {
     check(apiKey);
     if (audio.size < 1000) throw new ElevenLabsError(400, "invalid_audio", "The audio sample is too short.");

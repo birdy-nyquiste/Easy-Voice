@@ -12,6 +12,8 @@ export interface ElevenLabsClient {
   readonly maxCloneSampleBytes: number;
   /** Throws ElevenLabsError (status 401) when the key is invalid or lacks a permission we need. */
   getAccount(apiKey: string): Promise<ElevenLabsAccount>;
+  /** One cheap request that throws ElevenLabsError (status 401) if the key no longer works. */
+  checkKey(apiKey: string): Promise<void>;
   /** Instant Voice Cloning; the voice is usable as soon as this returns. */
   cloneVoice(
     apiKey: string,

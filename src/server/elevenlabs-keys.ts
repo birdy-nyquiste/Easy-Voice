@@ -1,6 +1,6 @@
 import "server-only";
 import { randomBytes } from "node:crypto";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { agents, elevenLabsKeys, voices, type ElevenLabsKey } from "@/db/schema";
 import { config } from "@/lib/config";
@@ -17,6 +17,13 @@ import { voiceProvider } from "./telnyx";
  */
 
 export const ELEVENLABS_UNAVAILABLE = "Connecting ElevenLabs is temporarily unavailable.";
+
+/** Shown wherever a rejected key stops something from working. */
+export const ELEVENLABS_KEY_REJECTED =
+  "ElevenLabs rejected your API key (revoked, expired or missing permissions). Replace it under Account → API keys.";
+
+/** How long a key check is trusted before calls check again. */
+const KEY_CHECK_TTL_MS = 5 * 60 * 1000;
 
 export async function getElevenLabsKey(userId: string): Promise<ElevenLabsKey | null> {
   const [row] = await db.select().from(elevenLabsKeys).where(eq(elevenLabsKeys.userId, userId));
@@ -76,6 +83,8 @@ export async function connectElevenLabs(userId: string, rawKey: string): Promise
   const secret = await voiceProvider().createIntegrationSecret(telnyxSecretRef, apiKey);
   const values = {
     keyEncrypted: encryptSecret(apiKey),
+    keyCheckedAt: new Date(),
+    keyInvalidAt: null,
     keyHint: apiKey.slice(-4),
     accountId: account.accountId,
     telnyxSecretId: secret.id,
@@ -114,6 +123,43 @@ export async function disconnectElevenLabs(userId: string): Promise<void> {
     await tx.delete(elevenLabsKeys).where(eq(elevenLabsKeys.userId, userId));
   });
   await deleteTelnyxSecret(existing.telnyxSecretId);
+}
+
+/** Whether ElevenLabs rejected the key (status 401): revoked, expired, or missing a permission. */
+export function isKeyRejection(err: unknown): boolean {
+  return err instanceof ElevenLabsError && err.status === 401;
+}
+
+/** Record what ElevenLabs said about the key, whenever we learn it (checks, clones, previews). */
+export async function recordKeyStatus(userId: string, rejected: boolean): Promise<void> {
+  const now = new Date();
+  await db
+    .update(elevenLabsKeys)
+    .set(rejected ? { keyCheckedAt: now, keyInvalidAt: sql`coalesce(${elevenLabsKeys.keyInvalidAt}, ${now.toISOString()}::timestamptz)` } : { keyCheckedAt: now, keyInvalidAt: null })
+    .where(eq(elevenLabsKeys.userId, userId));
+}
+
+/**
+ * Whether calls with the user's ElevenLabs voices can go ahead. Asks ElevenLabs at most every few
+ * minutes; only a definite rejection blocks calls (network trouble or ElevenLabs outages don't).
+ * A key that recovers (e.g. permissions restored) is picked up on the next check.
+ */
+export async function elevenLabsKeyUsable(userId: string): Promise<boolean> {
+  const row = await getElevenLabsKey(userId);
+  if (!row) return false;
+  if (row.keyCheckedAt && Date.now() - row.keyCheckedAt.getTime() < KEY_CHECK_TTL_MS) return !row.keyInvalidAt;
+  try {
+    await elevenLabs().checkKey(decryptSecret(row.keyEncrypted));
+    await recordKeyStatus(userId, false);
+    return true;
+  } catch (err) {
+    if (isKeyRejection(err)) {
+      await recordKeyStatus(userId, true);
+      return false;
+    }
+    console.error("ElevenLabs key check failed; allowing the call", userId, err);
+    return !row.keyInvalidAt;
+  }
 }
 
 async function agentsUsingElevenLabs(userId: string) {

@@ -5,6 +5,8 @@ import { agents, calls, phoneNumbers, users, type Agent, type Call } from "@/db/
 import { applyLedger, callChargeCents, hasSpendableBalance } from "@/server/billing/ledger";
 import { voiceProvider, type AssistantStart, type CallEvent } from "@/server/telnyx";
 import { OUTBOUND_GREETING } from "@/server/agents";
+import { elevenLabsKeyUsable } from "@/server/elevenlabs-keys";
+import { isElevenLabsVoice } from "@/server/telnyx/stock-voices";
 import { withWebhookDedupe } from "@/server/webhooks";
 import { fetchCallResultsSoon } from "./results";
 import { failedCallFields, hasOtherActiveCall } from "./state";
@@ -87,6 +89,9 @@ async function onInitiated(e: CallEvent) {
     return;
   }
 
+  // Checked before taking the lock: it may ask ElevenLabs, and the lock holds a transaction open.
+  const voiceUsable = await agentVoiceUsable(num.userId, num.agentId);
+
   // Admission runs under the user's lock so two simultaneous calls can't both pass the busy check.
   const decision = await withUserLock(num.userId, async (tx): Promise<InboundDecision | null> => {
     const [created] = await tx
@@ -112,7 +117,7 @@ async function onInitiated(e: CallEvent) {
       const [agent] = existing.agentId ? await tx.select().from(agents).where(eq(agents.id, existing.agentId)) : [];
       return agent?.providerAssistantId ? { action: "answer", call: existing, agent } : null;
     }
-    const check = await checkInbound(tx, created, num.agentId);
+    const check = await checkInbound(tx, created, num.agentId, voiceUsable);
     if ("outcome" in check) {
       await tx.update(calls).set({ status: "rejected", outcome: check.outcome }).where(eq(calls.id, created.id));
       return { action: "reject", call: created, cause: check.cause };
@@ -129,10 +134,18 @@ async function onInitiated(e: CallEvent) {
   }
 }
 
+/** False when the agent speaks with the user's own ElevenLabs voice and ElevenLabs rejects their key. */
+async function agentVoiceUsable(userId: string, agentId: string | null): Promise<boolean> {
+  if (!agentId) return true;
+  const [agent] = await db.select({ voiceRef: agents.voiceRef }).from(agents).where(eq(agents.id, agentId));
+  return !agent || !isElevenLabsVoice(agent.voiceRef) || elevenLabsKeyUsable(userId);
+}
+
 async function checkInbound(
   q: Queryable,
   call: Call,
   agentId: string | null,
+  voiceUsable: boolean,
 ): Promise<{ agent: Agent } | { outcome: string; cause: "CALL_REJECTED" | "USER_BUSY" }> {
   const [user] = await q.select().from(users).where(eq(users.id, call.userId));
   if (!hasSpendableBalance(user.balanceCents)) {
@@ -142,6 +155,12 @@ async function checkInbound(
   const [agent] = await q.select().from(agents).where(eq(agents.id, agentId));
   if (!agent || agent.deletedAt || agent.status !== "ready" || !agent.providerAssistantId) {
     return { outcome: "Rejected: the assigned agent is not ready.", cause: "CALL_REJECTED" };
+  }
+  if (!voiceUsable) {
+    return {
+      outcome: "Rejected: ElevenLabs rejected your API key, so the agent's voice couldn't speak. Replace it under Account → API keys.",
+      cause: "CALL_REJECTED",
+    };
   }
   if (await hasOtherActiveCall(call.userId, call.id, q)) {
     return { outcome: "Rejected: another call was already in progress.", cause: "USER_BUSY" };

@@ -8,7 +8,7 @@ import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
 import { LANGUAGES, type Language } from "@/lib/language";
 import { FeatureNotPermittedError, voiceProvider, type AssistantSpec } from "./telnyx";
-import { voiceSpeaks } from "./telnyx/stock-voices";
+import { isElevenLabsVoice, voiceSpeaks } from "./telnyx/stock-voices";
 import { ASSISTANT_BODY_VERSION } from "./telnyx/version";
 import { CLONING_UNAVAILABLE, cloningAvailable } from "./voices";
 
@@ -103,7 +103,7 @@ export const ENGLISH_ONLY_VOICE_RULE =
 
 /** Voices on the user's own ElevenLabs account need their key (as a Telnyx integration secret) on the assistant. */
 async function voiceApiKeyRef(a: Pick<Agent, "userId" | "voiceRef">): Promise<string | undefined> {
-  if (!a.voiceRef.startsWith("ElevenLabs.")) return undefined;
+  if (!isElevenLabsVoice(a.voiceRef)) return undefined;
   const [k] = await db
     .select({ ref: elevenLabsKeys.telnyxSecretRef })
     .from(elevenLabsKeys)

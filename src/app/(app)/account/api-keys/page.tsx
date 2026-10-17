@@ -4,6 +4,7 @@ import { Badge, Card, CardTitle, Field, Notice, inputClass } from "@/components/
 import { config } from "@/lib/config";
 import { requireUser } from "@/server/auth";
 import { ELEVENLABS_UNAVAILABLE, getElevenLabsKey } from "@/server/elevenlabs-keys";
+import { formatDateTime } from "@/lib/format";
 import { connectElevenLabsAction, disconnectElevenLabsAction } from "./actions";
 
 /** Third-party accounts the user brings (docs/elevenlabs-notes.md §5). */
@@ -20,12 +21,19 @@ export default async function ApiKeysPage() {
       <Card>
         <div className="flex items-center justify-between gap-3">
           <CardTitle>ElevenLabs</CardTitle>
-          {elKey && <Badge tone="green">Connected</Badge>}
+          {elKey && (elKey.keyInvalidAt ? <Badge tone="red">Key rejected</Badge> : <Badge tone="green">Connected</Badge>)}
         </div>
         {!config.features.elevenLabs ? (
           <Notice>{ELEVENLABS_UNAVAILABLE}</Notice>
         ) : elKey ? (
           <div className="space-y-4">
+            {elKey.keyInvalidAt && (
+              <Notice tone="red">
+                ElevenLabs rejected this key on {formatDateTime(elKey.keyInvalidAt)}: it may have been revoked, expired or lost a
+                permission. Calls with your ElevenLabs voices are declined until you replace it below with a working key for the
+                same account.
+              </Notice>
+            )}
             <p className="text-sm text-stone-700">
               Key ending <span className="font-mono">{elKey.keyHint}</span>. Voices you clone with ElevenLabs live in your ElevenLabs
               account, and calls with them use your ElevenLabs credits.{" "}

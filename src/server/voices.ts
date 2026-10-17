@@ -7,7 +7,14 @@ import { UserError } from "@/lib/errors";
 import { formatCents, formatMegabytes } from "@/lib/format";
 import { chargePurchase, refundPurchase, type Purchase } from "./billing/ledger";
 import { elevenLabs } from "./elevenlabs";
-import { ELEVENLABS_UNAVAILABLE, elevenLabsUserError, getElevenLabsKey, requireElevenLabsApiKey } from "./elevenlabs-keys";
+import {
+  ELEVENLABS_UNAVAILABLE,
+  elevenLabsUserError,
+  getElevenLabsKey,
+  isKeyRejection,
+  recordKeyStatus,
+  requireElevenLabsApiKey,
+} from "./elevenlabs-keys";
 import { decryptSecret } from "./secrets";
 import type { Language } from "@/lib/language";
 import { voiceProvider, type PreviewAudio, type StockVoice } from "./telnyx";
@@ -52,7 +59,13 @@ export async function voicePreview(userId: string, voice: string): Promise<Previ
       const keyRow = await getElevenLabsKey(userId);
       if (!keyRow) return null;
       const apiKey = decryptSecret(keyRow.keyEncrypted);
-      load = () => elevenLabs().synthesize(apiKey, providerVoiceId, PREVIEW_TEXT.bilingual);
+      load = () =>
+        elevenLabs()
+          .synthesize(apiKey, providerVoiceId, PREVIEW_TEXT.bilingual)
+          .catch(async (err) => {
+            if (isKeyRejection(err)) await recordKeyStatus(userId, true);
+            throw err;
+          });
     } else {
       load = () => voiceProvider().getCloneSample(providerVoiceId);
     }
@@ -164,6 +177,7 @@ async function cloneWithElevenLabs(
     }
   } catch (err) {
     console.error("ElevenLabs cloneVoice failed", err);
+    if (isKeyRejection(err)) await recordKeyStatus(userId, true);
     const userErr = elevenLabsUserError(err, "clone this sample");
     return failVoice(row, userErr instanceof UserError ? userErr.message : "ElevenLabs couldn't clone the voice. Try again later.");
   }

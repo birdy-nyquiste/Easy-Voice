@@ -158,6 +158,10 @@ export const elevenLabsKeys = pgTable("elevenlabs_keys", {
   /** Telnyx integration secret holding the same key; agents reference `telnyxSecretRef` as voice api_key_ref. */
   telnyxSecretId: text("telnyx_secret_id").notNull(),
   telnyxSecretRef: text("telnyx_secret_ref").notNull(),
+  /** When ElevenLabs last answered whether the key works (see elevenLabsKeyUsable). */
+  keyCheckedAt: ts("key_checked_at"),
+  /** Set while ElevenLabs rejects the key (revoked, expired, missing permissions); calls with its voices are refused. */
+  keyInvalidAt: ts("key_invalid_at"),
   createdAt: createdAt(),
   updatedAt: ts("updated_at").notNull().defaultNow(),
 });
