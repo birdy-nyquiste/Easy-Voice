@@ -49,6 +49,14 @@ The LLM and speech-to-text models are set for the whole platform, never per user
 variables and deploy, existing agents are re-synced by the daily cron, or when their owner opens the Agents page.
 Edits made directly in the Telnyx portal are overwritten the next time the agent syncs.
 
+## ElevenLabs voices (bring your own key)
+
+Users connect their own ElevenLabs API key under **Account → API keys**, then pick ElevenLabs in **Voices → Clone a voice** to clone into their ElevenLabs account.
+Cloning is free on our side, and calls with those voices use their ElevenLabs credits. We keep the key encrypted
+(`SECRETS_KEY`) to clone, delete and preview voices. We also store it as a Telnyx integration secret, which the agent
+references as `voice_settings.api_key_ref`, so Telnyx can speak with the voice on calls. Set `SECRETS_KEY` in production,
+or the feature stays off. Details and open questions are in [docs/elevenlabs-notes.md](docs/elevenlabs-notes.md).
+
 ## Stripe
 
 Stripe only processes one-time top-up payments; there are no subscriptions. Number rental and usage are deducted from the balance. Set `STRIPE_SECRET_KEY`. Point a webhook at `/api/webhooks/stripe` for the `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed` and `checkout.session.expired` events, then set `STRIPE_WEBHOOK_SECRET`. Locally: `stripe listen --forward-to localhost:3000/api/webhooks/stripe`.

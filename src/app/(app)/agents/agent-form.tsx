@@ -44,9 +44,11 @@ export function AgentForm({
       : "";
   const bilingual = stock.filter((v) => v.speaks.includes("zh"));
   const englishOnly = stock.filter((v) => !v.speaks.includes("zh"));
-  // While cloning is off, keep only the clone this agent already uses (so the picker shows it).
+  // While a provider's cloning is off, keep only the clone this agent already uses (so the picker shows it).
   const readyClones = clones.filter(
-    (c) => c.status === "ready" && (config.features.voiceCloning || c.id === agent?.voiceId),
+    (c) =>
+      c.status === "ready" &&
+      ((c.provider === "elevenlabs" ? config.features.elevenLabs : config.features.voiceCloning) || c.id === agent?.voiceId),
   );
   const ttsByVoice = Object.fromEntries([
     ...stock.map((v) => [`stock:${v.ref}`, ttsModelName(v.ref)]),
@@ -76,7 +78,9 @@ export function AgentForm({
             {readyClones.length > 0 && (
               <optgroup label="Your cloned voices">
                 {readyClones.map((v) => (
-                  <option key={v.id} value={`clone:${v.id}`}>{v.name}</option>
+                  <option key={v.id} value={`clone:${v.id}`}>
+                    {v.name}{v.provider === "elevenlabs" ? " (ElevenLabs)" : ""}
+                  </option>
                 ))}
               </optgroup>
             )}

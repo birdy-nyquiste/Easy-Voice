@@ -16,6 +16,13 @@ export const config = {
   get cronSecret() {
     return requiredEnv("CRON_SECRET", "");
   },
+  /**
+   * Encrypts API keys users give us (server/secrets.ts). Any string; a 32-byte key is derived from it.
+   * Changing it makes stored keys unreadable, so users would have to reconnect.
+   */
+  get secretsKey() {
+    return requiredEnv("SECRETS_KEY", "dev-insecure-secrets-key");
+  },
   /** Dev-only shortcut to credit a balance without paying. Never available in production builds. */
   get devCreditEnabled() {
     return process.env.NODE_ENV !== "production";
@@ -64,6 +71,18 @@ export const config = {
     messagingProfileId: process.env.TELNYX_MESSAGING_PROFILE_ID ?? "",
   },
 
+  elevenlabs: {
+    /** Follows TELNYX_MODE unless set: "mock" simulates ElevenLabs in-process. */
+    mode: (process.env.ELEVENLABS_MODE ?? process.env.TELNYX_MODE ?? (process.env.NODE_ENV === "production" ? "live" : "mock")) as
+      | "mock"
+      | "live",
+    /**
+     * TTS model for ElevenLabs voices on calls. Flash v2.5 is the low-latency phone model (~75 ms,
+     * Mandarin + English) and half the credits of Multilingual.
+     */
+    ttsModel: process.env.ELEVENLABS_TTS_MODEL || "eleven_flash_v2_5",
+  },
+
   pricing: {
     callPerMinuteCents: int("PRICE_CALL_PER_MINUTE_CENTS", 15),
     numberMonthlyCents: int("PRICE_NUMBER_MONTHLY_CENTS", 300),
@@ -89,6 +108,14 @@ export const config = {
     get voiceCloning() {
       const v = process.env.VOICE_CLONING;
       return v ? v === "on" : config.telnyx.mode !== "live";
+    },
+    /**
+     * Cloning with the user's own ElevenLabs key. Independent of VOICE_CLONING: the Telnyx L2
+     * restriction is about Telnyx clones. Live mode needs SECRETS_KEY. ELEVENLABS=on|off.
+     */
+    get elevenLabs() {
+      const v = process.env.ELEVENLABS;
+      return v ? v === "on" : config.elevenlabs.mode !== "live" || Boolean(process.env.SECRETS_KEY);
     },
     /**
      * Receiving texts (never sending: no 10DLC registration; SPEC §17). Live mode needs a messaging profile.

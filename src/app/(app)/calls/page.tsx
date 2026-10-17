@@ -67,7 +67,7 @@ export default async function CallsPage() {
       ) : (
         <Card className="p-0">
           <table className="w-full text-sm">
-            <thead className="border-b border-stone-100 text-left text-xs uppercase tracking-wide text-stone-500">
+            <thead className="border-b border-stone-100 text-left text-xs font-medium text-stone-500">
               <tr>
                 <th className="px-5 py-3 font-medium">Call</th>
                 <th className="hidden px-3 py-3 font-medium sm:table-cell">Agent</th>

@@ -98,7 +98,7 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
       instructions: spec.instructions,
       greeting: spec.greeting,
       model: spec.model,
-      voice_settings: { voice: spec.voiceRef },
+      voice_settings: { voice: spec.voiceRef, ...(spec.voiceApiKeyRef ? { api_key_ref: spec.voiceApiKeyRef } : {}) },
       transcription: {
         model: cfg.sttModel,
         // "auto" tolerates EN/ZH mixing; fall back to the agent's primary language otherwise.
@@ -273,6 +273,19 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
 
     async deleteClonedVoice(voiceId) {
       await api("DELETE", `/voice_clones/${encodeURIComponent(voiceId)}`);
+    },
+
+    async createIntegrationSecret(identifier, token) {
+      const res = await api<{ data: { id: string } }>("POST", "/integration_secrets", { identifier, type: "bearer", token });
+      return { id: res.data.id };
+    },
+
+    async deleteIntegrationSecret(id) {
+      try {
+        await api("DELETE", `/integration_secrets/${encodeURIComponent(id)}`);
+      } catch (err) {
+        if (!(err instanceof TelnyxApiError && err.status === 404)) throw err;
+      }
     },
 
     async createAssistant(spec) {

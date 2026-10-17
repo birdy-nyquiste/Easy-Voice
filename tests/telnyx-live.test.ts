@@ -133,6 +133,24 @@ describe("assistant config", () => {
     expect(body.model).toBe("openai/gpt-5.4-mini");
   });
 
+  it("references the user's ElevenLabs key secret for ElevenLabs voices only", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "assistant-1" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await provider.createAssistant({ ...spec, voiceRef: "ElevenLabs.eleven_flash_v2_5.v1", voiceApiKeyRef: "elevenlabs_u_1" });
+    await provider.createAssistant(spec);
+    const sent = fetchMock.mock.calls.map((c) => JSON.parse(String((c as unknown as [string, RequestInit])[1].body)).voice_settings);
+    expect(sent).toEqual([{ voice: "ElevenLabs.eleven_flash_v2_5.v1", api_key_ref: "elevenlabs_u_1" }, { voice: "Telnyx.KokoroTTS.af_heart" }]);
+  });
+
+  it("stores integration secrets as bearer tokens", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: { id: "sec-1", identifier: "elevenlabs_u_1" } }), { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await provider.createIntegrationSecret("elevenlabs_u_1", "sk_x")).toEqual({ id: "sec-1" });
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toMatch(/\/integration_secrets$/);
+    expect(JSON.parse(String(init.body))).toEqual({ identifier: "elevenlabs_u_1", type: "bearer", token: "sk_x" });
+  });
+
   it("reports Telnyx's cloned-voice restriction as FeatureNotPermittedError", async () => {
     const detail = "Your account is not permitted to use cloned voices. Please complete L2 verification or use a platform voice.";
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ errors: [{ code: "10010", detail }] }), { status: 403 })));

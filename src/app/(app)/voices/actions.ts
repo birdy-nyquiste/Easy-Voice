@@ -18,10 +18,13 @@ export async function cloneVoiceAction(_: ActionState, form: FormData): Promise<
       gender: form.get("gender") === "male" ? "male" : "female",
       audio,
       consent: form.get("consent") === "on",
+      provider: form.get("provider") === "elevenlabs" ? "elevenlabs" : "telnyx",
     });
     revalidatePath("/", "layout");
-    if (v.status === "failed") throw new UserError(`Cloning failed: ${v.failureReason} You were refunded.`);
-    return "Cloning started. It's usually ready within a minute.";
+    if (v.status === "failed") {
+      throw new UserError(v.provider === "elevenlabs" ? `Cloning failed: ${v.failureReason}` : `Cloning failed: ${v.failureReason} You were refunded.`);
+    }
+    return v.status === "ready" ? "Voice cloned. You can use it in an agent now." : "Cloning started. It's usually ready within a minute.";
   });
 }
 
