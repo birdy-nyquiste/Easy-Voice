@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { useTranslations } from "next-intl";
+import type { Messages } from "@/i18n/messages";
 import type { ComponentProps, ReactNode } from "react";
 
 export function PageHeader({
@@ -55,8 +57,11 @@ export function Badge({ tone = "gray", children }: { tone?: keyof typeof tones; 
   return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tones[tone]}`}>{children}</span>;
 }
 
-export function StatusBadge({ status }: { status: string }) {
-  const tone: Record<string, keyof typeof tones> = {
+type Status = keyof Messages["status"];
+
+export function StatusBadge({ status }: { status: Status }) {
+  const t = useTranslations("status");
+  const tone: Record<Status, keyof typeof tones> = {
     active: "green",
     ready: "green",
     completed: "green",
@@ -70,7 +75,13 @@ export function StatusBadge({ status }: { status: string }) {
     rejected: "red",
     released: "gray",
   };
-  return <Badge tone={tone[status] ?? "gray"}>{status}</Badge>;
+  return <Badge tone={tone[status]}>{t(status)}</Badge>;
+}
+
+/** A stock voice's gender as the catalog gives it ("female", "male"); unknown values show as-is. */
+export function VoiceGender({ gender }: { gender: string }) {
+  const t = useTranslations("gender");
+  return gender === "female" || gender === "male" ? t(gender) : gender;
 }
 
 const btn = {

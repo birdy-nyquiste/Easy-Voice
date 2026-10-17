@@ -2,6 +2,7 @@
 
 import { createContext, startTransition, useActionState, useContext, type ReactNode } from "react";
 import { useFormStatus } from "react-dom";
+import { useTranslations } from "next-intl";
 import type { ActionState } from "@/lib/action";
 import { buttonClass } from "./ui";
 
@@ -16,6 +17,7 @@ export function SubmitButton({
   variant?: "primary" | "secondary" | "danger";
   confirm?: string;
 }) {
+  const t = useTranslations("common");
   const formStatus = useFormStatus();
   // Inside ActionForm the submission doesn't go through <form action>, so read its pending state.
   const pending = useContext(ActionPendingContext) ?? formStatus.pending;
@@ -28,7 +30,7 @@ export function SubmitButton({
         if (confirm && !window.confirm(confirm)) e.preventDefault();
       }}
     >
-      {pending ? (pendingText ?? "Working…") : children}
+      {pending ? (pendingText ?? t("working")) : children}
     </button>
   );
 }
@@ -49,7 +51,8 @@ export function ActionForm({
   children: ReactNode;
   className?: string;
 }) {
-  const [state, formAction, pending] = useActionState(safeAction(action), undefined);
+  const t = useTranslations("errors");
+  const [state, formAction, pending] = useActionState(safeAction(action, t("network")), undefined);
   return (
     <form
       className={className}
@@ -71,7 +74,7 @@ export function ActionForm({
  * Turn a rejected action call (network failure, body too large, server crash) into an error state;
  * otherwise useActionState rethrows it and the whole page falls over.
  */
-export function safeAction<S extends { error?: string } | undefined>(action: (state: S, data: FormData) => Promise<S>) {
+export function safeAction<S extends { error?: string } | undefined>(action: (state: S, data: FormData) => Promise<S>, failedMessage: string) {
   return async (state: S, data: FormData): Promise<S> => {
     try {
       return await action(state, data);
@@ -79,7 +82,7 @@ export function safeAction<S extends { error?: string } | undefined>(action: (st
       // Let Next.js redirect()/notFound() propagate.
       if (err && typeof err === "object" && "digest" in err && String(err.digest).startsWith("NEXT_")) throw err;
       console.error(err);
-      return { ...state, error: "Something went wrong. Check your connection and try again." } as S;
+      return { ...state, error: failedMessage } as S;
     }
   };
 }

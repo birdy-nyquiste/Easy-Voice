@@ -6,6 +6,7 @@ import { db } from "@/db";
 import { ledgerEntries, payments, type User } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
+import { stored } from "@/lib/stored-text";
 import { formatCents } from "@/lib/format";
 import { withWebhookDedupe } from "@/server/webhooks";
 import { applyLedger } from "./ledger";
@@ -21,12 +22,12 @@ function stripe(): Stripe {
 /** Creates a Stripe Checkout session for a one-time top-up and returns its URL. */
 export async function createTopup(user: User, amountCents: number): Promise<string> {
   if (!Number.isInteger(amountCents) || amountCents < config.pricing.minTopupCents) {
-    throw new UserError(`Minimum top-up is ${formatCents(config.pricing.minTopupCents)}.`);
+    throw new UserError("minTopup", { amount: formatCents(config.pricing.minTopupCents) });
   }
-  if (amountCents > MAX_TOPUP_CENTS) throw new UserError(`Maximum top-up is ${formatCents(MAX_TOPUP_CENTS)}.`);
+  if (amountCents > MAX_TOPUP_CENTS) throw new UserError("maxTopup", { amount: formatCents(MAX_TOPUP_CENTS) });
 
   // Stripe is the only way money enters the system; there is no free-credit path.
-  if (!config.stripe.enabled) throw new UserError("Payments aren't configured yet. Please try again later.");
+  if (!config.stripe.enabled) throw new UserError("paymentsNotConfigured");
 
   const session = await stripe().checkout.sessions.create({
     mode: "payment",
@@ -53,16 +54,16 @@ export async function createTopup(user: User, amountCents: number): Promise<stri
 
 /** Dev-only: credit the balance directly. Recorded as an adjustment, never as a payment. */
 export async function addDevCredit(user: User, amountCents: number): Promise<void> {
-  if (!config.devCreditEnabled) throw new UserError("Not available.");
+  if (!config.devCreditEnabled) throw new UserError("notAvailable");
   if (!Number.isInteger(amountCents) || amountCents <= 0 || amountCents > MAX_TOPUP_CENTS) {
-    throw new UserError("Invalid amount.");
+    throw new UserError("invalidAmount");
   }
   await applyLedger({
     userId: user.id,
     amountCents,
     kind: "adjustment",
     idempotencyKey: `dev-credit:${randomUUID()}`,
-    description: `Dev credit ${formatCents(amountCents)} (no payment)`,
+    description: stored("ledgerDevCredit", { amount: formatCents(amountCents) }),
   });
 }
 
@@ -78,7 +79,7 @@ export async function completePayment(providerRef: string): Promise<void> {
         amountCents: p.amountCents,
         kind: "topup",
         idempotencyKey: `payment:${p.id}`,
-        description: `Top-up ${formatCents(p.amountCents)}`,
+        description: stored("ledgerTopup", { amount: formatCents(p.amountCents) }),
         refType: "payment",
         refId: p.id,
       },

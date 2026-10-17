@@ -6,8 +6,12 @@ import { redirect } from "next/navigation";
 import { cache } from "react";
 import { db } from "@/db";
 import { emailOtps, sessions, users, type User } from "@/db/schema";
+import type { Locale } from "@/i18n/locales";
+import { translator } from "@/i18n/messages";
 import { config, SESSION_COOKIE } from "@/lib/config";
+import type { ErrorKey } from "@/lib/errors";
 import { sendEmail } from "./email";
+import { syncLocaleAtSignIn } from "./locale";
 
 const OTP_TTL_MS = 10 * 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
@@ -21,15 +25,17 @@ export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-export async function requestEmailOtp(rawEmail: string): Promise<{ ok: true } | { ok: false; error: string }> {
+type AuthResult = { ok: true } | { ok: false; error: ErrorKey };
+
+export async function requestEmailOtp(rawEmail: string, locale: Locale): Promise<AuthResult> {
   const email = normalizeEmail(rawEmail);
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: "Enter a valid email address." };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: "invalidEmail" };
 
   const [{ count }] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(emailOtps)
     .where(and(eq(emailOtps.email, email), gt(emailOtps.createdAt, new Date(Date.now() - 3600_000))));
-  if (count >= OTP_MAX_PER_HOUR) return { ok: false, error: "Too many codes requested. Try again later." };
+  if (count >= OTP_MAX_PER_HOUR) return { ok: false, error: "tooManyCodes" };
 
   const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
   await db.insert(emailOtps).values({
@@ -37,15 +43,12 @@ export async function requestEmailOtp(rawEmail: string): Promise<{ ok: true } | 
     codeHash: hashOtp(email, code),
     expiresAt: new Date(Date.now() + OTP_TTL_MS),
   });
-  await sendEmail({
-    to: email,
-    subject: `Your Easy Voice code: ${code}`,
-    text: `Your sign-in code is ${code}. It expires in 10 minutes.`,
-  });
+  const t = translator(locale, "email");
+  await sendEmail({ to: email, subject: t("otpSubject", { code }), text: t("otpBody", { code }) });
   return { ok: true };
 }
 
-export async function verifyEmailOtp(rawEmail: string, code: string): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function verifyEmailOtp(rawEmail: string, code: string): Promise<AuthResult> {
   const email = normalizeEmail(rawEmail);
   const [otp] = await db
     .select()
@@ -53,18 +56,18 @@ export async function verifyEmailOtp(rawEmail: string, code: string): Promise<{ 
     .where(and(eq(emailOtps.email, email), isNull(emailOtps.consumedAt), gt(emailOtps.expiresAt, new Date())))
     .orderBy(desc(emailOtps.createdAt))
     .limit(1);
-  if (!otp || otp.attempts >= OTP_MAX_ATTEMPTS) return { ok: false, error: "Code expired. Request a new one." };
+  if (!otp || otp.attempts >= OTP_MAX_ATTEMPTS) return { ok: false, error: "codeExpired" };
 
   const expected = Buffer.from(otp.codeHash);
   const actual = Buffer.from(hashOtp(email, code.trim()));
   if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
     await db.update(emailOtps).set({ attempts: otp.attempts + 1 }).where(eq(emailOtps.id, otp.id));
-    return { ok: false, error: "Incorrect code." };
+    return { ok: false, error: "codeIncorrect" };
   }
   await db.update(emailOtps).set({ consumedAt: new Date() }).where(eq(emailOtps.id, otp.id));
 
   const user = await upsertUser({ email });
-  await createSession(user.id);
+  await createSession(user);
   return { ok: true };
 }
 
@@ -94,10 +97,10 @@ export async function upsertUser(input: { email: string; name?: string; googleSu
   return created;
 }
 
-export async function createSession(userId: string): Promise<void> {
+export async function createSession(user: User): Promise<void> {
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
-  await db.insert(sessions).values({ id: sha256(token), userId, expiresAt });
+  await db.insert(sessions).values({ id: sha256(token), userId: user.id, expiresAt });
   (await cookies()).set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
@@ -105,6 +108,7 @@ export async function createSession(userId: string): Promise<void> {
     path: "/",
     expires: expiresAt,
   });
+  await syncLocaleAtSignIn(user);
 }
 
 export const getCurrentUser = cache(async (): Promise<User | null> => {

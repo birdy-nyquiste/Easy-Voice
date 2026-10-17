@@ -3,6 +3,7 @@ import { db, type Tx } from "@/db";
 import { ledgerEntries, users } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
+import { storedColumns, type StoredText } from "@/lib/stored-text";
 
 type LedgerKind = (typeof ledgerEntries.$inferInsert)["kind"];
 
@@ -11,7 +12,7 @@ export interface LedgerInput {
   amountCents: number;
   kind: LedgerKind;
   idempotencyKey: string;
-  description: string;
+  description: StoredText;
   refType?: string;
   refId?: string;
   /** Reject (without writing) if the charge would take the balance below zero. */
@@ -52,8 +53,9 @@ export async function applyLedger(input: LedgerInput, tx?: Tx): Promise<LedgerRe
     const balanceAfter = user.balance + input.amountCents;
     if (input.requireFunds && balanceAfter < 0) throw new InsufficientBalanceError(user.balance);
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { requireFunds, ...entry } = input;
-    await t.insert(ledgerEntries).values({ ...entry, balanceAfterCents: balanceAfter });
+    const { requireFunds, description, ...entry } = input;
+    const d = storedColumns(description);
+    await t.insert(ledgerEntries).values({ ...entry, description: d.text, descriptionMsg: d.msg, balanceAfterCents: balanceAfter });
     await t
       .update(users)
       .set({
@@ -74,13 +76,13 @@ export interface Purchase {
   kind: LedgerKind;
   /** Base key; the refund uses `${key}:refund`. */
   key: string;
-  description: string;
+  description: StoredText;
   refType: string;
   refId: string;
 }
 
 /** Charge a purchase up front; an overdraft becomes a user-facing error and nothing is written. */
-export async function chargePurchase(p: Purchase, insufficientMessage: string, tx?: Tx): Promise<void> {
+export async function chargePurchase(p: Purchase, insufficient: UserError, tx?: Tx): Promise<void> {
   try {
     await applyLedger(
       {
@@ -96,13 +98,13 @@ export async function chargePurchase(p: Purchase, insufficientMessage: string, t
       tx,
     );
   } catch (err) {
-    if (err instanceof InsufficientBalanceError) throw new UserError(insufficientMessage);
+    if (err instanceof InsufficientBalanceError) throw insufficient;
     throw err;
   }
 }
 
 /** Refund a purchase exactly once. */
-export async function refundPurchase(p: Purchase, description: string, tx?: Tx): Promise<void> {
+export async function refundPurchase(p: Purchase, description: StoredText, tx?: Tx): Promise<void> {
   await applyLedger(
     {
       userId: p.userId,

@@ -1,7 +1,9 @@
+import { getLocale, getTranslations } from "next-intl/server";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { Card, CardTitle, Notice, StatusBadge } from "@/components/ui";
 import { config } from "@/lib/config";
 import { formatCents, formatDateTime } from "@/lib/format";
+import { showStored } from "@/lib/stored-text";
 import { requireUser } from "@/server/auth";
 import { listLedger, listPayments } from "@/server/billing/payments";
 import { devCreditAction, topupAction } from "./actions";
@@ -13,22 +15,23 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
   const { topup } = await searchParams;
   const [ledger, payments] = await Promise.all([listLedger(user.id), listPayments(user.id)]);
   const p = config.pricing;
+  const [t, locale] = await Promise.all([getTranslations("billing"), getLocale()]);
 
   return (
     <div className="space-y-6">
-      <p className="text-sm text-stone-500">Prepaid credit. Usage is deducted from your balance.</p>
-      {topup === "success" && <Notice tone="green">Payment received. Your balance will update in a moment if it hasn&apos;t already.</Notice>}
-      {topup === "cancelled" && <Notice>Checkout was cancelled. You weren&apos;t charged.</Notice>}
+      <p className="text-sm text-stone-500">{t("intro")}</p>
+      {topup === "success" && <Notice tone="green">{t("paymentReceived")}</Notice>}
+      {topup === "cancelled" && <Notice>{t("checkoutCancelled")}</Notice>}
       {user.balanceCents <= 0 && (
         <Notice tone="red">
-          Your balance is empty. Incoming calls are declined and outgoing calls are blocked until you top up.
-          {user.balanceCents < 0 && ` Numbers are released after ${config.policy.negativeBalanceReleaseDays} days with a negative balance.`}
+          {t("balanceEmpty")}
+          {user.balanceCents < 0 && t("releaseWarning", { days: config.policy.negativeBalanceReleaseDays })}
         </Notice>
       )}
 
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
-          <CardTitle>Balance</CardTitle>
+          <CardTitle>{t("balance")}</CardTitle>
           <p className={`text-3xl font-semibold ${user.balanceCents <= 0 ? "text-red-600" : ""}`}>{formatCents(user.balanceCents)}</p>
           <ActionForm action={topupAction} className="mt-4">
             <div className="flex flex-wrap gap-2">
@@ -42,12 +45,12 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
               ))}
             </div>
             <div className="mt-3">
-              <SubmitButton pendingText="Redirecting to Stripe…">Add credit</SubmitButton>
+              <SubmitButton pendingText={t("redirecting")}>{t("addCredit")}</SubmitButton>
             </div>
           </ActionForm>
           {config.devCreditEnabled && (
             <ActionForm action={devCreditAction} className="mt-4 rounded-lg border border-dashed border-sky-300 bg-sky-50 p-3">
-              <p className="mb-2 text-xs font-medium text-sky-800">Dev only — add credit without paying (hidden in production)</p>
+              <p className="mb-2 text-xs font-medium text-sky-800">{t("devOnly")}</p>
               <div className="flex gap-2">
                 {[10, 50].map((a) => (
                   <button key={a} name="amount" value={a} className="rounded-lg bg-white px-3 py-1.5 text-sm font-medium text-sky-800 ring-1 ring-sky-300 hover:bg-sky-100">
@@ -59,30 +62,30 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
           )}
         </Card>
         <Card>
-          <CardTitle>Pricing</CardTitle>
+          <CardTitle>{t("pricing")}</CardTitle>
           <dl className="space-y-2 text-sm">
-            <div className="flex justify-between"><dt>Calls (in or out)</dt><dd className="font-medium">{formatCents(p.callPerMinuteCents)} / min</dd></div>
-            <div className="flex justify-between"><dt>Phone number</dt><dd className="font-medium">{formatCents(p.numberMonthlyCents)} / month</dd></div>
-            <div className="flex justify-between"><dt>Voice clone</dt><dd className="font-medium">{formatCents(p.voiceCloneCents)} each</dd></div>
+            <div className="flex justify-between"><dt>{t("calls")}</dt><dd className="font-medium">{t("perMin", { price: formatCents(p.callPerMinuteCents) })}</dd></div>
+            <div className="flex justify-between"><dt>{t("number")}</dt><dd className="font-medium">{t("perMonth", { price: formatCents(p.numberMonthlyCents) })}</dd></div>
+            <div className="flex justify-between"><dt>{t("clone")}</dt><dd className="font-medium">{t("each", { price: formatCents(p.voiceCloneCents) })}</dd></div>
             {config.features.inboundSms && (
-              <div className="flex justify-between"><dt>Text received</dt><dd className="font-medium">{formatCents(p.smsInboundPerPartCents)} / segment</dd></div>
+              <div className="flex justify-between"><dt>{t("textReceived")}</dt><dd className="font-medium">{t("perSegment", { price: formatCents(p.smsInboundPerPartCents) })}</dd></div>
             )}
           </dl>
-          <p className="mt-4 text-xs text-stone-500">Payments are processed by Stripe. There are no subscriptions — number rental is deducted from your balance every 30 days. Call minutes are rounded up. Unanswered calls are free. Failed purchases are refunded automatically.{config.features.inboundSms && " A text segment holds up to 160 characters, or 70 when it contains Chinese characters or emoji."}</p>
+          <p className="mt-4 text-xs text-stone-500">{t("terms")}{config.features.inboundSms && t("segmentNote")}</p>
         </Card>
       </div>
 
       <Card className="p-0">
-        <div className="px-5 pt-5"><CardTitle>Activity</CardTitle></div>
+        <div className="px-5 pt-5"><CardTitle>{t("activity")}</CardTitle></div>
         {ledger.length === 0 ? (
-          <p className="px-5 pb-5 text-sm text-stone-500">No activity yet.</p>
+          <p className="px-5 pb-5 text-sm text-stone-500">{t("noActivity")}</p>
         ) : (
           <table className="w-full text-sm">
             <tbody className="divide-y divide-stone-100">
               {ledger.map((e) => (
                 <tr key={e.id}>
-                  <td className="px-5 py-2.5 text-stone-500">{formatDateTime(e.createdAt)}</td>
-                  <td className="px-3 py-2.5">{e.description}</td>
+                  <td className="px-5 py-2.5 text-stone-500">{formatDateTime(e.createdAt, locale)}</td>
+                  <td className="px-3 py-2.5">{showStored(locale, e.description, e.descriptionMsg)}</td>
                   <td className={`px-3 py-2.5 text-right tabular-nums ${e.amountCents > 0 ? "text-emerald-700" : ""}`}>
                     {e.amountCents > 0 ? "+" : ""}{formatCents(e.amountCents)}
                   </td>
@@ -96,11 +99,11 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
 
       {payments.some((x) => x.status !== "succeeded") && (
         <Card>
-          <CardTitle>Payments</CardTitle>
+          <CardTitle>{t("payments")}</CardTitle>
           <ul className="divide-y divide-stone-100 text-sm">
             {payments.map((x) => (
               <li key={x.id} className="flex items-center justify-between py-2">
-                <span>{formatDateTime(x.createdAt)} · {formatCents(x.amountCents)}</span>
+                <span>{formatDateTime(x.createdAt, locale)} · {formatCents(x.amountCents)}</span>
                 <span className="flex items-center gap-2">
                   {x.failureReason && <span className="text-stone-500">{x.failureReason}</span>}
                   <StatusBadge status={x.status} />

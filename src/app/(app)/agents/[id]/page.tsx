@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
+import { getLocale, getTranslations } from "next-intl/server";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { Card, CardTitle, Notice, PageHeader, StatusBadge } from "@/components/ui";
+import { showStored } from "@/lib/stored-text";
 import { getUserAgent, listModels } from "@/server/agents";
 import Link from "next/link";
 import { requireUser } from "@/server/auth";
@@ -29,16 +31,22 @@ export default async function AgentPage({
     listModels().catch(() => []),
     getElevenLabsKey(user.id),
   ]);
+  const [t, tc, locale] = await Promise.all([getTranslations("agents"), getTranslations("common"), getLocale()]);
   const keyRejected = isElevenLabsVoice(agent.voiceRef) && Boolean(elKey?.keyInvalidAt);
   return (
     <div className="space-y-6">
-      <PageHeader back={{ href: "/agents", label: "All agents" }} title={agent.name} action={<StatusBadge status={agent.status} />} />
-      {agent.status === "failed" && <Notice tone="red">{agent.failureReason}</Notice>}
-      {saved && agent.status === "ready" && <Notice tone="green">Saved.</Notice>}
+      <PageHeader back={{ href: "/agents", label: t("all") }} title={agent.name} action={<StatusBadge status={agent.status} />} />
+      {agent.status === "failed" && <Notice tone="red">{showStored(locale, agent.failureReason, agent.failureMsg)}</Notice>}
+      {saved && agent.status === "ready" && <Notice tone="green">{tc("saved")}</Notice>}
       {keyRejected && (
         <Notice tone="red">
-          This agent can&apos;t take or make calls: ElevenLabs rejected your API key, so its voice can&apos;t speak.{" "}
-          <Link href="/account/api-keys" className="font-medium underline">Replace the key</Link> or pick another voice.
+          {t.rich("keyRejectedNotice", {
+            link: (chunks) => (
+              <Link href="/account/api-keys" className="font-medium underline">
+                {chunks}
+              </Link>
+            ),
+          })}
         </Notice>
       )}
       <Card>
@@ -47,11 +55,11 @@ export default async function AgentPage({
         <AgentForm key={agent.updatedAt.toISOString()} agent={agent} stock={stock} clones={clones} models={models} />
       </Card>
       <Card>
-        <CardTitle>Danger zone</CardTitle>
+        <CardTitle>{t("dangerZone")}</CardTitle>
         <ActionForm action={deleteAgentAction}>
           <input type="hidden" name="id" value={agent.id} />
-          <SubmitButton variant="danger" confirm={`Delete ${agent.name}? Its number will stop answering calls.`}>
-            Delete agent
+          <SubmitButton variant="danger" confirm={t("deleteConfirm", { name: agent.name })}>
+            {t("delete")}
           </SubmitButton>
         </ActionForm>
       </Card>

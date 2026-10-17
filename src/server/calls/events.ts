@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq } from "drizzle-orm";
 import { db, withUserLock, type Queryable } from "@/db";
 import { agents, calls, phoneNumbers, users, type Agent, type Call } from "@/db/schema";
+import { stored, type StoredMessage } from "@/lib/stored-text";
 import { applyLedger, callChargeCents, hasSpendableBalance } from "@/server/billing/ledger";
 import { voiceProvider, type AssistantStart, type CallEvent } from "@/server/telnyx";
 import { OUTBOUND_GREETING } from "@/server/agents";
@@ -9,7 +10,7 @@ import { elevenLabsKeyUsable } from "@/server/elevenlabs-keys";
 import { isElevenLabsVoice } from "@/server/telnyx/stock-voices";
 import { withWebhookDedupe } from "@/server/webhooks";
 import { fetchCallResultsSoon } from "./results";
-import { failedCallFields, hasOtherActiveCall } from "./state";
+import { failedCallFields, hasOtherActiveCall, outcomeColumns } from "./state";
 
 /**
  * Process one provider call event. Safe to call repeatedly with the same
@@ -119,7 +120,7 @@ async function onInitiated(e: CallEvent) {
     }
     const check = await checkInbound(tx, created, num.agentId, voiceUsable);
     if ("outcome" in check) {
-      await tx.update(calls).set({ status: "rejected", outcome: check.outcome }).where(eq(calls.id, created.id));
+      await tx.update(calls).set({ status: "rejected", ...outcomeColumns(check.outcome) }).where(eq(calls.id, created.id));
       return { action: "reject", call: created, cause: check.cause };
     }
     return { action: "answer", call: created, agent: check.agent };
@@ -146,24 +147,21 @@ async function checkInbound(
   call: Call,
   agentId: string | null,
   voiceUsable: boolean,
-): Promise<{ agent: Agent } | { outcome: string; cause: "CALL_REJECTED" | "USER_BUSY" }> {
+): Promise<{ agent: Agent } | { outcome: StoredMessage; cause: "CALL_REJECTED" | "USER_BUSY" }> {
   const [user] = await q.select().from(users).where(eq(users.id, call.userId));
   if (!hasSpendableBalance(user.balanceCents)) {
-    return { outcome: "Rejected: account balance is empty. Top up to receive calls.", cause: "CALL_REJECTED" };
+    return { outcome: stored("outcomeBalanceEmpty"), cause: "CALL_REJECTED" };
   }
-  if (!agentId) return { outcome: "Rejected: no agent is assigned to this number.", cause: "CALL_REJECTED" };
+  if (!agentId) return { outcome: stored("outcomeNoAgent"), cause: "CALL_REJECTED" };
   const [agent] = await q.select().from(agents).where(eq(agents.id, agentId));
   if (!agent || agent.deletedAt || agent.status !== "ready" || !agent.providerAssistantId) {
-    return { outcome: "Rejected: the assigned agent is not ready.", cause: "CALL_REJECTED" };
+    return { outcome: stored("outcomeAgentNotReady"), cause: "CALL_REJECTED" };
   }
   if (!voiceUsable) {
-    return {
-      outcome: "Rejected: ElevenLabs rejected your API key, so the agent's voice couldn't speak. Replace it under Account → API keys.",
-      cause: "CALL_REJECTED",
-    };
+    return { outcome: stored("outcomeKeyRejected"), cause: "CALL_REJECTED" };
   }
   if (await hasOtherActiveCall(call.userId, call.id, q)) {
-    return { outcome: "Rejected: another call was already in progress.", cause: "USER_BUSY" };
+    return { outcome: stored("outcomeBusy"), cause: "USER_BUSY" };
   }
   return { agent };
 }
@@ -176,7 +174,7 @@ async function onAnswered(e: CallEvent) {
 
   const [agent] = call.agentId ? await db.select().from(agents).where(eq(agents.id, call.agentId)) : [];
   if (!agent?.providerAssistantId) {
-    await endWithoutCharge(call, "Agent was unavailable; call ended. You were not charged.");
+    await endWithoutCharge(call, stored("outcomeAgentUnavailable"));
     return;
   }
   try {
@@ -186,7 +184,7 @@ async function onAnswered(e: CallEvent) {
     }
   } catch (err) {
     console.error("startAssistant failed", call.id, err);
-    await endWithoutCharge(call, "The agent failed to start; call ended. You were not charged.");
+    await endWithoutCharge(call, stored("outcomeAgentFailed"));
   }
 }
 
@@ -201,22 +199,22 @@ async function onAssistantStartFailed(e: CallEvent) {
   if (!call || call.endedAt) return;
   console.error("Assistant failed to start", call.id, e.failureReason);
   // The call stays answered on the provider side; hang up so the caller isn't left in silence.
-  await endWithoutCharge(call, "The agent failed to start; call ended. You were not charged.");
+  await endWithoutCharge(call, stored("outcomeAgentFailed"));
 }
 
 /** Our side failed after the call connected: hang up and waive the charge. */
-async function endWithoutCharge(call: Call, outcome: string) {
-  await db.update(calls).set({ outcome, chargeWaived: true }).where(eq(calls.id, call.id));
+async function endWithoutCharge(call: Call, outcome: StoredMessage) {
+  await db.update(calls).set({ ...outcomeColumns(outcome), chargeWaived: true }).where(eq(calls.id, call.id));
   if (call.providerCallControlId) await voiceProvider().hangup(call.providerCallControlId);
 }
 
-const HANGUP_OUTCOMES: Record<string, string> = {
-  timeout: "No answer.",
-  no_answer: "No answer.",
-  user_busy: "The line was busy.",
-  call_rejected: "The call was declined.",
-  originator_cancel: "The caller hung up before it was answered.",
-  not_found: "That number couldn't be reached.",
+const HANGUP_OUTCOMES: Record<string, StoredMessage> = {
+  timeout: stored("outcomeNoAnswer"),
+  no_answer: stored("outcomeNoAnswer"),
+  user_busy: stored("outcomeLineBusy"),
+  call_rejected: stored("outcomeDeclined"),
+  originator_cancel: stored("outcomeCallerHungUp"),
+  not_found: stored("outcomeUnreachable"),
 };
 
 async function onHangup(e: CallEvent) {
@@ -250,7 +248,7 @@ async function onHangup(e: CallEvent) {
             amountCents: -charge,
             kind: "call",
             idempotencyKey: `call:${call.id}`,
-            description: `${call.direction === "inbound" ? "Inbound" : "Outbound"} call, ${Math.ceil(durationSec / 60)} min`,
+            description: stored(call.direction === "inbound" ? "ledgerCallInbound" : "ledgerCallOutbound", { minutes: Math.ceil(durationSec / 60) }),
             refType: "call",
             refId: call.id,
           },
@@ -267,7 +265,8 @@ async function onHangup(e: CallEvent) {
     .set({
       ...failedCallFields(endedAt),
       status: call.status === "rejected" ? "rejected" : "failed",
-      outcome: call.outcome ?? HANGUP_OUTCOMES[cause] ?? `Call ended before connecting (${cause}).`,
+      // An outcome set earlier (a rejection, a failed start) explains the call better than the hangup cause.
+      ...(call.outcome ? {} : outcomeColumns(HANGUP_OUTCOMES[cause] ?? stored("outcomeEndedEarly", { cause }))),
       hangupCause: cause,
     })
     .where(eq(calls.id, call.id));

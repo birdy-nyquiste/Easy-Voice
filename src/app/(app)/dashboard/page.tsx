@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getLocale, getTranslations } from "next-intl/server";
 import { Badge, Card, CardTitle, StatusBadge } from "@/components/ui";
 import { formatCents, formatDateTime, formatDuration, formatPhone } from "@/lib/format";
 import { listUserAgents } from "@/server/agents";
@@ -8,6 +9,7 @@ import { listUserNumbers } from "@/server/numbers";
 
 export default async function DashboardPage() {
   const user = await requireUser();
+  const [t, tc, locale] = await Promise.all([getTranslations("dashboard"), getTranslations("common"), getLocale()]);
   const [numbers, agents, recent] = await Promise.all([
     listUserNumbers(user.id),
     listUserAgents(user.id),
@@ -17,39 +19,39 @@ export default async function DashboardPage() {
   const linkedAgent = agents.find((a) => a.id === activeNumber?.agentId);
 
   const steps = [
-    { done: user.balanceCents > 0, label: "Add credit", href: "/account/billing" },
-    { done: agents.some((a) => a.status === "ready"), label: "Create an agent (pick or clone a voice)", href: "/agents/new" },
-    { done: Boolean(activeNumber), label: "Get a phone number", href: "/numbers" },
-    { done: Boolean(linkedAgent), label: "Connect the agent to your number", href: "/numbers" },
-    { done: recent.length > 0, label: "Make or receive your first call", href: "/calls" },
+    { done: user.balanceCents > 0, label: t("stepCredit"), href: "/account/billing" },
+    { done: agents.some((a) => a.status === "ready"), label: t("stepAgent"), href: "/agents/new" },
+    { done: Boolean(activeNumber), label: t("stepNumber"), href: "/numbers" },
+    { done: Boolean(linkedAgent), label: t("stepConnect"), href: "/numbers" },
+    { done: recent.length > 0, label: t("stepCall"), href: "/calls" },
   ];
   const allDone = steps.every((s) => s.done);
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
 
       <div className="grid gap-4 sm:grid-cols-3">
         <Card>
-          <CardTitle>Balance</CardTitle>
+          <CardTitle>{t("balance")}</CardTitle>
           <p className={`text-2xl font-semibold ${user.balanceCents <= 0 ? "text-red-600" : ""}`}>{formatCents(user.balanceCents)}</p>
-          <Link href="/account/billing" className="mt-1 inline-block text-sm text-stone-500 hover:text-stone-900">Top up →</Link>
+          <Link href="/account/billing" className="mt-1 inline-block text-sm text-stone-500 hover:text-stone-900">{t("topUp")}</Link>
         </Card>
         <Card>
-          <CardTitle>Number</CardTitle>
+          <CardTitle>{t("number")}</CardTitle>
           <p className="text-2xl font-semibold">{activeNumber ? formatPhone(activeNumber.e164) : "—"}</p>
-          <p className="mt-1 text-sm text-stone-500">{linkedAgent ? `Answered by ${linkedAgent.name}` : activeNumber ? "No agent assigned" : "No number yet"}</p>
+          <p className="mt-1 text-sm text-stone-500">{linkedAgent ? t("answeredBy", { name: linkedAgent.name }) : activeNumber ? t("noAgent") : t("noNumber")}</p>
         </Card>
         <Card>
-          <CardTitle>Agents</CardTitle>
+          <CardTitle>{t("agents")}</CardTitle>
           <p className="text-2xl font-semibold">{agents.length}</p>
-          <Link href="/agents" className="mt-1 inline-block text-sm text-stone-500 hover:text-stone-900">Manage →</Link>
+          <Link href="/agents" className="mt-1 inline-block text-sm text-stone-500 hover:text-stone-900">{t("manage")}</Link>
         </Card>
       </div>
 
       {!allDone && (
         <Card>
-          <CardTitle>Get set up</CardTitle>
+          <CardTitle>{t("setup")}</CardTitle>
           <ol className="space-y-2">
             {steps.map((s, i) => (
               <li key={s.label} className="flex items-center gap-3 text-sm">
@@ -69,25 +71,25 @@ export default async function DashboardPage() {
 
       <Card>
         <div className="flex items-center justify-between">
-          <CardTitle>Recent calls</CardTitle>
-          <Link href="/calls" className="text-sm text-stone-500 hover:text-stone-900">All calls →</Link>
+          <CardTitle>{t("recentCalls")}</CardTitle>
+          <Link href="/calls" className="text-sm text-stone-500 hover:text-stone-900">{t("allCalls")}</Link>
         </div>
         {recent.length === 0 ? (
-          <p className="text-sm text-stone-500">No calls yet.</p>
+          <p className="text-sm text-stone-500">{t("noCalls")}</p>
         ) : (
           <ul className="divide-y divide-stone-100">
             {recent.map(({ call, agentName }) => (
               <li key={call.id}>
                 <Link href={`/calls/${call.id}`} className="flex items-center justify-between gap-3 py-2.5 text-sm hover:bg-stone-50">
                   <span className="flex items-center gap-2">
-                    <Badge>{call.direction === "inbound" ? "↙ in" : "↗ out"}</Badge>
+                    <Badge>{call.direction === "inbound" ? tc("inbound") : tc("outbound")}</Badge>
                     {formatPhone(call.direction === "inbound" ? call.fromNumber : call.toNumber)}
                     <span className="text-stone-400">· {agentName ?? "—"}</span>
                   </span>
                   <span className="flex items-center gap-3 text-stone-500">
                     {formatDuration(call.durationSec)}
                     <StatusBadge status={call.status} />
-                    <span className="hidden sm:inline">{formatDateTime(call.createdAt)}</span>
+                    <span className="hidden sm:inline">{formatDateTime(call.createdAt, locale)}</span>
                   </span>
                 </Link>
               </li>

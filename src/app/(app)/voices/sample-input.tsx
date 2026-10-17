@@ -1,11 +1,14 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { buttonClass, inputClass } from "@/components/ui";
 import { formatMegabytes } from "@/lib/format";
 
 /** File input that can also be filled from a microphone recording. */
 export function SampleInput({ maxBytes }: { maxBytes: number }) {
+  const t = useTranslations("voices");
+  const tc = useTranslations("common");
   const fileRef = useRef<HTMLInputElement>(null);
   const recRef = useRef<MediaRecorder | null>(null);
   const [recording, setRecording] = useState(false);
@@ -20,7 +23,7 @@ export function SampleInput({ maxBytes }: { maxBytes: number }) {
   function setSample(file: File | null) {
     setError(null);
     if (file && file.size > maxBytes) {
-      setError(`That sample is ${formatMegabytes(file.size)}. The limit is ${formatMegabytes(maxBytes)} — use a shorter clip.`);
+      setError(t("sampleTooLarge", { size: formatMegabytes(file.size), max: formatMegabytes(maxBytes) }));
       file = null;
     }
     const dt = new DataTransfer();
@@ -46,7 +49,7 @@ export function SampleInput({ maxBytes }: { maxBytes: number }) {
       recRef.current = rec;
       setRecording(true);
     } catch {
-      setError("Microphone access was denied.");
+      setError(t("micDenied"));
     }
   }
 
@@ -68,15 +71,15 @@ export function SampleInput({ maxBytes }: { maxBytes: number }) {
       />
       <div className="flex items-center gap-3">
         <button type="button" onClick={recording ? stop : start} className={buttonClass(recording ? "danger" : "secondary")}>
-          {recording ? "■ Stop recording" : "● Record instead"}
+          {recording ? t("stopRecording") : t("record")}
         </button>
-        {recording && <span className="text-sm text-red-600">Recording… read naturally for 10–15 seconds.</span>}
+        {recording && <span className="text-sm text-red-600">{t("recording")}</span>}
       </div>
       {preview && !recording && (
         <div className="flex items-center gap-3">
           <audio controls src={preview} className="min-w-0 flex-1" />
           <button type="button" onClick={() => setSample(null)} className={buttonClass("secondary")}>
-            Remove
+            {tc("remove")}
           </button>
         </div>
       )}

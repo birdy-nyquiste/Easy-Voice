@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getLocale, getTranslations } from "next-intl/server";
 import { Badge, Card, Empty, Notice, PageHeader } from "@/components/ui";
 import { config } from "@/lib/config";
 import { formatCents, formatDateTime, formatPhone } from "@/lib/format";
@@ -12,27 +13,34 @@ export default async function MessagesPage() {
   const user = await requireUser();
   const [conversations, numbers] = await Promise.all([listConversations(user.id), listUserNumbers(user.id)]);
   const active = numbers.find((n) => n.status === "active");
+  const [t, locale] = await Promise.all([getTranslations("messages"), getLocale()]);
 
   return (
     <div className="space-y-6">
       <AutoRefresh everyMs={10_000} />
       <PageHeader
-        title="Messages"
-        description={`Texts sent to your number, ${formatCents(config.pricing.smsInboundPerPartCents)} per segment. Receive only: replies aren't supported.`}
+        title={t("title")}
+        description={t("description", { price: formatCents(config.pricing.smsInboundPerPartCents) })}
       />
 
       {!config.features.inboundSms ? (
-        <Notice>Receiving texts isn&apos;t turned on for this service yet.</Notice>
+        <Notice>{t("smsOff")}</Notice>
       ) : !active ? (
         <Notice>
-          <Link href="/numbers" className="underline">Get a number</Link> to start receiving texts.
+          {t.rich("getNumber", {
+            link: (chunks) => (
+              <Link href="/numbers" className="underline">
+                {chunks}
+              </Link>
+            ),
+          })}
         </Notice>
       ) : (
-        !active.smsEnabledAt && <Notice>Texting is still being set up for {formatPhone(active.e164)}. Check back later.</Notice>
+        !active.smsEnabledAt && <Notice>{t("smsSettingUp", { number: formatPhone(active.e164) })}</Notice>
       )}
 
       {conversations.length === 0 ? (
-        <Empty>No texts yet.</Empty>
+        <Empty>{t("empty")}</Empty>
       ) : (
         <Card className="p-0">
           <ul className="divide-y divide-stone-100">
@@ -43,12 +51,12 @@ export default async function MessagesPage() {
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <span className={`whitespace-nowrap ${c.unread ? "font-semibold" : "font-medium"}`}>{c.name ?? formatPhone(c.from)}</span>
                       {c.name && <span className="whitespace-nowrap text-xs text-stone-500">{formatPhone(c.from)}</span>}
-                      {c.unread > 0 && <span className="whitespace-nowrap"><Badge tone="blue">{c.unread} new</Badge></span>}
-                      {c.count > 1 && <span className="whitespace-nowrap text-xs text-stone-400">{c.count} texts</span>}
+                      {c.unread > 0 && <span className="whitespace-nowrap"><Badge tone="blue">{t("newCount", { count: c.unread })}</Badge></span>}
+                      {c.count > 1 && <span className="whitespace-nowrap text-xs text-stone-400">{t("textCount", { count: c.count })}</span>}
                     </div>
-                    <p className={`mt-0.5 truncate text-sm ${c.unread ? "text-stone-800" : "text-stone-500"}`}>{messagePreview(c.last)}</p>
+                    <p className={`mt-0.5 truncate text-sm ${c.unread ? "text-stone-800" : "text-stone-500"}`}>{messagePreview(c.last, t)}</p>
                   </div>
-                  <span className="shrink-0 whitespace-nowrap text-xs text-stone-500 sm:text-sm">{formatDateTime(c.last.receivedAt)}</span>
+                  <span className="shrink-0 whitespace-nowrap text-xs text-stone-500 sm:text-sm">{formatDateTime(c.last.receivedAt, locale)}</span>
                 </Link>
               </li>
             ))}

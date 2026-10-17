@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
 import { calls, ledgerEntries, users } from "@/db/schema";
+import { showStored } from "@/lib/stored-text";
 import { handleCallEvent } from "@/server/calls/events";
 import { mockProvider } from "@/server/telnyx/mock";
 import { event, makeLine, makeUser, resetDb } from "./helpers";
@@ -70,6 +71,7 @@ describe("inbound calls", () => {
     const c = await callByCcid("cc-1");
     expect(c.status).toBe("rejected");
     expect(c.outcome).toMatch(/balance/);
+    expect(showStored("zh", c.outcome!, c.outcomeMsg)).toBe("已拒接：账户余额已用完。充值后即可接听来电。");
 
     await handleCallEvent(event("call.hangup", { callControlId: "cc-1", hangupCause: "call_rejected" }));
     expect(await callByCcid("cc-1")).toMatchObject({ status: "rejected", billedCents: 0 });
@@ -171,7 +173,9 @@ describe("outbound calls", () => {
       .values({ userId: user.id, agentId: agent.id, phoneNumberId: number.id, direction: "outbound", fromNumber: number.e164, toNumber: "+14155550000", providerCallControlId: "cc-out" })
       .returning();
     await handleCallEvent(event("call.hangup", { callControlId: "cc-out", clientState: c.id, hangupCause: "timeout" }));
-    expect(await callByCcid("cc-out")).toMatchObject({ status: "failed", outcome: "No answer.", billedCents: 0 });
+    const ended = await callByCcid("cc-out");
+    expect(ended).toMatchObject({ status: "failed", outcome: "No answer.", billedCents: 0 });
+    expect(showStored("zh", ended.outcome!, ended.outcomeMsg)).toBe("无人接听。");
   });
 
   it("starts the assistant with the call's goal and an outbound greeting", async () => {

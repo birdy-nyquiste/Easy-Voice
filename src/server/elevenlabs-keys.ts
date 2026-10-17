@@ -16,12 +16,6 @@ import { voiceProvider } from "./telnyx";
  * which assistants reference so Telnyx can speak with the user's ElevenLabs voices on calls.
  */
 
-export const ELEVENLABS_UNAVAILABLE = "Connecting ElevenLabs is temporarily unavailable.";
-
-/** Shown wherever a rejected key stops something from working. */
-export const ELEVENLABS_KEY_REJECTED =
-  "ElevenLabs rejected your API key (revoked, expired or missing permissions). Replace it under Account → API keys.";
-
 /** How long a key check is trusted before calls check again. */
 const KEY_CHECK_TTL_MS = 5 * 60 * 1000;
 
@@ -33,20 +27,18 @@ export async function getElevenLabsKey(userId: string): Promise<ElevenLabsKey | 
 /** The user's ElevenLabs key in plain text; a UserError if they haven't connected one. */
 export async function requireElevenLabsApiKey(userId: string): Promise<string> {
   const row = await getElevenLabsKey(userId);
-  if (!row) throw new UserError("Connect your ElevenLabs account first.");
+  if (!row) throw new UserError("elevenLabsNotConnected");
   return decryptSecret(row.keyEncrypted);
 }
 
 /** Turn an ElevenLabs failure into something the key's owner can act on. */
-export function elevenLabsUserError(err: unknown, action: string): UserError | unknown {
+export function elevenLabsUserError(err: unknown, action: "check" | "clone"): UserError | unknown {
   if (!(err instanceof ElevenLabsError)) return err;
   if (err.status === 401) {
-    return new UserError(
-      `ElevenLabs refused the key (${err.detail}). Check that it's active and has the Text to Speech, Voices (write) and User (read) permissions, then connect it again.`,
-    );
+    return new UserError("elevenLabsKeyRefused", { detail: err.detail });
   }
-  if (err.status === 429) return new UserError(`ElevenLabs is busy or your plan's limit was reached. Try again in a minute.`);
-  if (err.status >= 400 && err.status < 500) return new UserError(`ElevenLabs couldn't ${action}: ${err.detail}`);
+  if (err.status === 429) return new UserError("elevenLabsBusy");
+  if (err.status >= 400 && err.status < 500) return new UserError(action === "check" ? "elevenLabsCheckFailed" : "elevenLabsCloneFailed", { detail: err.detail });
   return err;
 }
 
@@ -55,10 +47,10 @@ async function checkAccount(apiKey: string): Promise<ElevenLabsAccount> {
   try {
     account = await elevenLabs().getAccount(apiKey);
   } catch (err) {
-    throw elevenLabsUserError(err, "check the key");
+    throw elevenLabsUserError(err, "check");
   }
   if (!account.canClone) {
-    throw new UserError("Your ElevenLabs plan doesn't include voice cloning. Instant Voice Cloning needs the Starter plan or higher.");
+    throw new UserError("elevenLabsNoCloning");
   }
   return account;
 }
@@ -68,15 +60,13 @@ async function checkAccount(apiKey: string): Promise<ElevenLabsAccount> {
  * (clones live in that account, so a different account would leave them unusable).
  */
 export async function connectElevenLabs(userId: string, rawKey: string): Promise<ElevenLabsKey> {
-  if (!config.features.elevenLabs) throw new UserError(ELEVENLABS_UNAVAILABLE);
+  if (!config.features.elevenLabs) throw new UserError("elevenLabsUnavailable");
   const apiKey = rawKey.trim();
-  if (!apiKey) throw new UserError("Paste your ElevenLabs API key.");
+  if (!apiKey) throw new UserError("apiKeyRequired");
   const existing = await getElevenLabsKey(userId);
   const account = await checkAccount(apiKey);
   if (existing && existing.accountId !== account.accountId) {
-    throw new UserError(
-      "That key belongs to a different ElevenLabs account. Disconnect the current account first (its cloned voices will be removed here).",
-    );
+    throw new UserError("elevenLabsOtherAccount");
   }
 
   const telnyxSecretRef = `elevenlabs_${userId.replaceAll("-", "")}_${randomBytes(4).toString("hex")}`;
@@ -113,7 +103,7 @@ export async function disconnectElevenLabs(userId: string): Promise<void> {
   const existing = await getElevenLabsKey(userId);
   if (!existing) return;
   if ((await agentsUsingElevenLabs(userId)).length) {
-    throw new UserError("An agent uses one of your ElevenLabs voices. Change the agent's voice first.");
+    throw new UserError("elevenLabsVoiceInUse");
   }
   await db.transaction(async (tx) => {
     await tx

@@ -1,9 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { getLocale, getTranslations } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { attempt, type ActionState } from "@/lib/action";
 import { UserError } from "@/lib/errors";
+import { showStored } from "@/lib/stored-text";
 import { createAgent, deleteAgent, updateAgent } from "@/server/agents";
 import { requireUser } from "@/server/auth";
 
@@ -26,8 +28,10 @@ export async function saveAgentAction(_: ActionState, form: FormData): Promise<A
     const agent = id ? await updateAgent(user.id, id, fields(form)) : await createAgent(user.id, fields(form));
     id = agent.id;
     revalidatePath("/", "layout");
-    if (agent.status === "failed") throw new UserError(agent.failureReason ?? "Saving failed.");
-    return "Saved.";
+    if (agent.status === "failed") {
+      throw new UserError("agentSaveFailed", { reason: showStored(await getLocale(), agent.failureReason ?? "", agent.failureMsg) });
+    }
+    return (await getTranslations("common"))("saved");
   });
   // The agent page remounts its form after a save (see agents/[id]/page.tsx), which would drop
   // this action's state, so confirm via the URL instead.

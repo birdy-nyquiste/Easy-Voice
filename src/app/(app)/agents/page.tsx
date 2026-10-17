@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 import { ButtonLink, Card, Empty, PageHeader, StatusBadge } from "@/components/ui";
 import { config } from "@/lib/config";
 import { formatPhone } from "@/lib/format";
@@ -14,15 +15,24 @@ export default async function AgentsPage() {
   await resyncStaleAgents(user.id);
   const [agents, numbers, elKey] = await Promise.all([listUserAgents(user.id), listUserNumbers(user.id), getElevenLabsKey(user.id)]);
   const keyRejected = Boolean(elKey?.keyInvalidAt);
+  const [t, tl] = await Promise.all([getTranslations("agents"), getTranslations("languages")]);
   return (
     <div>
       <PageHeader
-        title="Agents"
-        description="An agent answers and places calls with the voice and instructions you give it."
-        action={agents.length < config.limits.agentsPerUser && <ButtonLink href="/agents/new">New agent</ButtonLink>}
+        title={t("title")}
+        description={t("description")}
+        action={agents.length < config.limits.agentsPerUser && <ButtonLink href="/agents/new">{t("new")}</ButtonLink>}
       />
       {agents.length === 0 ? (
-        <Empty>No agents yet. <Link href="/agents/new" className="font-medium underline">Create your first agent</Link>.</Empty>
+        <Empty>
+          {t.rich("empty", {
+            link: (chunks) => (
+              <Link href="/agents/new" className="font-medium underline">
+                {chunks}
+              </Link>
+            ),
+          })}
+        </Empty>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {agents.map((a) => {
@@ -36,10 +46,10 @@ export default async function AgentsPage() {
                   </div>
                   <p className="mt-1 line-clamp-2 text-sm text-stone-500">{a.greeting}</p>
                   {keyRejected && isElevenLabsVoice(a.voiceRef) && (
-                    <p className="mt-2 text-xs text-red-600">Can&apos;t take or make calls: ElevenLabs rejected your API key.</p>
+                    <p className="mt-2 text-xs text-red-600">{t("keyRejected")}</p>
                   )}
                   <p className="mt-3 text-xs text-stone-500">
-                    {a.language === "zh" ? "Mandarin" : "English"} · {num ? `Answers ${formatPhone(num.e164)}` : "Not on a number"}
+                    {tl(a.language)} · {num ? t("answers", { number: formatPhone(num.e164) }) : t("notOnNumber")}
                   </p>
                 </Card>
               </Link>

@@ -1,7 +1,8 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
-import { payments, phoneNumbers, users } from "@/db/schema";
+import { ledgerEntries, payments, phoneNumbers, users } from "@/db/schema";
+import { showStored } from "@/lib/stored-text";
 import { UserError } from "@/lib/errors";
 import { addDevCredit, completePayment, createTopup } from "@/server/billing/payments";
 import { chargeNumberRenewals, purchaseNumber } from "@/server/numbers";
@@ -26,6 +27,9 @@ describe("number purchase", () => {
     const n = await purchaseNumber(u, "+14155551234");
     expect(n.status).toBe("pending");
     expect(await balance(u.id)).toBe(700);
+    const [entry] = await db.select().from(ledgerEntries).where(eq(ledgerEntries.kind, "number_monthly"));
+    expect(entry.description).toBe("Phone number +14155551234 — first month");
+    expect(showStored("zh", entry.description, entry.descriptionMsg)).toBe("电话号码 +14155551234——首月");
   });
 
   it("refunds when the provider order fails", async () => {

@@ -3,6 +3,7 @@ import { and, eq, isNotNull, isNull, lt } from "drizzle-orm";
 import { db } from "@/db";
 import { calls, phoneNumbers, users } from "@/db/schema";
 import { config } from "@/lib/config";
+import { stored } from "@/lib/stored-text";
 import { resyncStaleAgents } from "./agents";
 import { purgeCallContent } from "./calls";
 import { fetchCallResults } from "./calls/results";
@@ -26,7 +27,7 @@ export async function runDailyJobs(now = new Date()) {
     .innerJoin(users, eq(users.id, phoneNumbers.userId))
     .where(and(eq(phoneNumbers.status, "active"), isNotNull(users.negativeSince), lt(users.negativeSince, cutoff)));
   for (const d of delinquent) {
-    await releaseNumber(d.userId, d.numberId, "Released: balance stayed negative past the grace period");
+    await releaseNumber(d.userId, d.numberId, stored("numberReleasedNegative"));
   }
 
   // Retention: delete recordings/transcripts older than RETENTION_DAYS, here and at the provider.

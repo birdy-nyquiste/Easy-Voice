@@ -4,6 +4,7 @@ import { db, withUserLock } from "@/db";
 import { agents, phoneNumbers, type PhoneNumber, type User } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
+import { stored, storedColumns, type StoredText } from "@/lib/stored-text";
 import { formatCents } from "@/lib/format";
 import { applyLedger, chargePurchase, refundPurchase, type Purchase } from "./billing/ledger";
 import { enableInboundSms } from "./messages";
@@ -19,7 +20,7 @@ export async function listUserNumbers(userId: string): Promise<PhoneNumber[]> {
 }
 
 export async function searchAvailableNumbers(areaCode: string) {
-  if (areaCode && !/^\d{3}$/.test(areaCode)) throw new UserError("Area code must be 3 digits.");
+  if (areaCode && !/^\d{3}$/.test(areaCode)) throw new UserError("areaCodeDigits");
   return voiceProvider().searchNumbers({ areaCode: areaCode || undefined, limit: 10 });
 }
 
@@ -29,7 +30,7 @@ function numberPurchase(n: Pick<PhoneNumber, "id" | "userId" | "e164">): Purchas
     priceCents: config.pricing.numberMonthlyCents,
     kind: "number_monthly",
     key: `number:${n.id}:0`,
-    description: `Phone number ${n.e164} — first month`,
+    description: stored("ledgerNumberFirstMonth", { number: n.e164 }),
     refType: "phone_number",
     refId: n.id,
   };
@@ -37,7 +38,7 @@ function numberPurchase(n: Pick<PhoneNumber, "id" | "userId" | "e164">): Purchas
 
 /** Buy a number: charges the first month up front, refunds if the order fails. */
 export async function purchaseNumber(user: User, e164: string): Promise<PhoneNumber> {
-  if (!/^\+1\d{10}$/.test(e164)) throw new UserError("Invalid US number.");
+  if (!/^\+1\d{10}$/.test(e164)) throw new UserError("invalidUsNumber");
 
   // Limit check, row insert and charge commit together under the user's lock.
   const row = await withUserLock(user.id, async (tx) => {
@@ -46,12 +47,12 @@ export async function purchaseNumber(user: User, e164: string): Promise<PhoneNum
       .from(phoneNumbers)
       .where(and(eq(phoneNumbers.userId, user.id), inArray(phoneNumbers.status, ["pending", "active"])));
     if (existing.length >= config.limits.numbersPerUser) {
-      throw new UserError(`You can have up to ${config.limits.numbersPerUser} number(s).`);
+      throw new UserError("numberLimit", { max: config.limits.numbersPerUser });
     }
     const [inserted] = await tx.insert(phoneNumbers).values({ userId: user.id, e164, status: "pending" }).returning();
     await chargePurchase(
       numberPurchase(inserted),
-      `Insufficient balance. A number costs ${formatCents(config.pricing.numberMonthlyCents)}/month — top up first.`,
+      new UserError("numberInsufficientBalance", { price: formatCents(config.pricing.numberMonthlyCents) }),
       tx,
     );
     return inserted;
@@ -64,20 +65,20 @@ export async function purchaseNumber(user: User, e164: string): Promise<PhoneNum
       .set({ providerOrderId: order.orderId, providerNumberId: order.numberId, paidThrough: new Date(Date.now() + MONTH_MS) })
       .where(eq(phoneNumbers.id, row.id))
       .returning();
-    if (order.status === "failure") return failNumber(updated, order.failureReason ?? "Order rejected by carrier");
+    if (order.status === "failure") return failNumber(updated, order.failureReason ?? stored("numberOrderRejected"));
     if (order.status === "success") return activateNumber(updated, order.numberId);
     return updated;
   } catch (err) {
     console.error("orderNumber failed", err);
-    await failNumber(row, "The number could not be ordered (it may no longer be available).");
-    throw new UserError("That number could not be ordered. Your payment was refunded — try another number.");
+    await failNumber(row, stored("numberCouldNotOrder"));
+    throw new UserError("numberOrderFailed");
   }
 }
 
 async function activateNumber(n: PhoneNumber, numberId?: string): Promise<PhoneNumber> {
   const [u] = await db
     .update(phoneNumbers)
-    .set({ status: "active", providerNumberId: numberId ?? n.providerNumberId, failureReason: null })
+    .set({ status: "active", providerNumberId: numberId ?? n.providerNumberId, failureReason: null, failureMsg: null })
     .where(eq(phoneNumbers.id, n.id))
     .returning();
   // Receiving texts is a bonus; a failure here must not fail the purchase (the daily cron retries).
@@ -85,11 +86,12 @@ async function activateNumber(n: PhoneNumber, numberId?: string): Promise<PhoneN
   return u;
 }
 
-async function failNumber(n: PhoneNumber, reason: string): Promise<PhoneNumber> {
-  await refundPurchase(numberPurchase(n), `Refund — number ${n.e164} could not be activated`);
+async function failNumber(n: PhoneNumber, reason: StoredText): Promise<PhoneNumber> {
+  await refundPurchase(numberPurchase(n), stored("ledgerNumberRefund", { number: n.e164 }));
+  const r = storedColumns(reason);
   const [u] = await db
     .update(phoneNumbers)
-    .set({ status: "failed", failureReason: reason })
+    .set({ status: "failed", failureReason: r.text, failureMsg: r.msg })
     .where(eq(phoneNumbers.id, n.id))
     .returning();
   return u;
@@ -106,23 +108,28 @@ export async function refreshPendingNumbers(userId?: string): Promise<void> {
     try {
       const order = await voiceProvider().getNumberOrder(n.providerOrderId);
       if (order.status === "success") await activateNumber(n, order.numberId);
-      else if (order.status === "failure") await failNumber(n, order.failureReason ?? "Order failed");
+      else if (order.status === "failure") await failNumber(n, order.failureReason ?? stored("numberOrderFailed"));
     } catch (err) {
       console.error("getNumberOrder failed", n.id, err);
     }
   }
 }
 
-export async function releaseNumber(userId: string, numberId: string, reason = "Released by user"): Promise<void> {
+export async function releaseNumber(userId: string, numberId: string, reason: StoredText = stored("numberReleasedByUser")): Promise<void> {
   const [n] = await db
     .select()
     .from(phoneNumbers)
     .where(and(eq(phoneNumbers.id, numberId), eq(phoneNumbers.userId, userId)));
-  if (!n || n.status === "released") throw new UserError("Number not found.");
+  if (!n || n.status === "released") throw new UserError("numberNotFound");
   if (n.providerNumberId && n.status === "active") await voiceProvider().releaseNumber(n.providerNumberId);
   await db
     .update(phoneNumbers)
-    .set({ status: "released", agentId: null, releasedAt: new Date(), failureReason: n.status === "failed" ? n.failureReason : reason })
+    .set({
+      status: "released",
+      agentId: null,
+      releasedAt: new Date(),
+      ...(n.status === "failed" ? {} : { failureReason: storedColumns(reason).text, failureMsg: storedColumns(reason).msg }),
+    })
     .where(eq(phoneNumbers.id, n.id));
 }
 
@@ -131,10 +138,10 @@ export async function assignAgentToNumber(userId: string, numberId: string, agen
     .select()
     .from(phoneNumbers)
     .where(and(eq(phoneNumbers.id, numberId), eq(phoneNumbers.userId, userId)));
-  if (!n || n.status === "released") throw new UserError("Number not found.");
+  if (!n || n.status === "released") throw new UserError("numberNotFound");
   if (agentId) {
     const [a] = await db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.userId, userId)));
-    if (!a || a.deletedAt) throw new UserError("Agent not found.");
+    if (!a || a.deletedAt) throw new UserError("agentNotFound");
   }
   await db.update(phoneNumbers).set({ agentId }).where(eq(phoneNumbers.id, n.id));
 }
@@ -150,7 +157,7 @@ export async function chargeNumberRenewals(now = new Date()): Promise<number> {
       amountCents: -config.pricing.numberMonthlyCents,
       kind: "number_monthly",
       idempotencyKey: `number:${n.id}:${n.paidThrough.toISOString()}`,
-      description: `Phone number ${n.e164} — monthly rental`,
+      description: stored("ledgerNumberMonthly", { number: n.e164 }),
       refType: "phone_number",
       refId: n.id,
     });

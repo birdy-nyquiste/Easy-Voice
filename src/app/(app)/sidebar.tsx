@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { LocaleSwitcher } from "@/components/locale-switcher";
 import { isActivePath } from "@/components/ui";
 import { SIDEBAR_COOKIE } from "@/lib/ui-prefs";
 import { logoutAction } from "../login/actions";
@@ -14,11 +16,11 @@ export interface Account {
   lowBalance: boolean;
 }
 
-const LINKS: { href: string; label: string; icon: ReactNode }[] = [
-  { href: "/dashboard", label: "Overview", icon: <path d="M3.5 9.5 10 4l6.5 5.5V16a1 1 0 0 1-1 1H12v-4.5H8V17H4.5a1 1 0 0 1-1-1V9.5Z" /> },
+const LINKS: { href: string; label: "overview" | "agents" | "voices" | "numbers" | "calls" | "messages"; icon: ReactNode }[] = [
+  { href: "/dashboard", label: "overview", icon: <path d="M3.5 9.5 10 4l6.5 5.5V16a1 1 0 0 1-1 1H12v-4.5H8V17H4.5a1 1 0 0 1-1-1V9.5Z" /> },
   {
     href: "/agents",
-    label: "Agents",
+    label: "agents",
     icon: (
       <>
         <rect x="4" y="6.5" width="12" height="9.5" rx="3" />
@@ -26,18 +28,18 @@ const LINKS: { href: string; label: string; icon: ReactNode }[] = [
       </>
     ),
   },
-  { href: "/voices", label: "Voices", icon: <path d="M4 8.5v3M7 6v8M10 4v12M13 6.5v7M16 8.5v3" /> },
-  { href: "/numbers", label: "Numbers", icon: <path d="M8 3.5 6.5 16.5M13.5 3.5 12 16.5M4 7.5h12.5M3.5 12.5h12.5" /> },
+  { href: "/voices", label: "voices", icon: <path d="M4 8.5v3M7 6v8M10 4v12M13 6.5v7M16 8.5v3" /> },
+  { href: "/numbers", label: "numbers", icon: <path d="M8 3.5 6.5 16.5M13.5 3.5 12 16.5M4 7.5h12.5M3.5 12.5h12.5" /> },
   {
     href: "/calls",
-    label: "Calls",
+    label: "calls",
     icon: (
       <path d="M4.5 3.5h2.1a1 1 0 0 1 .97.76l.62 2.5a1 1 0 0 1-.37 1.04l-1.17.88a9 9 0 0 0 4.67 4.67l.88-1.17a1 1 0 0 1 1.04-.37l2.5.62a1 1 0 0 1 .76.97v2.1a1 1 0 0 1-1 1H14C8.2 16.5 3.5 11.8 3.5 6V4.5a1 1 0 0 1 1-1Z" />
     ),
   },
   {
     href: "/messages",
-    label: "Messages",
+    label: "messages",
     icon: <path d="M5 4h10a1.5 1.5 0 0 1 1.5 1.5v6.5a1.5 1.5 0 0 1-1.5 1.5H9.5L6 16.5v-3H5A1.5 1.5 0 0 1 3.5 12V5.5A1.5 1.5 0 0 1 5 4Z" />,
   },
 ];
@@ -74,6 +76,7 @@ function Tooltip({ children }: { children: ReactNode }) {
 }
 
 export function Sidebar({ account, unread, initialCollapsed }: { account: Account; unread: number; initialCollapsed: boolean }) {
+  const t = useTranslations("nav");
   const path = usePathname();
   const [collapsed, setCollapsed] = useState(initialCollapsed);
 
@@ -93,8 +96,8 @@ export function Sidebar({ account, unread, initialCollapsed }: { account: Accoun
       <button
         type="button"
         onClick={toggle}
-        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        aria-label={collapsed ? t("expand") : t("collapse")}
+        title={collapsed ? t("expand") : t("collapse")}
         className={`absolute -right-3 top-6 z-20 hidden h-6 w-6 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 shadow-sm transition hover:border-stone-300 hover:text-stone-900 md:flex ${focusRing}`}
       >
         <Icon className={`h-3.5 w-3.5 transition-transform duration-200 motion-reduce:transition-none ${collapsed ? "rotate-180" : ""}`}>
@@ -130,19 +133,19 @@ export function Sidebar({ account, unread, initialCollapsed }: { account: Accoun
                     <span aria-hidden className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-sky-600 ring-2 ring-white" />
                   )}
                 </span>
-                <span className={labelClass}>{l.label}</span>
+                <span className={labelClass}>{t(l.label)}</span>
                 {showUnread && (
                   // Hidden from view in the rail (the dot shows instead) but still read out.
                   <span className={`rounded-full bg-sky-600 px-1.5 py-0.5 text-xs font-medium text-white ${collapsed ? "md:sr-only" : ""}`}>
                     {unread}
-                    <span className="sr-only"> new</span>
+                    <span className="sr-only">{t("unreadSr")}</span>
                   </span>
                 )}
               </span>
               {collapsed && (
                 <Tooltip>
-                  {l.label}
-                  {showUnread && ` · ${unread} new`}
+                  {t(l.label)}
+                  {showUnread && t("unreadTooltip", { count: unread })}
                 </Tooltip>
               )}
             </Link>
@@ -204,6 +207,7 @@ function Avatar({ account }: { account: Account }) {
 }
 
 function AccountActions({ account }: { account: Account }) {
+  const t = useTranslations("nav");
   const path = usePathname();
   const onAccount = isActivePath(path, "/account");
   const rowClass = `flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${focusRing}`;
@@ -215,7 +219,7 @@ function AccountActions({ account }: { account: Account }) {
           <rect x="3" y="5.5" width="14" height="10" rx="2" />
           <path d="M3 9h14M6.5 12.5h2" />
         </Icon>
-        <span className="flex-1">Balance</span>
+        <span className="flex-1">{t("balance")}</span>
         <span className="font-semibold tabular-nums">{account.balance}</span>
       </Link>
       <Link
@@ -227,24 +231,31 @@ function AccountActions({ account }: { account: Account }) {
           <circle cx="10" cy="7" r="3" />
           <path d="M4.5 16.5a5.5 5.5 0 0 1 11 0" />
         </Icon>
-        Account
+        {t("account")}
       </Link>
+      {/* No visible label: the sidebar is too narrow for it and both options; the group is named for screen readers. */}
+      <div className="flex items-center gap-2.5 px-2.5 py-1.5 text-stone-700">
+        <Icon className="h-4 w-4">
+          <circle cx="10" cy="10" r="6.5" />
+          <path d="M3.5 10h13M10 3.5c1.8 1.8 2.6 4 2.6 6.5s-.8 4.7-2.6 6.5c-1.8-1.8-2.6-4-2.6-6.5s.8-4.7 2.6-6.5Z" />
+        </Icon>
+        <LocaleSwitcher fill />
+      </div>
       <form action={logoutAction}>
         <button type="submit" className={`${rowClass} text-stone-700 hover:bg-red-50 hover:text-red-700`}>
           <Icon className="h-4 w-4">
             <path d="M8 4H5.5A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8M12 13.5 15.5 10 12 6.5M15.5 10H8.5" />
           </Icon>
-          Sign out
+          {t("signOut")}
         </button>
       </form>
     </div>
   );
 }
 
-const emptyBalanceNote = (account: Account) => (account.lowBalance ? ", balance is empty" : "");
-
 /** Expanded sidebar: shows the email; opening slides the balance and actions up above it. */
 function AccountCard({ account }: { account: Account }) {
+  const t = useTranslations("nav");
   const panel = useRef<HTMLDivElement>(null);
   const { open, toggle, root, trigger, onAccount } = useMenu(panel);
   const highlighted = open || onAccount;
@@ -269,7 +280,7 @@ function AccountCard({ account }: { account: Account }) {
         type="button"
         onClick={toggle}
         aria-expanded={open}
-        aria-label={`Account menu for ${account.email}${emptyBalanceNote(account)}`}
+        aria-label={t(account.lowBalance ? "accountMenuEmpty" : "accountMenu", { email: account.email })}
         className={`flex w-full items-center gap-2.5 rounded-xl p-2 text-left ${focusRing}`}
       >
         <Avatar account={account} />
@@ -286,6 +297,7 @@ function AccountCard({ account }: { account: Account }) {
 
 /** Collapsed rail (opens to the side) and phones (opens below): an avatar with a floating menu. */
 function AccountPopover({ account, placement }: { account: Account; placement: "side" | "below" }) {
+  const t = useTranslations("nav");
   const panel = useRef<HTMLDivElement>(null);
   const { open, toggle, root, trigger, onAccount } = useMenu(panel);
   const highlighted = open || onAccount;
@@ -297,7 +309,7 @@ function AccountPopover({ account, placement }: { account: Account; placement: "
         type="button"
         onClick={toggle}
         aria-expanded={open}
-        aria-label={`Account menu for ${account.email}${emptyBalanceNote(account)}`}
+        aria-label={t(account.lowBalance ? "accountMenuEmpty" : "accountMenu", { email: account.email })}
         title={side && !open ? account.email : undefined}
         className={`flex items-center justify-center rounded-full transition ${focusRing} ${side ? "mx-auto p-1 hover:bg-stone-100" : ""} ${highlighted ? "ring-2 ring-stone-300" : ""}`}
       >

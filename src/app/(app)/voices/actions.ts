@@ -1,8 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { getLocale, getTranslations } from "next-intl/server";
 import { attempt, type ActionState } from "@/lib/action";
 import { UserError } from "@/lib/errors";
+import { showStored } from "@/lib/stored-text";
 import { toLanguage } from "@/lib/language";
 import { requireUser } from "@/server/auth";
 import { cloneVoice, deleteVoice } from "@/server/voices";
@@ -11,7 +13,7 @@ export async function cloneVoiceAction(_: ActionState, form: FormData): Promise<
   return attempt(async () => {
     const user = await requireUser();
     const audio = form.get("audio");
-    if (!(audio instanceof File)) throw new UserError("Upload or record an audio sample.");
+    if (!(audio instanceof File)) throw new UserError("audioRequired");
     const v = await cloneVoice(user.id, {
       name: String(form.get("name") ?? ""),
       language: toLanguage(form.get("language")),
@@ -22,9 +24,12 @@ export async function cloneVoiceAction(_: ActionState, form: FormData): Promise<
     });
     revalidatePath("/", "layout");
     if (v.status === "failed") {
-      throw new UserError(v.provider === "elevenlabs" ? `Cloning failed: ${v.failureReason}` : `Cloning failed: ${v.failureReason} You were refunded.`);
+      throw new UserError(v.provider === "elevenlabs" ? "cloneFailed" : "cloneFailedRefunded", {
+        reason: showStored(await getLocale(), v.failureReason ?? "", v.failureMsg),
+      });
     }
-    return v.status === "ready" ? "Voice cloned. You can use it in an agent now." : "Cloning started. It's usually ready within a minute.";
+    const t = await getTranslations("voices");
+    return v.status === "ready" ? t("cloned") : t("cloneStarted");
   });
 }
 

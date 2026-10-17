@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { getTranslations } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { attempt, type ActionState } from "@/lib/action";
 import { requireUser } from "@/server/auth";
@@ -30,6 +31,7 @@ export async function saveContactNameAction(_: ActionState, form: FormData): Pro
     const name = String(form.get("name") ?? "");
     await setContactName(user.id, String(form.get("number") ?? ""), name);
     revalidatePath("/messages", "layout");
-    return name.trim() ? "Name saved." : "Name removed.";
+    const t = await getTranslations("messages");
+    return name.trim() ? t("nameSaved") : t("nameRemoved");
   });
 }
