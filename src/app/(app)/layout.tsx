@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { getTranslations } from "next-intl/server";
 import { requireUser } from "@/server/auth";
 import { formatCents } from "@/lib/format";
 import { config } from "@/lib/config";
@@ -10,6 +11,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const user = await requireUser();
   const unread = await countUnreadMessages(user.id);
   const collapsed = (await cookies()).get(SIDEBAR_COOKIE)?.value === "collapsed";
+  const t = await getTranslations("mock");
   return (
     <div className="min-h-screen md:flex">
       <Sidebar
@@ -20,7 +22,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <main className="mx-auto w-full min-w-0 max-w-5xl flex-1 px-4 py-8 md:px-8">
         {config.telnyx.mode === "mock" && (
           <div className="mb-6 rounded-lg border border-sky-200 bg-sky-50 px-4 py-2 text-xs text-sky-800">
-            Mock mode: phone numbers, voices, calls and texts are simulated. Set <code>TELNYX_MODE=live</code> to use Telnyx.
+            {t.rich("banner", { code: (chunks) => <code>{chunks}</code> })}
           </div>
         )}
         {children}

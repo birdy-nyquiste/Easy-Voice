@@ -3,10 +3,11 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { db, withUserLock } from "@/db";
 import { agents, calls, phoneNumbers, type Call, type User } from "@/db/schema";
 import { UserError } from "@/lib/errors";
+import { outcomeColumns, stored } from "@/lib/stored-text";
 import { toE164US } from "@/lib/format";
 import { hasSpendableBalance } from "@/server/billing/ledger";
 import { MAX_CALL_GOAL_LENGTH } from "@/server/agents";
-import { ELEVENLABS_KEY_REJECTED, elevenLabsKeyUsable } from "@/server/elevenlabs-keys";
+import { elevenLabsKeyUsable } from "@/server/elevenlabs-keys";
 import { voiceProvider } from "@/server/telnyx";
 import { isElevenLabsVoice } from "@/server/telnyx/stock-voices";
 import { callRef, failedCallFields, hasOtherActiveCall } from "./state";
@@ -33,34 +34,34 @@ export async function getUserCall(userId: string, callId: string): Promise<Call 
 
 export async function startOutboundCall(user: User, input: { agentId: string; to: string; goal?: string }): Promise<Call> {
   const to = toE164US(input.to);
-  if (!to) throw new UserError("Enter a valid US phone number.");
+  if (!to) throw new UserError("invalidPhone");
   const goal = input.goal?.trim() || null;
   if (goal && goal.length > MAX_CALL_GOAL_LENGTH) {
-    throw new UserError(`Keep the call goal under ${MAX_CALL_GOAL_LENGTH} characters.`);
+    throw new UserError("goalTooLong", { max: MAX_CALL_GOAL_LENGTH });
   }
-  if (!hasSpendableBalance(user.balanceCents)) throw new UserError("Your balance is empty. Top up to make calls.");
+  if (!hasSpendableBalance(user.balanceCents)) throw new UserError("balanceEmptyCall");
 
   const [agent] = await db
     .select()
     .from(agents)
     .where(and(eq(agents.id, input.agentId), eq(agents.userId, user.id), isNull(agents.deletedAt)));
-  if (!agent) throw new UserError("Agent not found.");
-  if (agent.status !== "ready") throw new UserError("This agent isn't ready. Open it and save again.");
+  if (!agent) throw new UserError("agentNotFound");
+  if (agent.status !== "ready") throw new UserError("agentNotReady");
   if (isElevenLabsVoice(agent.voiceRef) && !(await elevenLabsKeyUsable(user.id))) {
-    throw new UserError(`This agent's voice can't speak. ${ELEVENLABS_KEY_REJECTED}`);
+    throw new UserError("agentVoiceKeyRejected");
   }
 
   const [from] = await db
     .select()
     .from(phoneNumbers)
     .where(and(eq(phoneNumbers.userId, user.id), eq(phoneNumbers.status, "active")));
-  if (!from) throw new UserError("You need an active phone number to call from.");
-  if (from.e164 === to) throw new UserError("You can't call your own agent number.");
+  if (!from) throw new UserError("noActiveNumber");
+  if (from.e164 === to) throw new UserError("cantCallOwnNumber");
 
   // Busy check + insert under the user's lock so two clicks can't start two calls.
   const call = await withUserLock(user.id, async (tx) => {
     if (await hasOtherActiveCall(user.id, undefined, tx)) {
-      throw new UserError("Another call is in progress. Wait for it to finish.");
+      throw new UserError("callInProgress");
     }
     const [inserted] = await tx
       .insert(calls)
@@ -89,7 +90,7 @@ export async function startOutboundCall(user: User, input: { agentId: string; to
     console.error("dial failed", call.id, err);
     const [u] = await db
       .update(calls)
-      .set({ ...failedCallFields(new Date()), status: "failed", outcome: "The call could not be placed." })
+      .set({ ...failedCallFields(new Date()), status: "failed", ...outcomeColumns(stored("outcomeNotPlaced")) })
       .where(eq(calls.id, call.id))
       .returning();
     return u;
@@ -115,9 +116,9 @@ export async function getRecordingUrl(userId: string, callId: string): Promise<s
 /** User-initiated delete: removes recording at the provider and blanks content; billing rows stay. */
 export async function deleteCallRecord(userId: string, callId: string): Promise<void> {
   const [c] = await db.select().from(calls).where(and(eq(calls.id, callId), eq(calls.userId, userId)));
-  if (!c || c.deletedAt) throw new UserError("Call not found.");
-  if (!c.endedAt) throw new UserError("Can't delete a call that's still in progress.");
-  if (!(await purgeCallContent(c))) throw new UserError("Couldn't delete the recording. Try again shortly.");
+  if (!c || c.deletedAt) throw new UserError("callNotFound");
+  if (!c.endedAt) throw new UserError("callStillLive");
+  if (!(await purgeCallContent(c))) throw new UserError("recordingDeleteFailed");
   await db.update(calls).set({ deletedAt: new Date() }).where(eq(calls.id, c.id));
 }
 

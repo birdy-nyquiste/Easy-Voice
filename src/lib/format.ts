@@ -1,3 +1,5 @@
+import { BCP47, type Locale } from "@/i18n/locales";
+
 export function formatCents(cents: number): string {
   const sign = cents < 0 ? "-" : "";
   return `${sign}$${(Math.abs(cents) / 100).toFixed(2)}`;
@@ -20,9 +22,9 @@ export function formatDuration(sec: number | null | undefined): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-export function formatDateTime(d: Date | string | null | undefined): string {
+export function formatDateTime(d: Date | string | null | undefined, locale: Locale): string {
   if (!d) return "—";
-  return new Date(d).toLocaleString("en-US", {
+  return new Date(d).toLocaleString(BCP47[locale], {
     month: "short",
     day: "numeric",
     hour: "numeric",

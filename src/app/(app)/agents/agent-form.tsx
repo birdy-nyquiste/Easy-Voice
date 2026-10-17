@@ -1,3 +1,4 @@
+import { useTranslations } from "next-intl";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { Field, inputClass } from "@/components/ui";
 import { config } from "@/lib/config";
@@ -29,6 +30,11 @@ export function AgentForm({
   clones: Voice[];
   models: LlmModel[];
 }) {
+  const t = useTranslations("agents");
+  const tc = useTranslations("common");
+  const tl = useTranslations("languages");
+  const tg = useTranslations("gender");
+  const gender = (g: string) => (g === "female" || g === "male" ? tg(g) : g);
   const defaultModel = config.telnyx.llmModel;
   const otherModels = models.filter((m) => m.id !== defaultModel);
   // Keep a previously saved model selectable even if it's no longer offered.
@@ -58,13 +64,13 @@ export function AgentForm({
     <ActionForm action={saveAgentAction} className="space-y-5">
       {agent && <input type="hidden" name="id" value={agent.id} />}
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Name">
-          <input name="name" required maxLength={80} defaultValue={agent?.name} placeholder="My assistant" className={inputClass} />
+        <Field label={tc("name")}>
+          <input name="name" required maxLength={80} defaultValue={agent?.name} placeholder={t("namePlaceholder")} className={inputClass} />
         </Field>
-        <Field label="Primary language" hint="Callers can still mix English and Mandarin.">
+        <Field label={t("language")} hint={t("languageHint")}>
           <select name="language" defaultValue={agent?.language ?? "en"} className={inputClass}>
-            <option value="en">English</option>
-            <option value="zh">Mandarin (普通话)</option>
+            <option value="en">{tl("en")}</option>
+            <option value="zh">{tl("zhNative")}</option>
           </select>
         </Field>
       </div>
@@ -74,9 +80,9 @@ export function AgentForm({
         sttName={sttModelName(config.telnyx.sttModel)}
         voiceOptions={
           <>
-            <option value="" disabled>Choose a voice…</option>
+            <option value="" disabled>{t("chooseVoice")}</option>
             {readyClones.length > 0 && (
-              <optgroup label="Your cloned voices">
+              <optgroup label={t("yourClones")}>
                 {readyClones.map((v) => (
                   <option key={v.id} value={`clone:${v.id}`}>
                     {v.name}{v.provider === "elevenlabs" ? " (ElevenLabs)" : ""}
@@ -84,17 +90,17 @@ export function AgentForm({
                 ))}
               </optgroup>
             )}
-            <optgroup label="Mandarin + English">
+            <optgroup label={tl("bilingual")}>
               {bilingual.map((v) => (
                 <option key={v.ref} value={`stock:${v.ref}`}>
-                  {v.name}{v.gender ? ` (${v.gender})` : ""}
+                  {v.gender ? t("voiceWithGender", { name: v.name, gender: gender(v.gender) }) : v.name}
                 </option>
               ))}
             </optgroup>
-            <optgroup label="English only">
+            <optgroup label={tl("englishOnly")}>
               {englishOnly.map((v) => (
                 <option key={v.ref} value={`stock:${v.ref}`}>
-                  {v.name}{v.gender ? ` (${v.gender})` : ""}
+                  {v.gender ? t("voiceWithGender", { name: v.name, gender: gender(v.gender) }) : v.name}
                 </option>
               ))}
             </optgroup>
@@ -102,7 +108,7 @@ export function AgentForm({
         }
         modelSelect={
           <select name="model" defaultValue={agent?.model ?? ""} className={inputClass}>
-            <option value="">{modelName(defaultModel)} (default)</option>
+            <option value="">{t("defaultModel", { name: modelName(defaultModel) })}</option>
             {otherModels.map((m) => (
               <option key={m.id} value={m.id}>{m.name}</option>
             ))}
@@ -110,18 +116,23 @@ export function AgentForm({
         }
       />
       <Field
-        label="Greeting"
-        hint={`The first thing the agent says when answering. A recording notice ("${RECORDING_NOTICE.en}" / "${RECORDING_NOTICE.zh}") is added automatically. On calls the agent places, it opens with "${OUTBOUND_GREETING.en}" instead.`}
+        label={t("greeting")}
+        hint={t("greetingHint", {
+          noticeEn: RECORDING_NOTICE.en,
+          noticeZh: RECORDING_NOTICE.zh,
+          outboundEn: OUTBOUND_GREETING.en,
+          outboundZh: OUTBOUND_GREETING.zh,
+        })}
       >
         <input name="greeting" required maxLength={500} defaultValue={agent?.greeting ?? "Hi, you've reached my assistant. How can I help?"} className={inputClass} />
       </Field>
       <Field
-        label="Instructions"
-        hint={<>How the agent should behave on calls. Use <code>{"{{call_direction}}"}</code> (inbound or outbound) and <code>{"{{call_goal}}"}</code> (what you ask for when placing a call).</>}
+        label={t("instructions")}
+        hint={t.rich("instructionsHint", { code: (chunks) => <code>{chunks}</code> })}
       >
         <textarea name="instructions" required rows={8} maxLength={8000} defaultValue={agent?.instructions ?? DEFAULT_INSTRUCTIONS} className={`${inputClass} font-mono text-xs leading-relaxed`} />
       </Field>
-      <SubmitButton pendingText="Saving…">{agent ? "Save changes" : "Create agent"}</SubmitButton>
+      <SubmitButton pendingText={tc("saving")}>{agent ? t("saveChanges") : t("create")}</SubmitButton>
     </ActionForm>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useSyncExternalStore, type ReactNode } from "react";
+import { useTranslations } from "next-intl";
+import { useEffect, useSyncExternalStore } from "react";
 import { buttonClass } from "./ui";
 
 // One player for the whole page, so starting a preview stops whichever one was playing.
@@ -43,6 +44,7 @@ function usePlayer(): PlayerState {
 
 /** Play/stop a preview of a voice picker value ("stock:<ref>" or "clone:<voice uuid>"). */
 export function PreviewButton({ voice, compact }: { voice: string; compact?: boolean }) {
+  const t = useTranslations("preview");
   const p = usePlayer();
   useEffect(() => () => {
     if (current.voice === voice) {
@@ -51,18 +53,13 @@ export function PreviewButton({ voice, compact }: { voice: string; compact?: boo
     }
   }, [voice]);
   const status = p.voice === voice ? p.status : "idle";
-  const label: Record<PlayerState["status"], ReactNode> = {
-    idle: "▶ Preview",
-    loading: "Loading…",
-    playing: "■ Stop",
-    error: "Unavailable",
-  };
+  const label = { idle: t("play"), loading: t("loading"), playing: t("stop"), error: t("unavailable") };
   return (
     <button
       type="button"
       disabled={!voice}
       onClick={() => toggle(voice)}
-      aria-label={status === "playing" ? "Stop preview" : "Play preview"}
+      aria-label={status === "playing" ? t("stopLabel") : t("playLabel")}
       className={compact ? "shrink-0 rounded-md px-2 py-1 text-xs font-medium text-stone-600 hover:bg-stone-100 disabled:opacity-40" : `${buttonClass("secondary")} shrink-0`}
     >
       {label[status]}

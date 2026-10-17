@@ -3,11 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
 import { agents, voices } from "@/db/schema";
 import { config } from "@/lib/config";
+import { errorText } from "@/lib/errors";
 import { createAgent, ENGLISH_ONLY_VOICE_RULE, platformFingerprint, resyncStaleAgents } from "@/server/agents";
 import { mockProvider } from "@/server/telnyx/mock";
 import { FeatureNotPermittedError } from "@/server/telnyx/types";
-import { CLONING_UNAVAILABLE, cloneVoice } from "@/server/voices";
+import { cloneVoice } from "@/server/voices";
 import { makeUser, resetDb } from "./helpers";
+
+const CLONING_UNAVAILABLE = errorText("en", "cloningUnavailable");
 
 const original = { ...config.telnyx };
 beforeEach(resetDb);
@@ -119,7 +122,7 @@ describe("agent model", () => {
     vi.spyOn(mockProvider, "createAssistant").mockRejectedValue(new FeatureNotPermittedError("cloned_voices", "403"));
     const a = await createAgent(u.id, input);
     expect(a.status).toBe("failed");
-    expect(a.failureReason).toBe(`${CLONING_UNAVAILABLE} Pick a built-in voice for now.`);
+    expect(a.failureReason).toBe(errorText("en", "cloningUnavailablePickBuiltIn"));
   });
 });
 

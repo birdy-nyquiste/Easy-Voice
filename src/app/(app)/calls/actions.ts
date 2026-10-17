@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { getTranslations } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { attempt, type ActionState } from "@/lib/action";
 import { requireUser } from "@/server/auth";
@@ -25,7 +26,7 @@ export async function hangupAction(_: ActionState, form: FormData): Promise<Acti
   return attempt(async () => {
     const user = await requireUser();
     await hangupCall(user.id, String(form.get("id")));
-    return "Hanging up…";
+    return (await getTranslations("calls"))("hangingUp");
   });
 }
 

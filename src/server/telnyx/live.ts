@@ -1,5 +1,6 @@
 import { createPublicKey, verify } from "node:crypto";
 import { config } from "@/lib/config";
+import { stored } from "@/lib/stored-text";
 import { encodeClientState, parseTelnyxEnvelope } from "./events";
 import { toOfferedModels, type CatalogModel } from "./models";
 import { toStockVoices, type CatalogVoice } from "./stock-voices";
@@ -133,7 +134,7 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
       orderId: order.id,
       status,
       numberId,
-      failureReason: status === "failure" ? `Order ${order.status}` : undefined,
+      failureReason: status === "failure" ? stored("numberOrderStatus", { status: order.status }) : undefined,
     };
   }
 
@@ -143,7 +144,7 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
       voiceId: d.id,
       ref: `Telnyx.${model}.${d.provider_voice_id ?? d.id}`,
       status: d.status === "active" ? "ready" : d.status === "pending" ? "processing" : "failed",
-      failureReason: d.status === "expired" ? "This voice has expired." : d.status === "failed" ? "Cloning failed." : undefined,
+      failureReason: d.status === "expired" ? stored("voiceExpired") : d.status === "failed" ? stored("voiceCloningFailed") : undefined,
     };
   }
 
@@ -268,7 +269,7 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
       }
       const list = await api<{ data: Parameters<typeof toClone>[0][] }>("GET", "/voice_clones?page[size]=250");
       const found = list.data.find((c) => c.id === voiceId);
-      return found ? toClone(found) : { voiceId, ref: "", status: "failed", failureReason: "This voice is no longer available." };
+      return found ? toClone(found) : { voiceId, ref: "", status: "failed", failureReason: stored("voiceUnavailable") };
     },
 
     async deleteClonedVoice(voiceId) {

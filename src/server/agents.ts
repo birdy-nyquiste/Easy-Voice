@@ -5,12 +5,13 @@ import { z } from "zod";
 import { db, withUserLock } from "@/db";
 import { agents, elevenLabsKeys, phoneNumbers, voices, type Agent } from "@/db/schema";
 import { config } from "@/lib/config";
-import { UserError } from "@/lib/errors";
+import { UserError, type ErrorKey } from "@/lib/errors";
+import { failureColumns, stored, storedFromError } from "@/lib/stored-text";
 import { LANGUAGES, type Language } from "@/lib/language";
 import { FeatureNotPermittedError, voiceProvider, type AssistantSpec } from "./telnyx";
 import { isElevenLabsVoice, voiceSpeaks } from "./telnyx/stock-voices";
 import { ASSISTANT_BODY_VERSION } from "./telnyx/version";
-import { CLONING_UNAVAILABLE, cloningAvailable } from "./voices";
+import { cloningAvailable } from "./voices";
 
 export const RECORDING_NOTICE = {
   en: "This call may be recorded.",
@@ -29,13 +30,15 @@ export const OUTBOUND_GREETING = {
 
 export const MAX_CALL_GOAL_LENGTH = 1000;
 
+const INPUT_ERRORS = { nameRequired: 1, instructionsRequired: 1, greetingRequired: 1, voiceRequired: 1 } satisfies Partial<Record<ErrorKey, 1>>;
+
 export const agentInput = z.object({
-  name: z.string().trim().min(1, "Name is required").max(80),
-  instructions: z.string().trim().min(1, "Instructions are required").max(8000),
-  greeting: z.string().trim().min(1, "Greeting is required").max(500),
+  name: z.string().trim().min(1, "nameRequired").max(80),
+  instructions: z.string().trim().min(1, "instructionsRequired").max(8000),
+  greeting: z.string().trim().min(1, "greetingRequired").max(500),
   language: z.enum(LANGUAGES),
   /** "stock:<ref>" or "clone:<voice uuid>" */
-  voice: z.string().min(1, "Pick a voice"),
+  voice: z.string().min(1, "voiceRequired"),
   /** LLM id from listModels(); empty means the platform default. */
   model: z.string().trim().optional().transform((m) => m || null),
 });
@@ -62,9 +65,9 @@ async function resolveVoice(
   if (kind === "stock") {
     const stock = await voiceProvider().listStockVoices();
     const match = stock.find((v) => v.ref === value);
-    if (!match) throw new UserError("Unknown voice.");
+    if (!match) throw new UserError("unknownVoice");
     if (!match.speaks.includes(language)) {
-      throw new UserError(`${match.name} can't speak Mandarin. Pick a voice marked "Mandarin + English".`);
+      throw new UserError("voiceNoMandarin", { name: match.name });
     }
     return { voiceRef: value, voiceId: null };
   }
@@ -73,12 +76,12 @@ async function resolveVoice(
       .select()
       .from(voices)
       .where(and(eq(voices.id, value), eq(voices.userId, userId), isNull(voices.deletedAt)));
-    if (!v) throw new UserError("Unknown voice.");
-    if (!cloningAvailable(v.provider)) throw new UserError(`${CLONING_UNAVAILABLE} Pick a built-in voice for now.`);
-    if (v.status !== "ready" || !v.voiceRef) throw new UserError("That cloned voice isn't ready yet.");
+    if (!v) throw new UserError("unknownVoice");
+    if (!cloningAvailable(v.provider)) throw new UserError("cloningUnavailablePickBuiltIn");
+    if (v.status !== "ready" || !v.voiceRef) throw new UserError("cloneNotReady");
     return { voiceRef: v.voiceRef, voiceId: v.id };
   }
-  throw new UserError("Unknown voice.");
+  throw new UserError("unknownVoice");
 }
 
 export async function listModels() {
@@ -87,7 +90,7 @@ export async function listModels() {
 
 async function resolveModel(model: string | null): Promise<string | null> {
   if (!model || model === config.telnyx.llmModel) return null;
-  if (!(await listModels()).some((m) => m.id === model)) throw new UserError("That model isn't available. Pick another.");
+  if (!(await listModels()).some((m) => m.id === model)) throw new UserError("modelUnavailable");
   return model;
 }
 
@@ -108,7 +111,7 @@ async function voiceApiKeyRef(a: Pick<Agent, "userId" | "voiceRef">): Promise<st
     .select({ ref: elevenLabsKeys.telnyxSecretRef })
     .from(elevenLabsKeys)
     .where(eq(elevenLabsKeys.userId, a.userId));
-  if (!k) throw new UserError("Your ElevenLabs account isn't connected. Connect it under Account → API keys, or pick another voice.");
+  if (!k) throw new UserError("elevenLabsNotConnectedForAgent");
   return k.ref;
 }
 
@@ -138,7 +141,7 @@ export async function createAgent(userId: string, raw: unknown): Promise<Agent> 
       .from(agents)
       .where(and(eq(agents.userId, userId), isNull(agents.deletedAt)));
     if (existing.length >= config.limits.agentsPerUser) {
-      throw new UserError(`You can have up to ${config.limits.agentsPerUser} agents.`);
+      throw new UserError("agentLimit", { max: config.limits.agentsPerUser });
     }
     const [inserted] = await tx.insert(agents).values({ userId, ...input, ...voice, status: "syncing" }).returning();
     return inserted;
@@ -148,7 +151,7 @@ export async function createAgent(userId: string, raw: unknown): Promise<Agent> 
 
 export async function updateAgent(userId: string, agentId: string, raw: unknown): Promise<Agent> {
   const existing = await getUserAgent(userId, agentId);
-  if (!existing) throw new UserError("Agent not found.");
+  if (!existing) throw new UserError("agentNotFound");
   const input = parse(raw);
   const voice = await resolveVoice(userId, input.voice, input.language);
   input.model = await resolveModel(input.model);
@@ -169,21 +172,22 @@ export async function syncAgent(a: Agent): Promise<Agent> {
     else assistantId = (await voiceProvider().createAssistant(spec)).assistantId;
     const [u] = await db
       .update(agents)
-      .set({ providerAssistantId: assistantId, status: "ready", failureReason: null, syncedConfig: platformFingerprint() })
+      .set({ providerAssistantId: assistantId, status: "ready", failureReason: null, failureMsg: null, syncedConfig: platformFingerprint() })
       .where(eq(agents.id, a.id))
       .returning();
     return u;
   } catch (err) {
     console.error("syncAgent failed", a.id, err);
-    const failureReason =
+    const reason = failureColumns(
       err instanceof FeatureNotPermittedError && err.feature === "cloned_voices"
-        ? `${CLONING_UNAVAILABLE} Pick a built-in voice for now.`
+        ? storedFromError(new UserError("cloningUnavailablePickBuiltIn"))
         : err instanceof UserError
-          ? err.message
-          : "Couldn't save the agent. Try saving again.";
+          ? storedFromError(err)
+          : stored("agentSaveFailed"),
+    );
     const [u] = await db
       .update(agents)
-      .set({ status: "failed", failureReason })
+      .set({ status: "failed", ...reason })
       .where(eq(agents.id, a.id))
       .returning();
     return u;
@@ -226,7 +230,7 @@ export async function resyncStaleAgents(userId?: string): Promise<number> {
 
 export async function deleteAgent(userId: string, agentId: string): Promise<void> {
   const a = await getUserAgent(userId, agentId);
-  if (!a) throw new UserError("Agent not found.");
+  if (!a) throw new UserError("agentNotFound");
   if (a.providerAssistantId) {
     try {
       await voiceProvider().deleteAssistant(a.providerAssistantId);
@@ -240,6 +244,8 @@ export async function deleteAgent(userId: string, agentId: string): Promise<void
 
 function parse(raw: unknown): AgentInput {
   const r = agentInput.safeParse(raw);
-  if (!r.success) throw new UserError(r.error.issues[0]?.message ?? "Invalid input");
-  return r.data;
+  if (r.success) return r.data;
+  // Our own messages (above) are error keys; anything else zod reports gets a generic one.
+  const message = r.error.issues[0]?.message;
+  throw new UserError(message && message in INPUT_ERRORS ? (message as ErrorKey) : "invalidInput");
 }

@@ -1,3 +1,4 @@
+import { getTranslations } from "next-intl/server";
 import { Card, PageHeader } from "@/components/ui";
 import { listModels } from "@/server/agents";
 import { requireUser } from "@/server/auth";
@@ -6,6 +7,7 @@ import { AgentForm } from "../agent-form";
 
 export default async function NewAgentPage() {
   const user = await requireUser();
+  const t = await getTranslations("agents");
   const [stock, clones, models] = await Promise.all([
     listStockVoices(),
     listUserVoices(user.id),
@@ -14,7 +16,7 @@ export default async function NewAgentPage() {
   ]);
   return (
     <div>
-      <PageHeader back={{ href: "/agents", label: "All agents" }} title="New agent" />
+      <PageHeader back={{ href: "/agents", label: t("all") }} title={t("new")} />
       <Card>
         <AgentForm stock={stock} clones={clones} models={models} />
       </Card>

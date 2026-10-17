@@ -1,0 +1,1 @@
+ALTER TABLE "payments" ADD COLUMN "failure_msg" jsonb;

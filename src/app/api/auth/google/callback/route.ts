@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
     };
     if (!claims.email || !claims.email_verified) return fail("google_email");
     const user = await upsertUser({ email: claims.email, name: claims.name, googleSub: claims.sub });
-    await createSession(user.id);
+    await createSession(user);
   } catch (err) {
     console.error("Google sign-in failed", err);
     return fail("google_failed");

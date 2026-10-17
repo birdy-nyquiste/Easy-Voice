@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { contacts, messages, phoneNumbers, type Message, type PhoneNumber } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
+import { stored } from "@/lib/stored-text";
 import { applyLedger } from "./billing/ledger";
 import { voiceProvider, type InboundMessageEvent } from "./telnyx";
 import { withWebhookDedupe } from "./webhooks";
@@ -53,7 +54,7 @@ export async function handleInboundMessage(e: InboundMessageEvent): Promise<void
           amountCents: -billedCents,
           kind: "sms",
           idempotencyKey: `sms:${e.messageId}`,
-          description: `Text from ${e.from} (${e.parts} segment${e.parts === 1 ? "" : "s"})`,
+          description: stored("ledgerSms", { from: e.from, parts: e.parts }),
           refType: "message",
           refId: created.id,
         },
@@ -155,7 +156,7 @@ export async function deleteConversation(userId: string, from: string): Promise<
     .set({ body: null, purgedAt: now, deletedAt: now })
     .where(and(eq(messages.userId, userId), eq(messages.fromNumber, from), isNull(messages.deletedAt)))
     .returning({ id: messages.id });
-  if (deleted.length === 0) throw new UserError("Conversation not found.");
+  if (deleted.length === 0) throw new UserError("conversationNotFound");
 }
 
 /** Retention: blank text content older than the cutoff. */
@@ -187,9 +188,9 @@ export async function getContactName(userId: string, number: string): Promise<st
 /** Name a sender; an empty name removes it. */
 export async function setContactName(userId: string, number: string, rawName: string): Promise<void> {
   const name = rawName.trim().replace(/\s+/g, " ");
-  if (!number) throw new UserError("Missing number.");
+  if (!number) throw new UserError("missingNumber");
   if (name.length > MAX_CONTACT_NAME_LENGTH) {
-    throw new UserError(`Keep the name under ${MAX_CONTACT_NAME_LENGTH} characters.`);
+    throw new UserError("contactNameTooLong", { max: MAX_CONTACT_NAME_LENGTH });
   }
   if (!name) {
     await db.delete(contacts).where(and(eq(contacts.userId, userId), eq(contacts.number, number)));

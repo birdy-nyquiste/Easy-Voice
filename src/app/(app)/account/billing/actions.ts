@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { getTranslations } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { attempt, type ActionState } from "@/lib/action";
 import { requireUser } from "@/server/auth";
@@ -22,6 +23,6 @@ export async function devCreditAction(_: ActionState, form: FormData): Promise<A
     const user = await requireUser();
     await addDevCredit(user, Math.round(Number(form.get("amount")) * 100));
     revalidatePath("/", "layout");
-    return "Dev credit added.";
+    return (await getTranslations("billing"))("devCreditAdded");
   });
 }

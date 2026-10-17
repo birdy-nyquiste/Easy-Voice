@@ -1,8 +1,12 @@
+import { getLocale } from "next-intl/server";
 import { userMessage } from "./errors";
 
 export type ActionState = { error?: string; ok?: string } | undefined;
 
-/** Run a server action body, turning thrown UserErrors into form state. */
+/**
+ * Run a server action body, turning thrown UserErrors into form state in the user's language.
+ * The body returns its success message already translated.
+ */
 export async function attempt(fn: () => Promise<string | void>): Promise<ActionState> {
   try {
     const ok = await fn();
@@ -13,6 +17,6 @@ export async function attempt(fn: () => Promise<string | void>): Promise<ActionS
       throw err;
     }
     if (!(err instanceof Error && err.name === "UserError")) console.error(err);
-    return { error: userMessage(err) };
+    return { error: userMessage(err, await getLocale()) };
   }
 }

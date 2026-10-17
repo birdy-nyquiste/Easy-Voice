@@ -1,12 +1,14 @@
 import Link from "next/link";
+import { getLocale, getTranslations } from "next-intl/server";
 import { ActionForm, SubmitButton } from "@/components/forms";
-import { Badge, Card, CardTitle, Field, Notice, PageHeader, StatusBadge, Tabs, inputClass } from "@/components/ui";
+import { Badge, Card, CardTitle, Field, Notice, PageHeader, StatusBadge, Tabs, VoiceGender, inputClass } from "@/components/ui";
 import { PreviewButton } from "@/components/voice-preview";
 import { config } from "@/lib/config";
 import { formatCents, formatMegabytes } from "@/lib/format";
+import { showStored } from "@/lib/stored-text";
 import { requireUser } from "@/server/auth";
 import { getElevenLabsKey } from "@/server/elevenlabs-keys";
-import { CLONING_UNAVAILABLE, listStockVoices, listUserVoices, refreshProcessingVoices } from "@/server/voices";
+import { listStockVoices, listUserVoices, refreshProcessingVoices } from "@/server/voices";
 import { cloneVoiceAction, deleteVoiceAction } from "./actions";
 import { SampleInput } from "./sample-input";
 
@@ -23,6 +25,13 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
     getElevenLabsKey(user.id),
     searchParams,
   ]);
+  const [t, tc, tl, te, locale] = await Promise.all([
+    getTranslations("voices"),
+    getTranslations("common"),
+    getTranslations("languages"),
+    getTranslations("errors"),
+    getLocale(),
+  ]);
   const tab = library === "cloned" || library === "built-in" ? library : clones.length ? "cloned" : "built-in";
 
   const cloning = config.features.voiceCloning;
@@ -37,37 +46,37 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
   // Third-party accounts are set up under Account → API keys, not here.
   const canAddService = elevenLabs && !elKey;
   const noProviderReason = canAddService
-    ? "Connect a voice service to start cloning."
+    ? t("connectToClone")
     : cloning || (elevenLabs && elKey)
-      ? `You can have up to ${config.limits.clonedVoicesPerUser} cloned voices per service. Delete one to clone another.`
-      : CLONING_UNAVAILABLE;
+      ? t("cloneLimit", { max: config.limits.clonedVoicesPerUser })
+      : te("cloningUnavailable");
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Voices" description="The voices your agents can use, and where you make new ones." />
+      <PageHeader title={t("title")} description={t("description")} />
 
       <Card>
-        <CardTitle>Voice Library</CardTitle>
+        <CardTitle>{t("library")}</CardTitle>
         <Tabs
           tabs={[
-            { href: "/voices?library=cloned", label: `Cloned (${clones.length})`, active: tab === "cloned" },
-            { href: "/voices?library=built-in", label: `Built-in (${stock.length})`, active: tab === "built-in" },
+            { href: "/voices?library=cloned", label: t("clonedTab", { count: clones.length }), active: tab === "cloned" },
+            { href: "/voices?library=built-in", label: t("builtInTab", { count: stock.length }), active: tab === "built-in" },
           ]}
         />
         <div className="pt-4">
           {tab === "cloned" ? (
             clones.length === 0 ? (
-              <p className="text-sm text-stone-500">No cloned voices yet. Make one in the Voice Lab below.</p>
+              <p className="text-sm text-stone-500">{t("noClones")}</p>
             ) : (
               <ul className="divide-y divide-stone-100">
                 {clones.map((v) => (
                   <li key={v.id} className="flex items-center justify-between gap-3 py-2.5">
                     <span className="flex flex-wrap items-center gap-2 text-sm">
                       <span className="font-medium">{v.name}</span>
-                      <Badge>{v.language === "zh" ? "Mandarin" : "English"}</Badge>
+                      <Badge>{tl(v.language)}</Badge>
                       {v.provider === "elevenlabs" && <Badge tone="blue">ElevenLabs</Badge>}
                       <StatusBadge status={v.status} />
-                      {v.failureReason && <span className="text-red-600">{v.failureReason}</span>}
+                      {v.failureReason && <span className="text-red-600">{showStored(locale, v.failureReason, v.failureMsg)}</span>}
                     </span>
                     <span className="flex items-center gap-1">
                       {v.providerVoiceId && v.status !== "failed" && <PreviewButton voice={`clone:${v.id}`} compact />}
@@ -77,11 +86,11 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
                           variant="danger"
                           confirm={
                             v.provider === "elevenlabs"
-                              ? `Delete voice "${v.name}"? It's also deleted from your ElevenLabs account.`
-                              : `Delete voice "${v.name}"?`
+                              ? t("deleteConfirmElevenLabs", { name: v.name })
+                              : t("deleteConfirm", { name: v.name })
                           }
                         >
-                          Delete
+                          {tc("delete")}
                         </SubmitButton>
                       </ActionForm>
                     </span>
@@ -97,8 +106,8 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
                   <span className="min-w-0 space-y-1">
                     <span className="block font-medium">{v.name}</span>
                     <span className="flex flex-wrap gap-1.5">
-                      {v.speaks.includes("zh") ? <Badge tone="green">Mandarin + English</Badge> : <Badge>English only</Badge>}
-                      {v.gender && <Badge>{v.gender}</Badge>}
+                      {v.speaks.includes("zh") ? <Badge tone="green">{tl("bilingual")}</Badge> : <Badge>{tl("englishOnly")}</Badge>}
+                      {v.gender && <Badge><VoiceGender gender={v.gender} /></Badge>}
                     </span>
                   </span>
                 </li>
@@ -109,22 +118,22 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
       </Card>
 
       <Card>
-        <CardTitle>Voice Lab</CardTitle>
+        <CardTitle>{t("lab")}</CardTitle>
         {/* One method today; more (e.g. designing a voice from a description) can join as tabs. */}
-        <Tabs tabs={[{ href: "/voices", label: "Clone from a sample", active: true }]} />
+        <Tabs tabs={[{ href: "/voices", label: t("cloneTab"), active: true }]} />
         <div className="space-y-4 pt-4">
-          <p className="text-sm text-stone-500">Record or upload someone speaking, and get a voice that sounds like them.</p>
+          <p className="text-sm text-stone-500">{t("labIntro")}</p>
           {/* Once ElevenLabs is connected the Easy Voice option simply isn't offered; no notice needed. */}
           {!cloning && canAddService && (
             <Notice>
-              {CLONING_UNAVAILABLE} You can still clone with your own ElevenLabs account: use “Add a service” below.
+              {te("cloningUnavailable")} {t("useOwnElevenLabs")}
             </Notice>
           )}
           {providers.length === 0 && !canAddService ? (
             <p className="text-sm text-stone-500">{noProviderReason}</p>
           ) : (
             <ActionForm action={cloneVoiceAction} className="space-y-4">
-              <Field label="Clone with">
+              <Field label={t("cloneWith")}>
                 <div className="grid gap-2 sm:grid-cols-3">
                   {providers.map((p, i) => (
                     <label
@@ -136,8 +145,8 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
                         <span className="font-medium">{p === "elevenlabs" ? "ElevenLabs" : "Easy Voice"}</span>
                         <span className="block text-stone-500">
                           {p === "elevenlabs"
-                            ? "Your account. Free here; calls use your ElevenLabs credits."
-                            : `${formatCents(config.pricing.voiceCloneCents)} from your balance.`}
+                            ? t("elevenLabsOption")
+                            : t("easyVoiceOption", { price: formatCents(config.pricing.voiceCloneCents) })}
                         </span>
                       </span>
                     </label>
@@ -151,8 +160,8 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
                         +
                       </span>
                       <span>
-                        <span className="font-medium">Add a service</span>
-                        <span className="block text-stone-500">Connect your own ElevenLabs account.</span>
+                        <span className="font-medium">{t("addService")}</span>
+                        <span className="block text-stone-500">{t("addServiceHint")}</span>
                       </span>
                     </Link>
                   )}
@@ -163,33 +172,35 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
               ) : (
                 <>
                   <div className="grid gap-4 sm:grid-cols-3">
-                    <Field label="Name">
-                      <input name="name" required maxLength={60} placeholder="My voice" className={inputClass} />
+                    <Field label={tc("name")}>
+                      <input name="name" required maxLength={60} placeholder={t("namePlaceholder")} className={inputClass} />
                     </Field>
-                    <Field label="Sample language">
+                    <Field label={t("sampleLanguage")}>
                       <select name="language" className={inputClass}>
-                        <option value="en">English</option>
-                        <option value="zh">Mandarin</option>
+                        <option value="en">{tl("en")}</option>
+                        <option value="zh">{tl("zh")}</option>
                       </select>
                     </Field>
-                    <Field label="Voice type">
+                    <Field label={t("voiceType")}>
                       <select name="gender" className={inputClass}>
-                        <option value="female">Female</option>
-                        <option value="male">Male</option>
+                        <option value="female">{t("female")}</option>
+                        <option value="male">{t("male")}</option>
                       </select>
                     </Field>
                   </div>
                   <Field
-                    label="Audio sample"
-                    hint={`Clear speech, one speaker, no background noise: 10–15 seconds${providers.includes("elevenlabs") ? " (ElevenLabs works best with 1–2 minutes)" : ""}. Max ${formatMegabytes(config.limits.cloneSampleBytes)}.`}
+                    label={t("sample")}
+                    hint={t(providers.includes("elevenlabs") ? "sampleHintElevenLabs" : "sampleHint", {
+                      max: formatMegabytes(config.limits.cloneSampleBytes),
+                    })}
                   >
                     <SampleInput maxBytes={config.limits.cloneSampleBytes} />
                   </Field>
                   <label className="flex items-start gap-2 text-sm text-stone-700">
                     <input type="checkbox" name="consent" required className="mt-0.5" />
-                    <span>This is my own voice, or I have the speaker&apos;s explicit permission to clone it.</span>
+                    <span>{t("consent")}</span>
                   </label>
-                  <SubmitButton pendingText="Uploading…">Clone voice</SubmitButton>
+                  <SubmitButton pendingText={t("uploading")}>{t("clone")}</SubmitButton>
                 </>
               )}
             </ActionForm>

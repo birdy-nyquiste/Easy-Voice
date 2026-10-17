@@ -11,6 +11,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import type { Language } from "@/lib/language";
+import type { StoredMessage } from "@/lib/stored-text";
 
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 const ts = (name: string) => timestamp(name, { withTimezone: true });
@@ -26,6 +27,8 @@ export const users = pgTable("users", {
   balanceCents: integer("balance_cents").notNull().default(0),
   /** When the balance first went negative; null while balance >= 0. */
   negativeSince: ts("negative_since"),
+  /** Interface language the user picked; null until they pick one. Restored to the cookie at sign-in. */
+  locale: text("locale").$type<Language>(),
   createdAt: createdAt(),
 });
 
@@ -62,6 +65,7 @@ export const payments = pgTable("payments", {
   amountCents: integer("amount_cents").notNull(),
   status: paymentStatus("status").notNull().default("pending"),
   failureReason: text("failure_reason"),
+  failureMsg: jsonb("failure_msg").$type<StoredMessage>(),
   createdAt: createdAt(),
   completedAt: ts("completed_at"),
 });
@@ -90,6 +94,8 @@ export const ledgerEntries = pgTable(
     refType: text("ref_type"),
     refId: text("ref_id"),
     description: text("description").notNull(),
+    /** The message `description` was written from, to show it in the viewer's language (null on older rows). */
+    descriptionMsg: jsonb("description_msg").$type<StoredMessage>(),
     createdAt: createdAt(),
   },
   (t) => [index("ledger_user_idx").on(t.userId, t.createdAt)],
@@ -109,6 +115,7 @@ export const phoneNumbers = pgTable(
     providerNumberId: text("provider_number_id"),
     status: numberStatus("status").notNull().default("pending"),
     failureReason: text("failure_reason"),
+    failureMsg: jsonb("failure_msg").$type<StoredMessage>(),
     agentId: uuid("agent_id").references(() => agents.id, { onDelete: "set null" }),
     /** Monthly rental is paid up to this instant. */
     paidThrough: ts("paid_through"),
@@ -138,6 +145,7 @@ export const voices = pgTable("voices", {
   voiceRef: text("voice_ref"),
   status: voiceStatus("status").notNull().default("processing"),
   failureReason: text("failure_reason"),
+  failureMsg: jsonb("failure_msg").$type<StoredMessage>(),
   consentAt: ts("consent_at").notNull(),
   createdAt: createdAt(),
   deletedAt: ts("deleted_at"),
@@ -186,6 +194,7 @@ export const agents = pgTable("agents", {
   syncedConfig: text("synced_config"),
   status: agentStatus("status").notNull().default("syncing"),
   failureReason: text("failure_reason"),
+  failureMsg: jsonb("failure_msg").$type<StoredMessage>(),
   createdAt: createdAt(),
   updatedAt: ts("updated_at").notNull().defaultNow(),
   deletedAt: ts("deleted_at"),
@@ -220,6 +229,7 @@ export const calls = pgTable(
     status: callStatus("status").notNull().default("initiated"),
     /** Human-readable explanation for rejected / failed / unanswered calls. */
     outcome: text("outcome"),
+    outcomeMsg: jsonb("outcome_msg").$type<StoredMessage>(),
     hangupCause: text("hangup_cause"),
     answeredAt: ts("answered_at"),
     endedAt: ts("ended_at"),

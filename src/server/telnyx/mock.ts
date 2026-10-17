@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { stored } from "@/lib/stored-text";
 import { encodeClientState, parseCallEnvelope, parseTelnyxEnvelope } from "./events";
 import { MOCK_MODELS, toOfferedModels } from "./models";
 import { MOCK_CATALOG, toStockVoices } from "./stock-voices";
@@ -110,7 +111,7 @@ export const mockProvider: VoiceProvider = {
 
   async cloneVoice({ audio }) {
     if (audio.size < 1000) {
-      return { voiceId: "", ref: "", status: "failed", failureReason: "Audio sample too short" };
+      return { voiceId: "", ref: "", status: "failed", failureReason: stored("voiceSampleTooShort") };
     }
     const voiceId = `clone_${randomUUID()}`;
     state.clones.set(voiceId, { createdAt: Date.now() });
@@ -119,7 +120,7 @@ export const mockProvider: VoiceProvider = {
 
   async getClonedVoice(voiceId): Promise<ClonedVoiceResult> {
     const c = state.clones.get(voiceId);
-    if (!c) return { voiceId, ref: "", status: "failed", failureReason: "Voice not found" };
+    if (!c) return { voiceId, ref: "", status: "failed", failureReason: stored("voiceUnavailable") };
     const ready = Date.now() - c.createdAt > 3000;
     return { voiceId, ref: `Telnyx.Clone.${voiceId}`, status: ready ? "ready" : "processing" };
   },
