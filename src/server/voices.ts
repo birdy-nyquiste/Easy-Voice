@@ -84,7 +84,7 @@ export async function listUserVoices(userId: string): Promise<Voice[]> {
   return db.select().from(voices).where(and(eq(voices.userId, userId), isNull(voices.deletedAt)));
 }
 
-export const CLONING_UNAVAILABLE = "The cloned voice feature is temporarily unavailable.";
+export const CLONING_UNAVAILABLE = "Easy Voice cloned voices are temporarily unavailable.";
 
 export type CloneProvider = Voice["provider"];
 

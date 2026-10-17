@@ -32,7 +32,7 @@ export default async function AgentPage({
   const keyRejected = isElevenLabsVoice(agent.voiceRef) && Boolean(elKey?.keyInvalidAt);
   return (
     <div className="space-y-6">
-      <PageHeader title={agent.name} action={<StatusBadge status={agent.status} />} />
+      <PageHeader back={{ href: "/agents", label: "All agents" }} title={agent.name} action={<StatusBadge status={agent.status} />} />
       {agent.status === "failed" && <Notice tone="red">{agent.failureReason}</Notice>}
       {saved && agent.status === "ready" && <Notice tone="green">Saved.</Notice>}
       {keyRejected && (

@@ -14,7 +14,7 @@ export default async function NewAgentPage() {
   ]);
   return (
     <div>
-      <PageHeader title="New agent" />
+      <PageHeader back={{ href: "/agents", label: "All agents" }} title="New agent" />
       <Card>
         <AgentForm stock={stock} clones={clones} models={models} />
       </Card>

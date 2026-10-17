@@ -1,10 +1,32 @@
 import Link from "next/link";
 import type { ComponentProps, ReactNode } from "react";
 
-export function PageHeader({ title, description, action }: { title: string; description?: string; action?: ReactNode }) {
+export function PageHeader({
+  title,
+  description,
+  action,
+  back,
+}: {
+  title: string;
+  description?: string;
+  action?: ReactNode;
+  /** Link to the list a detail page came from, e.g. { href: "/calls", label: "All calls" }. */
+  back?: { href: string; label: string };
+}) {
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div>
+        {back && (
+          <Link
+            href={back.href}
+            className="group -ml-1 mb-2 inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-sm text-stone-500 transition-colors hover:text-stone-900"
+          >
+            <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden className="h-4 w-4 transition-transform group-hover:-translate-x-0.5">
+              <path fillRule="evenodd" d="M12.8 4.2a.75.75 0 0 1 0 1.06L8.06 10l4.74 4.74a.75.75 0 1 1-1.06 1.06l-5.27-5.27a.75.75 0 0 1 0-1.06l5.27-5.27a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
+            </svg>
+            {back.label}
+          </Link>
+        )}
         <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
         {description && <p className="mt-1 text-sm text-stone-500">{description}</p>}
       </div>
@@ -90,6 +112,11 @@ export function Notice({ tone = "amber", children }: { tone?: "amber" | "red" | 
     blue: "border-sky-200 bg-sky-50 text-sky-800",
   }[tone];
   return <div className={`rounded-lg border px-4 py-3 text-sm ${cls}`}>{children}</div>;
+}
+
+/** Whether `path` is `href` or a page under it. */
+export function isActivePath(path: string, href: string): boolean {
+  return path === href || path.startsWith(`${href}/`);
 }
 
 /** Underlined tab links; the active one is marked. `scroll={false}` keeps the page in place when switching. */

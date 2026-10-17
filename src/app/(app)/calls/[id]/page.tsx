@@ -22,6 +22,7 @@ export default async function CallPage({ params }: { params: Promise<{ id: strin
     <div className="space-y-6">
       {(live || awaitingResults) && <AutoRefresh everyMs={live ? 1500 : 4000} />}
       <PageHeader
+        back={{ href: "/calls", label: "All calls" }}
         title={`${call.direction === "inbound" ? "Call from" : "Call to"} ${formatPhone(other)}`}
         description={formatDateTime(call.createdAt)}
         action={<StatusBadge status={call.status} />}

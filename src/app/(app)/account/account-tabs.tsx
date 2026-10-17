@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { Tabs } from "@/components/ui";
+import { Tabs, isActivePath } from "@/components/ui";
 
 const TABS = [
   { href: "/account/billing", label: "Billing" },
@@ -10,5 +10,5 @@ const TABS = [
 
 export function AccountTabs() {
   const path = usePathname();
-  return <Tabs tabs={TABS.map((t) => ({ ...t, active: path === t.href || path.startsWith(`${t.href}/`) }))} />;
+  return <Tabs tabs={TABS.map((t) => ({ ...t, active: isActivePath(path, t.href) }))} />;
 }
