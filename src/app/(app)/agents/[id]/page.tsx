@@ -2,7 +2,10 @@ import { notFound } from "next/navigation";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { Card, CardTitle, Notice, PageHeader, StatusBadge } from "@/components/ui";
 import { getUserAgent, listModels } from "@/server/agents";
+import Link from "next/link";
 import { requireUser } from "@/server/auth";
+import { getElevenLabsKey } from "@/server/elevenlabs-keys";
+import { isElevenLabsVoice } from "@/server/telnyx/stock-voices";
 import { listStockVoices, listUserVoices } from "@/server/voices";
 import { deleteAgentAction } from "../actions";
 import { AgentForm } from "../agent-form";
@@ -19,17 +22,25 @@ export default async function AgentPage({
   const { saved } = await searchParams;
   const agent = await getUserAgent(user.id, id);
   if (!agent) notFound();
-  const [stock, clones, models] = await Promise.all([
+  const [stock, clones, models, elKey] = await Promise.all([
     listStockVoices(),
     listUserVoices(user.id),
     // Without the catalog the form still offers the default model.
     listModels().catch(() => []),
+    getElevenLabsKey(user.id),
   ]);
+  const keyRejected = isElevenLabsVoice(agent.voiceRef) && Boolean(elKey?.keyInvalidAt);
   return (
     <div className="space-y-6">
       <PageHeader title={agent.name} action={<StatusBadge status={agent.status} />} />
       {agent.status === "failed" && <Notice tone="red">{agent.failureReason}</Notice>}
       {saved && agent.status === "ready" && <Notice tone="green">Saved.</Notice>}
+      {keyRejected && (
+        <Notice tone="red">
+          This agent can&apos;t take or make calls: ElevenLabs rejected your API key, so its voice can&apos;t speak.{" "}
+          <Link href="/account/api-keys" className="font-medium underline">Replace the key</Link> or pick another voice.
+        </Notice>
+      )}
       <Card>
         {/* Keyed on updatedAt: React resets a form to its initial defaults after an action, so
             without a remount the fields would show pre-save values (and a second save would revert). */}

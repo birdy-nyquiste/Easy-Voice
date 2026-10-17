@@ -4,13 +4,16 @@ import { config } from "@/lib/config";
 import { formatPhone } from "@/lib/format";
 import { listUserAgents, resyncStaleAgents } from "@/server/agents";
 import { requireUser } from "@/server/auth";
+import { getElevenLabsKey } from "@/server/elevenlabs-keys";
+import { isElevenLabsVoice } from "@/server/telnyx/stock-voices";
 import { listUserNumbers } from "@/server/numbers";
 
 export default async function AgentsPage() {
   const user = await requireUser();
   // Bring agents up to date with changed platform model settings (cheap no-op otherwise).
   await resyncStaleAgents(user.id);
-  const [agents, numbers] = await Promise.all([listUserAgents(user.id), listUserNumbers(user.id)]);
+  const [agents, numbers, elKey] = await Promise.all([listUserAgents(user.id), listUserNumbers(user.id), getElevenLabsKey(user.id)]);
+  const keyRejected = Boolean(elKey?.keyInvalidAt);
   return (
     <div>
       <PageHeader
@@ -32,6 +35,9 @@ export default async function AgentsPage() {
                     <StatusBadge status={a.status} />
                   </div>
                   <p className="mt-1 line-clamp-2 text-sm text-stone-500">{a.greeting}</p>
+                  {keyRejected && isElevenLabsVoice(a.voiceRef) && (
+                    <p className="mt-2 text-xs text-red-600">Can&apos;t take or make calls: ElevenLabs rejected your API key.</p>
+                  )}
                   <p className="mt-3 text-xs text-stone-500">
                     {a.language === "zh" ? "Mandarin" : "English"} · {num ? `Answers ${formatPhone(num.e164)}` : "Not on a number"}
                   </p>

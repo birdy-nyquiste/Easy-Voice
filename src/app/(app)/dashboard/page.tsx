@@ -17,7 +17,7 @@ export default async function DashboardPage() {
   const linkedAgent = agents.find((a) => a.id === activeNumber?.agentId);
 
   const steps = [
-    { done: user.balanceCents > 0, label: "Add credit", href: "/billing" },
+    { done: user.balanceCents > 0, label: "Add credit", href: "/account/billing" },
     { done: agents.some((a) => a.status === "ready"), label: "Create an agent (pick or clone a voice)", href: "/agents/new" },
     { done: Boolean(activeNumber), label: "Get a phone number", href: "/numbers" },
     { done: Boolean(linkedAgent), label: "Connect the agent to your number", href: "/numbers" },
@@ -33,7 +33,7 @@ export default async function DashboardPage() {
         <Card>
           <CardTitle>Balance</CardTitle>
           <p className={`text-2xl font-semibold ${user.balanceCents <= 0 ? "text-red-600" : ""}`}>{formatCents(user.balanceCents)}</p>
-          <Link href="/billing" className="mt-1 inline-block text-sm text-stone-500 hover:text-stone-900">Top up →</Link>
+          <Link href="/account/billing" className="mt-1 inline-block text-sm text-stone-500 hover:text-stone-900">Top up →</Link>
         </Card>
         <Card>
           <CardTitle>Number</CardTitle>

@@ -6,7 +6,7 @@ import { applyLedger } from "@/server/billing/ledger";
 import type { CallEvent } from "@/server/telnyx";
 
 export async function resetDb() {
-  await db.execute(sql`truncate table users, sessions, email_otps, payments, ledger_entries, phone_numbers, voices, agents, calls, messages, contacts, webhook_events restart identity cascade`);
+  await db.execute(sql`truncate table users, sessions, email_otps, payments, ledger_entries, phone_numbers, voices, elevenlabs_keys, agents, calls, messages, contacts, webhook_events restart identity cascade`);
 }
 
 export async function makeUser(balanceCents = 0) {

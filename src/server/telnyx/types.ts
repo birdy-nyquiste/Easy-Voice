@@ -72,6 +72,8 @@ export interface AssistantSpec {
   greeting: string;
   language: Language;
   voiceRef: string;
+  /** Integration secret identifier holding the user's key, for voices on their own provider account (ElevenLabs). */
+  voiceApiKeyRef?: string;
   /** LLM id; see listModels(). */
   model: string;
 }
@@ -184,6 +186,11 @@ export interface VoiceProvider {
   cloneVoice(input: { name: string; language: Language; gender: "male" | "female"; audio: Blob }): Promise<ClonedVoiceResult>;
   getClonedVoice(voiceId: string): Promise<ClonedVoiceResult>;
   deleteClonedVoice(voiceId: string): Promise<void>;
+
+  /** Store a third-party API key so assistants can reference it by `identifier` (e.g. voice api_key_ref). */
+  createIntegrationSecret(identifier: string, token: string): Promise<{ id: string }>;
+  /** Succeeds if the secret is already gone. */
+  deleteIntegrationSecret(id: string): Promise<void>;
 
   createAssistant(spec: AssistantSpec): Promise<{ assistantId: string }>;
   updateAssistant(assistantId: string, spec: AssistantSpec): Promise<void>;

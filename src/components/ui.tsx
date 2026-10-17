@@ -18,7 +18,7 @@ export function Card({ children, className = "" }: { children: ReactNode; classN
 }
 
 export function CardTitle({ children }: { children: ReactNode }) {
-  return <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-stone-500">{children}</h2>;
+  return <h2 className="mb-3 text-sm font-semibold text-stone-700">{children}</h2>;
 }
 
 const tones = {
@@ -90,4 +90,23 @@ export function Notice({ tone = "amber", children }: { tone?: "amber" | "red" | 
     blue: "border-sky-200 bg-sky-50 text-sky-800",
   }[tone];
   return <div className={`rounded-lg border px-4 py-3 text-sm ${cls}`}>{children}</div>;
+}
+
+/** Underlined tab links; the active one is marked. `scroll={false}` keeps the page in place when switching. */
+export function Tabs({ tabs }: { tabs: { href: string; label: ReactNode; active: boolean }[] }) {
+  return (
+    <nav className="flex gap-1 border-b border-stone-200">
+      {tabs.map((t) => (
+        <Link
+          key={t.href}
+          href={t.href}
+          scroll={false}
+          aria-current={t.active ? "page" : undefined}
+          className={`-mb-px border-b-2 px-3 py-2 text-sm ${t.active ? "border-stone-900 font-medium text-stone-900" : "border-transparent text-stone-500 hover:text-stone-900"}`}
+        >
+          {t.label}
+        </Link>
+      ))}
+    </nav>
+  );
 }

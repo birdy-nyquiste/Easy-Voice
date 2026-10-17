@@ -10,7 +10,7 @@ const LINKS = [
   { href: "/numbers", label: "Numbers" },
   { href: "/calls", label: "Calls" },
   { href: "/messages", label: "Messages" },
-  { href: "/billing", label: "Billing" },
+  { href: "/account", label: "Account" },
 ];
 
 /** `unread`: new texts, shown next to Messages. */

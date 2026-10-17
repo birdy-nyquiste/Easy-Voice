@@ -43,8 +43,8 @@ export async function createTopup(user: User, amountCents: number): Promise<stri
       },
     ],
     metadata: { userId: user.id },
-    success_url: `${config.appUrl}/billing?topup=success`,
-    cancel_url: `${config.appUrl}/billing?topup=cancelled`,
+    success_url: `${config.appUrl}/account/billing?topup=success`,
+    cancel_url: `${config.appUrl}/account/billing?topup=cancelled`,
   });
   await db.insert(payments).values({ userId: user.id, provider: "stripe", providerRef: session.id, amountCents });
   if (!session.url) throw new Error("Stripe did not return a checkout URL");

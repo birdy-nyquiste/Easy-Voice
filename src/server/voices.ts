@@ -1,11 +1,21 @@
 import "server-only";
 import { and, eq, isNull, ne } from "drizzle-orm";
-import { db, withUserLock } from "@/db";
+import { db, withUserLock, type Tx } from "@/db";
 import { agents, voices, type Voice } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
 import { formatCents, formatMegabytes } from "@/lib/format";
 import { chargePurchase, refundPurchase, type Purchase } from "./billing/ledger";
+import { elevenLabs } from "./elevenlabs";
+import {
+  ELEVENLABS_UNAVAILABLE,
+  elevenLabsUserError,
+  getElevenLabsKey,
+  isKeyRejection,
+  recordKeyStatus,
+  requireElevenLabsApiKey,
+} from "./elevenlabs-keys";
+import { decryptSecret } from "./secrets";
 import type { Language } from "@/lib/language";
 import { voiceProvider, type PreviewAudio, type StockVoice } from "./telnyx";
 
@@ -44,7 +54,21 @@ export async function voicePreview(userId: string, voice: string): Promise<Previ
     if (!v?.providerVoiceId) return null;
     key = `clone:${v.providerVoiceId}`;
     const providerVoiceId = v.providerVoiceId;
-    load = () => voiceProvider().getCloneSample(providerVoiceId);
+    if (v.provider === "elevenlabs") {
+      // ElevenLabs keeps no sample we can fetch, so speak a line (on the user's own credits).
+      const keyRow = await getElevenLabsKey(userId);
+      if (!keyRow) return null;
+      const apiKey = decryptSecret(keyRow.keyEncrypted);
+      load = () =>
+        elevenLabs()
+          .synthesize(apiKey, providerVoiceId, PREVIEW_TEXT.bilingual)
+          .catch(async (err) => {
+            if (isKeyRejection(err)) await recordKeyStatus(userId, true);
+            throw err;
+          });
+    } else {
+      load = () => voiceProvider().getCloneSample(providerVoiceId);
+    }
   } else {
     return null;
   }
@@ -62,26 +86,34 @@ export async function listUserVoices(userId: string): Promise<Voice[]> {
 
 export const CLONING_UNAVAILABLE = "The cloned voice feature is temporarily unavailable.";
 
+export type CloneProvider = Voice["provider"];
+
+/** Whether new clones can be made with (and agents can use voices from) this provider. */
+export function cloningAvailable(provider: CloneProvider): boolean {
+  return provider === "elevenlabs" ? config.features.elevenLabs : config.features.voiceCloning;
+}
+
+/**
+ * Telnyx clones are made on our account and charged; ElevenLabs clones are made in the user's
+ * own account with their key, so they cost nothing here (docs/elevenlabs-notes.md §5).
+ */
 export async function cloneVoice(
   userId: string,
-  input: { name: string; language: Language; gender: "male" | "female"; audio: File; consent: boolean },
+  input: { name: string; language: Language; gender: "male" | "female"; audio: File; consent: boolean; provider?: CloneProvider },
 ): Promise<Voice> {
-  if (!config.features.voiceCloning) throw new UserError(CLONING_UNAVAILABLE);
+  const provider = input.provider ?? "telnyx";
+  if (!cloningAvailable(provider)) throw new UserError(provider === "elevenlabs" ? ELEVENLABS_UNAVAILABLE : CLONING_UNAVAILABLE);
   const name = input.name.trim();
   if (!name) throw new UserError("Give the voice a name.");
   if (!input.consent) throw new UserError("You must confirm this is your voice or that you have the speaker's consent.");
   if (!input.audio || input.audio.size === 0) throw new UserError("Upload or record an audio sample.");
-  const maxBytes = Math.min(voiceProvider().maxCloneSampleBytes, config.limits.cloneSampleBytes);
+  const providerMax = provider === "elevenlabs" ? elevenLabs().maxCloneSampleBytes : voiceProvider().maxCloneSampleBytes;
+  const maxBytes = Math.min(providerMax, config.limits.cloneSampleBytes);
   if (input.audio.size > maxBytes) throw new UserError(`Audio sample must be under ${formatMegabytes(maxBytes)}.`);
+  if (provider === "elevenlabs") return cloneWithElevenLabs(userId, { ...input, name });
 
   const row = await withUserLock(userId, async (tx) => {
-    const existing = await tx
-      .select({ id: voices.id })
-      .from(voices)
-      .where(and(eq(voices.userId, userId), isNull(voices.deletedAt), ne(voices.status, "failed")));
-    if (existing.length >= config.limits.clonedVoicesPerUser) {
-      throw new UserError(`You can have up to ${config.limits.clonedVoicesPerUser} cloned voices.`);
-    }
+    await checkCloneLimit(tx, userId, "telnyx");
     const [inserted] = await tx
       .insert(voices)
       .values({ userId, name, language: input.language, consentAt: new Date(), status: "processing" })
@@ -109,6 +141,54 @@ export async function cloneVoice(
   }
 }
 
+async function checkCloneLimit(tx: Tx, userId: string, provider: CloneProvider) {
+  const existing = await tx
+    .select({ id: voices.id })
+    .from(voices)
+    .where(and(eq(voices.userId, userId), eq(voices.provider, provider), isNull(voices.deletedAt), ne(voices.status, "failed")));
+  if (existing.length >= config.limits.clonedVoicesPerUser) {
+    const where = provider === "elevenlabs" ? " with ElevenLabs" : "";
+    throw new UserError(`You can have up to ${config.limits.clonedVoicesPerUser} cloned voices${where}.`);
+  }
+}
+
+async function cloneWithElevenLabs(
+  userId: string,
+  input: { name: string; language: Language; gender: "male" | "female"; audio: File },
+): Promise<Voice> {
+  const apiKey = await requireElevenLabsApiKey(userId);
+  const row = await withUserLock(userId, async (tx) => {
+    await checkCloneLimit(tx, userId, "elevenlabs");
+    const [inserted] = await tx
+      .insert(voices)
+      .values({ userId, name: input.name, language: input.language, provider: "elevenlabs", consentAt: new Date(), status: "processing" })
+      .returning();
+    return inserted;
+  });
+
+  let voiceId: string;
+  try {
+    const res = await elevenLabs().cloneVoice(apiKey, input);
+    voiceId = res.voiceId;
+    if (res.requiresVerification) {
+      // Not usable on calls until verified in ElevenLabs; don't leave it taking up a slot there.
+      await elevenLabs().deleteVoice(apiKey, voiceId).catch((err) => console.error("ElevenLabs deleteVoice failed", err));
+      return failVoice(row, "ElevenLabs wants this voice verified before it can be used. Try a different sample.");
+    }
+  } catch (err) {
+    console.error("ElevenLabs cloneVoice failed", err);
+    if (isKeyRejection(err)) await recordKeyStatus(userId, true);
+    const userErr = elevenLabsUserError(err, "clone this sample");
+    return failVoice(row, userErr instanceof UserError ? userErr.message : "ElevenLabs couldn't clone the voice. Try again later.");
+  }
+  const [u] = await db
+    .update(voices)
+    .set({ providerVoiceId: voiceId, voiceRef: `ElevenLabs.${config.elevenlabs.ttsModel}.${voiceId}`, status: "ready" })
+    .where(eq(voices.id, row.id))
+    .returning();
+  return u;
+}
+
 function clonePurchase(v: Pick<Voice, "id" | "userId" | "name">): Purchase {
   return {
     userId: v.userId,
@@ -122,7 +202,7 @@ function clonePurchase(v: Pick<Voice, "id" | "userId" | "name">): Purchase {
 }
 
 async function failVoice(v: Voice, reason: string): Promise<Voice> {
-  await refundPurchase(clonePurchase(v), `Refund — voice clone "${v.name}" failed`);
+  if (v.provider === "telnyx") await refundPurchase(clonePurchase(v), `Refund — voice clone "${v.name}" failed`);
   const [u] = await db.update(voices).set({ status: "failed", failureReason: reason }).where(eq(voices.id, v.id)).returning();
   return u;
 }
@@ -132,7 +212,7 @@ export async function refreshProcessingVoices(userId: string): Promise<void> {
   const rows = await db
     .select()
     .from(voices)
-    .where(and(eq(voices.userId, userId), eq(voices.status, "processing"), isNull(voices.deletedAt)));
+    .where(and(eq(voices.userId, userId), eq(voices.provider, "telnyx"), eq(voices.status, "processing"), isNull(voices.deletedAt)));
   for (const v of rows) {
     if (!v.providerVoiceId) continue;
     try {
@@ -155,7 +235,13 @@ export async function deleteVoice(userId: string, voiceId: string): Promise<void
   if (using.length) throw new UserError("This voice is used by an agent. Change the agent's voice first.");
   if (v.providerVoiceId) {
     try {
-      await voiceProvider().deleteClonedVoice(v.providerVoiceId);
+      if (v.provider === "elevenlabs") {
+        // It lives in the user's ElevenLabs account; deleting it there frees their voice slot.
+        const keyRow = await getElevenLabsKey(userId);
+        if (keyRow) await elevenLabs().deleteVoice(decryptSecret(keyRow.keyEncrypted), v.providerVoiceId);
+      } else {
+        await voiceProvider().deleteClonedVoice(v.providerVoiceId);
+      }
     } catch (err) {
       console.error("deleteClonedVoice failed", v.id, err);
     }

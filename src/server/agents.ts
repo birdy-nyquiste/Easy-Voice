@@ -3,14 +3,14 @@ import { createHash } from "node:crypto";
 import { and, eq, isNull, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { db, withUserLock } from "@/db";
-import { agents, phoneNumbers, voices, type Agent } from "@/db/schema";
+import { agents, elevenLabsKeys, phoneNumbers, voices, type Agent } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
 import { LANGUAGES, type Language } from "@/lib/language";
 import { FeatureNotPermittedError, voiceProvider, type AssistantSpec } from "./telnyx";
-import { voiceSpeaks } from "./telnyx/stock-voices";
+import { isElevenLabsVoice, voiceSpeaks } from "./telnyx/stock-voices";
 import { ASSISTANT_BODY_VERSION } from "./telnyx/version";
-import { CLONING_UNAVAILABLE } from "./voices";
+import { CLONING_UNAVAILABLE, cloningAvailable } from "./voices";
 
 export const RECORDING_NOTICE = {
   en: "This call may be recorded.",
@@ -69,12 +69,12 @@ async function resolveVoice(
     return { voiceRef: value, voiceId: null };
   }
   if (kind === "clone") {
-    if (!config.features.voiceCloning) throw new UserError(`${CLONING_UNAVAILABLE} Pick a built-in voice for now.`);
     const [v] = await db
       .select()
       .from(voices)
       .where(and(eq(voices.id, value), eq(voices.userId, userId), isNull(voices.deletedAt)));
     if (!v) throw new UserError("Unknown voice.");
+    if (!cloningAvailable(v.provider)) throw new UserError(`${CLONING_UNAVAILABLE} Pick a built-in voice for now.`);
     if (v.status !== "ready" || !v.voiceRef) throw new UserError("That cloned voice isn't ready yet.");
     return { voiceRef: v.voiceRef, voiceId: v.id };
   }
@@ -101,7 +101,21 @@ export function providerGreeting(language: Language, greeting: string): string {
 export const ENGLISH_ONLY_VOICE_RULE =
   "Your voice can only speak English. Always reply in English, even if the caller speaks another language.";
 
-function toSpec(a: Pick<Agent, "name" | "instructions" | "greeting" | "language" | "voiceRef" | "model">): AssistantSpec {
+/** Voices on the user's own ElevenLabs account need their key (as a Telnyx integration secret) on the assistant. */
+async function voiceApiKeyRef(a: Pick<Agent, "userId" | "voiceRef">): Promise<string | undefined> {
+  if (!isElevenLabsVoice(a.voiceRef)) return undefined;
+  const [k] = await db
+    .select({ ref: elevenLabsKeys.telnyxSecretRef })
+    .from(elevenLabsKeys)
+    .where(eq(elevenLabsKeys.userId, a.userId));
+  if (!k) throw new UserError("Your ElevenLabs account isn't connected. Connect it under Account → API keys, or pick another voice.");
+  return k.ref;
+}
+
+function toSpec(
+  a: Pick<Agent, "name" | "instructions" | "greeting" | "language" | "voiceRef" | "model">,
+  voiceApiKeyRef?: string,
+): AssistantSpec {
   const englishOnly = !voiceSpeaks(a.voiceRef).includes("zh");
   return {
     name: a.name,
@@ -109,6 +123,7 @@ function toSpec(a: Pick<Agent, "name" | "instructions" | "greeting" | "language"
     greeting: providerGreeting(a.language, a.greeting),
     language: a.language,
     voiceRef: a.voiceRef,
+    voiceApiKeyRef,
     model: a.model ?? config.telnyx.llmModel,
   };
 }
@@ -148,9 +163,10 @@ export async function updateAgent(userId: string, agentId: string, raw: unknown)
 /** Push the agent config to the provider; records failure instead of throwing. */
 export async function syncAgent(a: Agent): Promise<Agent> {
   try {
+    const spec = toSpec(a, await voiceApiKeyRef(a));
     let assistantId = a.providerAssistantId;
-    if (assistantId) await voiceProvider().updateAssistant(assistantId, toSpec(a));
-    else assistantId = (await voiceProvider().createAssistant(toSpec(a))).assistantId;
+    if (assistantId) await voiceProvider().updateAssistant(assistantId, spec);
+    else assistantId = (await voiceProvider().createAssistant(spec)).assistantId;
     const [u] = await db
       .update(agents)
       .set({ providerAssistantId: assistantId, status: "ready", failureReason: null, syncedConfig: platformFingerprint() })
@@ -162,7 +178,9 @@ export async function syncAgent(a: Agent): Promise<Agent> {
     const failureReason =
       err instanceof FeatureNotPermittedError && err.feature === "cloned_voices"
         ? `${CLONING_UNAVAILABLE} Pick a built-in voice for now.`
-        : "Couldn't save the agent. Try saving again.";
+        : err instanceof UserError
+          ? err.message
+          : "Couldn't save the agent. Try saving again.";
     const [u] = await db
       .update(agents)
       .set({ status: "failed", failureReason })

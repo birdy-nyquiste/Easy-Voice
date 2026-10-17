@@ -38,12 +38,24 @@ export function toStockVoices(catalog: CatalogVoice[]): StockVoice[] {
     .sort((a, b) => b.speaks.length - a.speaks.length || a.name.localeCompare(b.name));
 }
 
-/** Languages a voice can pronounce, from its "Provider.Model.id" ref. */
+/** Voices on a user's own ElevenLabs account; Telnyx needs their key (api_key_ref) to speak with them. */
+export function isElevenLabsVoice(ref: string): boolean {
+  return ref.startsWith("ElevenLabs.");
+}
+
+/** Languages a voice can pronounce, from its "Provider.Model.id" ref. ElevenLabs Flash/Multilingual speak both. */
 export function voiceSpeaks(ref: string): Language[] {
   return ref.startsWith("Telnyx.KokoroTTS.") ? ["en"] : ["zh", "en"];
 }
 
-const TTS_MODEL_NAMES: Record<string, string> = { KokoroTTS: "Kokoro", Ultra: "Ultra", Qwen3TTS: "Qwen3-TTS" };
+const TTS_MODEL_NAMES: Record<string, string> = {
+  KokoroTTS: "Kokoro",
+  Ultra: "Ultra",
+  Qwen3TTS: "Qwen3-TTS",
+  eleven_flash_v2_5: "ElevenLabs Flash v2.5",
+  eleven_multilingual_v2: "ElevenLabs Multilingual v2",
+  eleven_turbo_v2_5: "ElevenLabs Turbo v2.5",
+};
 
 /** Display name of the speech model behind a "Provider.Model.id" voice ref. */
 export function ttsModelName(ref: string): string {

@@ -122,21 +122,48 @@ export const phoneNumbers = pgTable(
 
 export const voiceStatus = pgEnum("voice_status", ["processing", "ready", "failed"]);
 
+/** Where a clone lives: on our Telnyx account, or in the user's own ElevenLabs account. */
+export const cloneProvider = pgEnum("clone_provider", ["telnyx", "elevenlabs"]);
+
 /** Cloned voices owned by users. Stock voices come straight from the provider catalog. */
 export const voices = pgTable("voices", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().references(() => users.id),
   name: text("name").notNull(),
   language: text("language").$type<Language>().notNull(),
+  provider: cloneProvider("provider").notNull().default("telnyx"),
   /** Provider clone id (for status/delete calls). */
   providerVoiceId: text("provider_voice_id"),
-  /** Voice string used in assistant voice settings, e.g. "Telnyx.Qwen3TTS.<id>". */
+  /** Voice string used in assistant voice settings, e.g. "Telnyx.Qwen3TTS.<id>" or "ElevenLabs.<model>.<id>". */
   voiceRef: text("voice_ref"),
   status: voiceStatus("status").notNull().default("processing"),
   failureReason: text("failure_reason"),
   consentAt: ts("consent_at").notNull(),
   createdAt: createdAt(),
   deletedAt: ts("deleted_at"),
+});
+
+/**
+ * A user's own ElevenLabs API key (bring your own key). Clones made with it live in their
+ * ElevenLabs account, and calls with those voices use their ElevenLabs credits.
+ */
+export const elevenLabsKeys = pgTable("elevenlabs_keys", {
+  userId: uuid("user_id").primaryKey().references(() => users.id),
+  /** AES-256-GCM, see server/secrets.ts. We need the key itself to clone, delete and preview voices. */
+  keyEncrypted: text("key_encrypted").notNull(),
+  /** Last 4 characters, for display. */
+  keyHint: text("key_hint").notNull(),
+  /** ElevenLabs account the key belongs to; a replacement key must be from the same account. */
+  accountId: text("account_id").notNull(),
+  /** Telnyx integration secret holding the same key; agents reference `telnyxSecretRef` as voice api_key_ref. */
+  telnyxSecretId: text("telnyx_secret_id").notNull(),
+  telnyxSecretRef: text("telnyx_secret_ref").notNull(),
+  /** When ElevenLabs last answered whether the key works (see elevenLabsKeyUsable). */
+  keyCheckedAt: ts("key_checked_at"),
+  /** Set while ElevenLabs rejects the key (revoked, expired, missing permissions); calls with its voices are refused. */
+  keyInvalidAt: ts("key_invalid_at"),
+  createdAt: createdAt(),
+  updatedAt: ts("updated_at").notNull().defaultNow(),
 });
 
 export const agentStatus = pgEnum("agent_status", ["syncing", "ready", "failed"]);
@@ -277,6 +304,7 @@ export const webhookEvents = pgTable(
 export type User = typeof users.$inferSelect;
 export type PhoneNumber = typeof phoneNumbers.$inferSelect;
 export type Voice = typeof voices.$inferSelect;
+export type ElevenLabsKey = typeof elevenLabsKeys.$inferSelect;
 export type Agent = typeof agents.$inferSelect;
 export type Call = typeof calls.$inferSelect;
 export type Message = typeof messages.$inferSelect;

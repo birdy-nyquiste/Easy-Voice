@@ -128,6 +128,11 @@ export const mockProvider: VoiceProvider = {
     state.clones.delete(voiceId);
   },
 
+  async createIntegrationSecret() {
+    return { id: `secret-${randomUUID()}` };
+  },
+  async deleteIntegrationSecret() {},
+
   async createAssistant() {
     return { assistantId: `assistant-${randomUUID()}` };
   },

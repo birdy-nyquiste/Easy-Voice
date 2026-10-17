@@ -19,7 +19,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             Easy Voice
           </Link>
           <Link
-            href="/billing"
+            href="/account/billing"
             className={`rounded-lg px-2 py-1 text-sm font-medium md:mt-4 md:block md:px-3 md:py-2 ${low ? "bg-red-50 text-red-700" : "bg-stone-100 text-stone-700"}`}
           >
             <span className="hidden text-xs font-normal text-stone-500 md:block">Balance</span>

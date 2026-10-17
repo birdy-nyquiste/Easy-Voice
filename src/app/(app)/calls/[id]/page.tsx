@@ -74,7 +74,7 @@ export default async function CallPage({ params }: { params: Promise<{ id: strin
                 {call.transcript.map((m, i) => (
                   <li key={i} className={`flex ${m.role === "assistant" ? "" : "justify-end"}`}>
                     <div className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm ${m.role === "assistant" ? "bg-stone-100" : "bg-stone-900 text-white"}`}>
-                      <div className="mb-0.5 text-[10px] uppercase tracking-wide opacity-60">{m.role === "assistant" ? agent?.name ?? "Agent" : "Caller"}</div>
+                      <div className="mb-0.5 text-xs opacity-60">{m.role === "assistant" ? agent?.name ?? "Agent" : "Caller"}</div>
                       {m.text}
                     </div>
                   </li>
