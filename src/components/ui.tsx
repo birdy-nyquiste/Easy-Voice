@@ -114,6 +114,11 @@ export function Notice({ tone = "amber", children }: { tone?: "amber" | "red" | 
   return <div className={`rounded-lg border px-4 py-3 text-sm ${cls}`}>{children}</div>;
 }
 
+/** Whether `path` is `href` or a page under it. */
+export function isActivePath(path: string, href: string): boolean {
+  return path === href || path.startsWith(`${href}/`);
+}
+
 /** Underlined tab links; the active one is marked. `scroll={false}` keeps the page in place when switching. */
 export function Tabs({ tabs }: { tabs: { href: string; label: ReactNode; active: boolean }[] }) {
   return (

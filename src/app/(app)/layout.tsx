@@ -8,15 +8,12 @@ import { Sidebar } from "./sidebar";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
-  const low = user.balanceCents <= 0;
   const unread = await countUnreadMessages(user.id);
   const collapsed = (await cookies()).get(SIDEBAR_COOKIE)?.value === "collapsed";
   return (
     <div className="min-h-screen md:flex">
       <Sidebar
-        email={user.email}
-        balance={formatCents(user.balanceCents)}
-        lowBalance={low}
+        account={{ email: user.email, balance: formatCents(user.balanceCents), lowBalance: user.balanceCents <= 0 }}
         unread={unread}
         initialCollapsed={collapsed}
       />

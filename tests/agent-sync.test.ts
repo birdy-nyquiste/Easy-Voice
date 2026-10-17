@@ -119,7 +119,7 @@ describe("agent model", () => {
     vi.spyOn(mockProvider, "createAssistant").mockRejectedValue(new FeatureNotPermittedError("cloned_voices", "403"));
     const a = await createAgent(u.id, input);
     expect(a.status).toBe("failed");
-    expect(a.failureReason).toBe("The cloned voice feature is temporarily unavailable. Pick a built-in voice for now.");
+    expect(a.failureReason).toBe(`${CLONING_UNAVAILABLE} Pick a built-in voice for now.`);
   });
 });
 

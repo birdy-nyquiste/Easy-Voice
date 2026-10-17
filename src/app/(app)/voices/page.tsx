@@ -92,7 +92,6 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
           ) : (
             <ul className="grid gap-2 sm:grid-cols-2">
               {stock.map((v) => (
-                // Name on its own line, badges under it: side by side, the badges squeezed long names to a letter or two.
                 <li key={v.ref} className="flex items-start gap-1 rounded-lg border border-stone-100 px-3 py-2 text-sm">
                   <PreviewButton voice={`stock:${v.ref}`} compact />
                   <span className="min-w-0 space-y-1">
@@ -118,8 +117,7 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
           {/* Once ElevenLabs is connected the Easy Voice option simply isn't offered; no notice needed. */}
           {!cloning && canAddService && (
             <Notice>
-              Cloning with Easy Voice is temporarily unavailable. You can still clone with your own ElevenLabs account: use
-              “Add a service” below.
+              {CLONING_UNAVAILABLE} You can still clone with your own ElevenLabs account: use “Add a service” below.
             </Notice>
           )}
           {providers.length === 0 && !canAddService ? (
