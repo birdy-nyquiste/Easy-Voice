@@ -40,7 +40,8 @@ export default async function ApiKeysPage() {
               </Notice>
             )}
             <p className="text-sm text-stone-700">
-              {t.rich("keyEnding", { hint: elKey.keyHint, mono: (chunks) => <span className="font-mono">{chunks}</span> })}{" "}
+              {t.rich("keyEnding", { hint: elKey.keyHint, mono: (chunks) => <span className="font-mono">{chunks}</span> })}
+              {tc("sentenceGap")}
               <Link href="/voices" className="underline hover:text-stone-900">
                 {t("cloneLink")}
               </Link>

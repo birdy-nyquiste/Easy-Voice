@@ -1,13 +1,17 @@
 import { createTranslator } from "next-intl";
 import en from "@/messages/en.json";
+import es from "@/messages/es.json";
+import ja from "@/messages/ja.json";
 import zh from "@/messages/zh.json";
-import type { Locale } from "./locales";
+import { BCP47, type Locale } from "./locales";
 
 export type Messages = typeof en;
-export const MESSAGES: Record<Locale, Messages> = { en, zh };
+export const MESSAGES: Record<Locale, Messages> = { en, zh, es, ja };
 
 function create<N extends keyof Messages>(locale: Locale, namespace: N) {
-  return createTranslator({ locale, messages: MESSAGES[locale], namespace });
+  // Numbers in messages (amounts in errors and stored text) format like formatCents: es-419, not Spain.
+  // next-intl types `locale` as our codes, but it only hands it to Intl here.
+  return createTranslator({ locale: BCP47[locale] as Locale, messages: MESSAGES[locale], namespace });
 }
 
 // Translators are reused: errors and stored text are rendered once per row on list pages.

@@ -5,7 +5,7 @@ import { agents, voices, type Voice } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
 import { failureColumns, stored, storedFromError, type StoredText } from "@/lib/stored-text";
-import { formatCents, formatMegabytes } from "@/lib/format";
+import { toMegabytes } from "@/lib/format";
 import { chargePurchase, refundPurchase, type Purchase } from "./billing/ledger";
 import { elevenLabs } from "./elevenlabs";
 import {
@@ -107,7 +107,7 @@ export async function cloneVoice(
   if (!input.audio || input.audio.size === 0) throw new UserError("audioRequired");
   const providerMax = provider === "elevenlabs" ? elevenLabs().maxCloneSampleBytes : voiceProvider().maxCloneSampleBytes;
   const maxBytes = Math.min(providerMax, config.limits.cloneSampleBytes);
-  if (input.audio.size > maxBytes) throw new UserError("audioTooLarge", { size: formatMegabytes(maxBytes) });
+  if (input.audio.size > maxBytes) throw new UserError("audioTooLarge", { size: toMegabytes(maxBytes) });
   if (provider === "elevenlabs") return cloneWithElevenLabs(userId, { ...input, name });
 
   const row = await withUserLock(userId, async (tx) => {
@@ -118,7 +118,7 @@ export async function cloneVoice(
       .returning();
     await chargePurchase(
       clonePurchase(inserted),
-      new UserError("cloneInsufficientBalance", { price: formatCents(config.pricing.voiceCloneCents) }),
+      new UserError("cloneInsufficientBalance", { price: config.pricing.voiceCloneCents / 100 }),
       tx,
     );
     return inserted;

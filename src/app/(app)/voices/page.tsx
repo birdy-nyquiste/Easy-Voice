@@ -126,7 +126,9 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
           {/* Once ElevenLabs is connected the Easy Voice option simply isn't offered; no notice needed. */}
           {!cloning && canAddService && (
             <Notice>
-              {te("cloningUnavailable")} {t("useOwnElevenLabs")}
+              {te("cloningUnavailable")}
+              {tc("sentenceGap")}
+              {t("useOwnElevenLabs")}
             </Notice>
           )}
           {providers.length === 0 && !canAddService ? (
@@ -146,7 +148,7 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
                         <span className="block text-stone-500">
                           {p === "elevenlabs"
                             ? t("elevenLabsOption")
-                            : t("easyVoiceOption", { price: formatCents(config.pricing.voiceCloneCents) })}
+                            : t("easyVoiceOption", { price: formatCents(config.pricing.voiceCloneCents, locale) })}
                         </span>
                       </span>
                     </label>
@@ -191,7 +193,7 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
                   <Field
                     label={t("sample")}
                     hint={t(providers.includes("elevenlabs") ? "sampleHintElevenLabs" : "sampleHint", {
-                      max: formatMegabytes(config.limits.cloneSampleBytes),
+                      max: formatMegabytes(config.limits.cloneSampleBytes, locale),
                     })}
                   >
                     <SampleInput maxBytes={config.limits.cloneSampleBytes} />

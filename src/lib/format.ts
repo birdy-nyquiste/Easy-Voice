@@ -1,13 +1,34 @@
 import { BCP47, type Locale } from "@/i18n/locales";
 
-export function formatCents(cents: number): string {
-  const sign = cents < 0 ? "-" : "";
-  return `${sign}$${(Math.abs(cents) / 100).toFixed(2)}`;
+const numberFormats = new Map<string, Intl.NumberFormat>();
+function numberFormat(locale: Locale, options: Intl.NumberFormatOptions): Intl.NumberFormat {
+  const key = `${locale}:${JSON.stringify(options)}`;
+  let f = numberFormats.get(key);
+  if (!f) numberFormats.set(key, (f = new Intl.NumberFormat(BCP47[locale], options)));
+  return f;
 }
 
-/** 4613734 → "4.4 MB" */
-export function formatMegabytes(bytes: number): string {
-  return `${Number((bytes / 1024 / 1024).toFixed(1))} MB`;
+/**
+ * US dollars in the interface language: 1050 → "$10.50" (en, ja), "US$10.50" (zh), "USD 10.50" (es,
+ * where a bare "$" would read as pesos). `whole` drops the cents; `signed` adds "+" to credits.
+ */
+export function formatCents(cents: number, locale: Locale, { whole = false, signed = false } = {}): string {
+  return numberFormat(locale, {
+    style: "currency",
+    currency: "USD",
+    ...(whole && { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
+    ...(signed && { signDisplay: "exceptZero" }),
+  }).format(cents / 100);
+}
+
+/** 4613734 → "4.4 MB", with the interface language's decimal separator */
+export function formatMegabytes(bytes: number, locale: Locale): string {
+  return `${numberFormat(locale, { maximumFractionDigits: 1 }).format(bytes / 1024 / 1024)} MB`;
+}
+
+/** Megabytes, rounded like formatMegabytes, for a `{size, number} MB` argument in a message. */
+export function toMegabytes(bytes: number): number {
+  return Number((bytes / 1024 / 1024).toFixed(1));
 }
 
 export function formatPhone(e164: string): string {

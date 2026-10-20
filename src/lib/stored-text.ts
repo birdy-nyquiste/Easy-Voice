@@ -53,5 +53,12 @@ function render(locale: Locale, msg: StoredMessage): string | null {
   const t = translator(locale, namespace) as unknown as { (key: string, values: ErrorValues): string; has(key: string): boolean };
   // A key renamed or removed since the row was written falls back to the stored English.
   if (!t.has(key)) return null;
-  return t(key, msg.values ?? {});
+  return t(key, dollarsFromText(msg.values ?? {}));
+}
+
+/** Rows written before amounts were stored as numbers hold "$25.00"; the messages now format a number. */
+function dollarsFromText(values: ErrorValues): ErrorValues {
+  return Object.fromEntries(
+    Object.entries(values).map(([k, v]) => [k, typeof v === "string" && /^-?\$[\d,]+(\.\d+)?$/.test(v) ? Number(v.replace(/[$,]/g, "")) : v]),
+  );
 }

@@ -233,7 +233,7 @@ function AccountActions({ account }: { account: Account }) {
         </Icon>
         {t("account")}
       </Link>
-      {/* No visible label: the sidebar is too narrow for it and both options; the group is named for screen readers. */}
+      {/* No visible label: the globe stands in for it; the select is named for screen readers. */}
       <div className="flex items-center gap-2.5 px-2.5 py-1.5 text-stone-700">
         <Icon className="h-4 w-4">
           <circle cx="10" cy="10" r="6.5" />

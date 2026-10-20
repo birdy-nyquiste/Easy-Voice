@@ -32,7 +32,7 @@ export default async function CallsPage() {
   return (
     <div className="space-y-6">
       {inFlight && <AutoRefresh />}
-      <PageHeader title={t("title")} description={t("description", { price: formatCents(config.pricing.callPerMinuteCents) })} />
+      <PageHeader title={t("title")} description={t("description", { price: formatCents(config.pricing.callPerMinuteCents, locale) })} />
 
       <Card>
         <CardTitle>{t("placeTitle")}</CardTitle>
@@ -104,7 +104,7 @@ export default async function CallsPage() {
                   <td className="hidden px-3 py-3 text-stone-600 sm:table-cell">{agentName ?? "—"}</td>
                   <td className="px-3 py-3"><StatusBadge status={call.status} /></td>
                   <td className="hidden px-3 py-3 text-right tabular-nums sm:table-cell">{formatDuration(call.durationSec)}</td>
-                  <td className="hidden px-3 py-3 text-right tabular-nums sm:table-cell">{call.billedCents != null ? formatCents(call.billedCents) : "—"}</td>
+                  <td className="hidden px-3 py-3 text-right tabular-nums sm:table-cell">{call.billedCents != null ? formatCents(call.billedCents, locale) : "—"}</td>
                   <td className="whitespace-nowrap px-5 py-3 text-right text-stone-500">{formatDateTime(call.createdAt, locale)}</td>
                 </tr>
               ))}

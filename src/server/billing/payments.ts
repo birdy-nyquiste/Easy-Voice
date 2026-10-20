@@ -4,14 +4,18 @@ import { and, desc, eq } from "drizzle-orm";
 import Stripe from "stripe";
 import { db } from "@/db";
 import { ledgerEntries, payments, type User } from "@/db/schema";
+import type { Locale } from "@/i18n/locales";
+import { translator } from "@/i18n/messages";
 import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
 import { failureColumns, stored, type StoredText } from "@/lib/stored-text";
-import { formatCents } from "@/lib/format";
 import { withWebhookDedupe } from "@/server/webhooks";
 import { applyLedger } from "./ledger";
 
 const MAX_TOPUP_CENTS = 50_000;
+
+/** Checkout pages in the interface language. */
+const CHECKOUT_LOCALE: Record<Locale, Stripe.Checkout.SessionCreateParams.Locale> = { en: "en", zh: "zh", es: "es-419", ja: "ja" };
 
 let stripeClient: Stripe | undefined;
 function stripe(): Stripe {
@@ -20,11 +24,11 @@ function stripe(): Stripe {
 }
 
 /** Creates a Stripe Checkout session for a one-time top-up and returns its URL. */
-export async function createTopup(user: User, amountCents: number): Promise<string> {
+export async function createTopup(user: User, amountCents: number, locale: Locale): Promise<string> {
   if (!Number.isInteger(amountCents) || amountCents < config.pricing.minTopupCents) {
-    throw new UserError("minTopup", { amount: formatCents(config.pricing.minTopupCents) });
+    throw new UserError("minTopup", { amount: config.pricing.minTopupCents / 100 });
   }
-  if (amountCents > MAX_TOPUP_CENTS) throw new UserError("maxTopup", { amount: formatCents(MAX_TOPUP_CENTS) });
+  if (amountCents > MAX_TOPUP_CENTS) throw new UserError("maxTopup", { amount: MAX_TOPUP_CENTS / 100 });
 
   // Stripe is the only way money enters the system; there is no free-credit path.
   if (!config.stripe.enabled) throw new UserError("paymentsNotConfigured");
@@ -32,6 +36,7 @@ export async function createTopup(user: User, amountCents: number): Promise<stri
   const session = await stripe().checkout.sessions.create({
     mode: "payment",
     customer_email: user.email,
+    locale: CHECKOUT_LOCALE[locale],
     client_reference_id: user.id,
     line_items: [
       {
@@ -39,7 +44,7 @@ export async function createTopup(user: User, amountCents: number): Promise<stri
         price_data: {
           currency: "usd",
           unit_amount: amountCents,
-          product_data: { name: "Easy Voice credit" },
+          product_data: { name: translator(locale, "billing")("checkoutItem") },
         },
       },
     ],
@@ -63,7 +68,7 @@ export async function addDevCredit(user: User, amountCents: number): Promise<voi
     amountCents,
     kind: "adjustment",
     idempotencyKey: `dev-credit:${randomUUID()}`,
-    description: stored("ledgerDevCredit", { amount: formatCents(amountCents) }),
+    description: stored("ledgerDevCredit", { amount: amountCents / 100 }),
   });
 }
 
@@ -79,7 +84,7 @@ export async function completePayment(providerRef: string): Promise<void> {
         amountCents: p.amountCents,
         kind: "topup",
         idempotencyKey: `payment:${p.id}`,
-        description: stored("ledgerTopup", { amount: formatCents(p.amountCents) }),
+        description: stored("ledgerTopup", { amount: p.amountCents / 100 }),
         refType: "payment",
         refId: p.id,
       },

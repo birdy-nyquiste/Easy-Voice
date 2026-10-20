@@ -35,7 +35,7 @@ export default async function NumbersPage({ searchParams }: { searchParams: Prom
     <div className="space-y-6">
       <PageHeader
         title={t("title")}
-        description={t("description", { price: formatCents(config.pricing.numberMonthlyCents) })}
+        description={t("description", { price: formatCents(config.pricing.numberMonthlyCents, locale) })}
       />
 
       {numbers.length === 0 ? (
@@ -57,7 +57,7 @@ export default async function NumbersPage({ searchParams }: { searchParams: Prom
                     <p className="mt-1 text-xs text-stone-500">
                       {n.smsEnabledAt ? (
                         t.rich("receivesTexts", {
-                          price: formatCents(config.pricing.smsInboundPerPartCents),
+                          price: formatCents(config.pricing.smsInboundPerPartCents, locale),
                           link: (chunks) => (
                             <Link href="/messages" className="underline">
                               {chunks}
@@ -147,7 +147,7 @@ export default async function NumbersPage({ searchParams }: { searchParams: Prom
                     <input type="hidden" name="e164" value={r.e164} />
                     <SubmitButton
                       pendingText={t("ordering")}
-                      confirm={t("buyConfirm", { number: formatPhone(r.e164), price: formatCents(config.pricing.numberMonthlyCents) })}
+                      confirm={t("buyConfirm", { number: formatPhone(r.e164), price: formatCents(config.pricing.numberMonthlyCents, locale) })}
                     >
                       {t("buy")}
                     </SubmitButton>

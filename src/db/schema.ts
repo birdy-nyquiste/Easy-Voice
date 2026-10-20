@@ -10,6 +10,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { Locale } from "@/i18n/locales";
 import type { Language } from "@/lib/language";
 import type { StoredMessage } from "@/lib/stored-text";
 
@@ -28,7 +29,7 @@ export const users = pgTable("users", {
   /** When the balance first went negative; null while balance >= 0. */
   negativeSince: ts("negative_since"),
   /** Interface language the user picked; null until they pick one. Restored to the cookie at sign-in. */
-  locale: text("locale").$type<Language>(),
+  locale: text("locale").$type<Locale>(),
   createdAt: createdAt(),
 });
 

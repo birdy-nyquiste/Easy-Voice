@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { attempt, type ActionState } from "@/lib/action";
 import { requireUser } from "@/server/auth";
@@ -12,7 +12,7 @@ export async function topupAction(_: ActionState, form: FormData): Promise<Actio
   const result = await attempt(async () => {
     const user = await requireUser();
     const dollars = Number(form.get("amount"));
-    url = await createTopup(user, Math.round(dollars * 100));
+    url = await createTopup(user, Math.round(dollars * 100), await getLocale());
   });
   if (url) redirect(url);
   return result;

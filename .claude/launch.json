@@ -1,6 +1,7 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "web", "runtimeExecutable": "pnpm", "runtimeArgs": ["dev"], "port": 3000 }
+    { "name": "web", "runtimeExecutable": "pnpm", "runtimeArgs": ["dev"], "port": 3000 },
+    { "name": "web-console-email", "runtimeExecutable": "env", "runtimeArgs": ["RESEND_API_KEY=", "pnpm", "dev"], "port": 3000 }
   ]
 }

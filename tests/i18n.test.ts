@@ -1,9 +1,14 @@
+import { readFileSync } from "node:fs";
 import { createTranslator } from "next-intl";
 import { describe, expect, it } from "vitest";
-import { localeFromAcceptLanguage } from "@/i18n/locales";
+import { LOCALES, localeFromAcceptLanguage } from "@/i18n/locales";
 import { MESSAGES } from "@/i18n/messages";
-import { UserError } from "@/lib/errors";
+import { errorText, UserError } from "@/lib/errors";
+import { formatCents, formatMegabytes } from "@/lib/format";
 import { showStored, stored, storedColumns, storedFromError } from "@/lib/stored-text";
+
+/** Intl puts a no-break space between "USD" and the amount. */
+const plain = (s: string | null) => s?.replace(/\u00a0/g, " ");
 
 type Tree = { [key: string]: string | Tree };
 
@@ -16,8 +21,9 @@ function flatten(tree: Tree, prefix = ""): Record<string, string> {
   );
 }
 
-const en = flatten(MESSAGES.en);
-const zh = flatten(MESSAGES.zh);
+const flat = Object.fromEntries(LOCALES.map((l) => [l, flatten(MESSAGES[l])]));
+const en = flat.en;
+const translations = LOCALES.filter((l) => l !== "en");
 
 /** Argument names and rich-text tags a message uses, ignoring quoted (literal) braces. */
 function slots(message: string): string[] {
@@ -28,20 +34,20 @@ function slots(message: string): string[] {
 }
 
 describe("messages", () => {
-  it("has the same keys in Chinese as in English", () => {
-    expect(Object.keys(zh).sort()).toEqual(Object.keys(en).sort());
+  it.each(translations)("has the same keys in %s as in English", (locale) => {
+    expect(Object.keys(flat[locale]).sort()).toEqual(Object.keys(en).sort());
   });
 
-  it("keeps every placeholder and tag in the translation", () => {
-    const mismatched = Object.keys(en).filter((k) => slots(en[k]).join() !== slots(zh[k] ?? "").join());
+  it.each(translations)("keeps every placeholder and tag in the %s translation", (locale) => {
+    const mismatched = Object.keys(en).filter((k) => slots(en[k]).join() !== slots(flat[locale][k] ?? "").join());
     expect(mismatched).toEqual([]);
   });
 
-  it("formats every message in both languages", () => {
-    for (const locale of ["en", "zh"] as const) {
+  it("formats every message in every language", () => {
+    for (const locale of LOCALES) {
       const errors: string[] = [];
       const t = createTranslator({ locale, messages: MESSAGES[locale], onError: (e) => errors.push(e.message) });
-      for (const [key, message] of Object.entries(locale === "en" ? en : zh)) {
+      for (const [key, message] of Object.entries(flat[locale])) {
         const values: Record<string, string | number | ((chunks: string) => string)> = {};
         for (const slot of slots(message)) {
           const name = slot.slice(1, -1);
@@ -67,6 +73,14 @@ describe("localeFromAcceptLanguage", () => {
     expect(localeFromAcceptLanguage("en-US,zh-CN;q=0.9")).toBe("en");
   });
 
+  it("picks Spanish and Japanese for any regional variant", () => {
+    expect(localeFromAcceptLanguage("es-MX,es;q=0.9,en;q=0.8")).toBe("es");
+    expect(localeFromAcceptLanguage("es")).toBe("es");
+    expect(localeFromAcceptLanguage("ja-JP")).toBe("ja");
+    expect(localeFromAcceptLanguage("ja,en-US;q=0.7")).toBe("ja");
+    expect(localeFromAcceptLanguage("en-US,ja;q=0.9")).toBe("en");
+  });
+
   it("falls back to English for Traditional Chinese, other languages and no header", () => {
     expect(localeFromAcceptLanguage("zh-TW")).toBe("en");
     expect(localeFromAcceptLanguage("fr-FR,de;q=0.8")).toBe("en");
@@ -89,10 +103,60 @@ describe("stored text", () => {
     expect(showStored("zh", text, msg)).toBe("ElevenLabs 繁忙，或已达到你套餐的上限，请一分钟后再试。");
   });
 
+  it("formats amounts and sizes in the viewer's language, including rows that stored '$25.00'", () => {
+    expect(storedColumns(stored("ledgerTopup", { amount: 25 })).text).toBe("Top-up $25.00");
+    expect(plain(showStored("es", "Top-up $25.00", { key: "stored.ledgerTopup", values: { amount: 25 } }))).toBe("Recarga de USD 25.00");
+    expect(plain(showStored("zh", "Top-up $25.00", { key: "stored.ledgerTopup", values: { amount: "$25.00" } }))).toBe("充值 US$25.00");
+    expect(new UserError("audioTooLarge", { size: 4.5 }).message).toBe("Audio sample must be under 4.5 MB.");
+    expect(errorText("es", "audioTooLarge", { size: 4.5 })).toBe("La muestra de audio debe pesar menos de 4.5 MB.");
+  });
+
+  it("formats money in the interface language", () => {
+    expect(formatCents(-1050, "en")).toBe("-$10.50");
+    expect(plain(formatCents(2500, "es", { whole: true }))).toBe("USD 25");
+    expect(formatCents(1000, "ja", { signed: true })).toBe("+$10.00");
+    expect(formatMegabytes(4613734, "es")).toBe("4.4 MB");
+  });
+
   it("falls back to the stored English for older rows and unknown keys", () => {
     expect(showStored("zh", "Top-up $25.00", null)).toBe("Top-up $25.00");
     // @ts-expect-error -- a key that no longer exists
     expect(showStored("zh", "Old text", { key: "stored.gone" })).toBe("Old text");
     expect(showStored("zh", null, null)).toBeNull();
+  });
+});
+
+describe("pre-i18n backfill (drizzle/0013)", () => {
+  const sql = readFileSync("drizzle/0013_backfill_stored_messages.sql", "utf8");
+  const statements = sql.split("--> statement-breakpoint");
+  const samples: Record<string, Record<string, string | number>> = {
+    amount: { amount: 1234.5 },
+    number: { number: "+14155551000" },
+    name: { name: 'My "best" voice' },
+    minutes: { minutes: 3 },
+    sms: { from: "+12025550123" },
+    cause: { cause: "normal_clearing" },
+  };
+
+  it("matches the English of every message it backfills", () => {
+    const checked: string[] = [];
+    for (const statement of statements) {
+      const pattern = /WHERE[^~]*~ '([^']+)'/.exec(statement)?.[1];
+      if (!pattern) continue;
+      for (const [, key] of statement.matchAll(/'stored\.(\w+)'/g)) {
+        for (const values of [...Object.values(samples), { from: "+12025550123", parts: 1 }, { from: "+12025550123", parts: 2 }]) {
+          // @ts-expect-error -- keys come from the SQL at runtime
+          const text = storedColumns(stored(key, values)).text;
+          if (new RegExp(pattern).test(text)) checked.push(key);
+        }
+      }
+    }
+    const fixed = [...sql.matchAll(/\('((?:[^']|'')+)', 'stored\.(\w+)'\)/g)];
+    for (const [, text, key] of fixed) {
+      // @ts-expect-error -- keys come from the SQL at runtime
+      expect(storedColumns(stored(key)).text, key).toBe(text.replace(/''/g, "'"));
+      checked.push(key);
+    }
+    expect(new Set(checked)).toEqual(new Set(Object.keys(MESSAGES.en.stored).filter((k) => /^(ledger|outcome)/.test(k))));
   });
 });

@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { requireUser } from "@/server/auth";
 import { formatCents } from "@/lib/format";
 import { config } from "@/lib/config";
@@ -11,11 +11,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const user = await requireUser();
   const unread = await countUnreadMessages(user.id);
   const collapsed = (await cookies()).get(SIDEBAR_COOKIE)?.value === "collapsed";
-  const t = await getTranslations("mock");
+  const [t, locale] = await Promise.all([getTranslations("mock"), getLocale()]);
   return (
     <div className="min-h-screen md:flex">
       <Sidebar
-        account={{ email: user.email, balance: formatCents(user.balanceCents), lowBalance: user.balanceCents <= 0 }}
+        account={{ email: user.email, balance: formatCents(user.balanceCents, locale), lowBalance: user.balanceCents <= 0 }}
         unread={unread}
         initialCollapsed={collapsed}
       />

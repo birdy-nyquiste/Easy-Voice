@@ -57,7 +57,7 @@ export default async function CallPage({ params }: { params: Promise<{ id: strin
           <div><dt className="text-stone-500">{t("direction")}</dt><dd className="mt-1"><Badge>{t(call.direction === "inbound" ? "directionInbound" : "directionOutbound")}</Badge></dd></div>
           <div><dt className="text-stone-500">{tc("agent")}</dt><dd className="mt-1 font-medium">{agent?.name ?? "—"}</dd></div>
           <div><dt className="text-stone-500">{t("colDuration")}</dt><dd className="mt-1 font-medium tabular-nums">{formatDuration(call.durationSec)}</dd></div>
-          <div><dt className="text-stone-500">{t("colCost")}</dt><dd className="mt-1 font-medium tabular-nums">{call.billedCents != null ? formatCents(call.billedCents) : "—"}</dd></div>
+          <div><dt className="text-stone-500">{t("colCost")}</dt><dd className="mt-1 font-medium tabular-nums">{call.billedCents != null ? formatCents(call.billedCents, locale) : "—"}</dd></div>
         </dl>
       </Card>
 
