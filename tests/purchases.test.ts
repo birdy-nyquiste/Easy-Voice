@@ -87,7 +87,7 @@ describe("dev credit", () => {
 describe("payments", () => {
   it("never credits balance without Stripe", async () => {
     const u = await makeUser(0);
-    await expect(createTopup(u, 2500)).rejects.toThrow(/aren't configured/);
+    await expect(createTopup(u, 2500, "en")).rejects.toThrow(/aren't configured/);
     expect(await balance(u.id)).toBe(0);
   });
 

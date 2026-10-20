@@ -34,7 +34,7 @@ export default async function DashboardPage() {
       <div className="grid gap-4 sm:grid-cols-3">
         <Card>
           <CardTitle>{t("balance")}</CardTitle>
-          <p className={`text-2xl font-semibold ${user.balanceCents <= 0 ? "text-red-600" : ""}`}>{formatCents(user.balanceCents)}</p>
+          <p className={`text-2xl font-semibold ${user.balanceCents <= 0 ? "text-red-600" : ""}`}>{formatCents(user.balanceCents, locale)}</p>
           <Link href="/account/billing" className="mt-1 inline-block text-sm text-stone-500 hover:text-stone-900">{t("topUp")}</Link>
         </Card>
         <Card>

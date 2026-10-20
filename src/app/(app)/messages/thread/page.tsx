@@ -28,7 +28,7 @@ export default async function ThreadPage({ searchParams }: { searchParams: Promi
       <PageHeader
         back={{ href: "/messages", label: t("all") }}
         title={t("threadTitle", { name: who })}
-        description={[name && formatPhone(from), t("textCount", { count: texts.length }), t("billed", { amount: formatCents(billed) })].filter(Boolean).join(" · ")}
+        description={[name && formatPhone(from), t("textCount", { count: texts.length }), t("billed", { amount: formatCents(billed, locale) })].filter(Boolean).join(" · ")}
         action={
           <ActionForm action={deleteConversationAction}>
             <input type="hidden" name="from" value={from} />

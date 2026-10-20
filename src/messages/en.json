@@ -14,7 +14,8 @@
     "agent": "Agent",
     "inbound": "↙ in",
     "outbound": "↗ out",
-    "language": "Language"
+    "language": "Language",
+    "sentenceGap": " "
   },
   "languages": {
     "en": "English",
@@ -26,7 +27,9 @@
   "localeSwitcher": {
     "label": "Language",
     "en": "English",
-    "zh": "中文"
+    "zh": "中文",
+    "es": "Español",
+    "ja": "日本語"
   },
   "status": {
     "active": "active",
@@ -335,11 +338,12 @@
     "segmentNote": " A text segment holds up to 160 characters, or 70 when it contains Chinese characters or emoji.",
     "activity": "Activity",
     "noActivity": "No activity yet.",
-    "payments": "Payments"
+    "payments": "Payments",
+    "checkoutItem": "Easy Voice credit"
   },
   "stored": {
-    "ledgerTopup": "Top-up {amount}",
-    "ledgerDevCredit": "Dev credit {amount} (no payment)",
+    "ledgerTopup": "Top-up {amount, number, ::currency/USD}",
+    "ledgerDevCredit": "Dev credit {amount, number, ::currency/USD} (no payment)",
     "ledgerNumberFirstMonth": "Phone number {number} — first month",
     "ledgerNumberMonthly": "Phone number {number} — monthly rental",
     "ledgerNumberRefund": "Refund — number {number} could not be activated",
@@ -393,7 +397,7 @@
     "areaCodeDigits": "Area code must be 3 digits.",
     "invalidUsNumber": "Invalid US number.",
     "numberLimit": "You can have up to {max, plural, one {# number} other {# numbers}}.",
-    "numberInsufficientBalance": "Insufficient balance. A number costs {price}/month — top up first.",
+    "numberInsufficientBalance": "Insufficient balance. A number costs {price, number, ::currency/USD}/month — top up first.",
     "numberOrderFailed": "That number could not be ordered. Your payment was refunded — try another number.",
     "orderFailed": "Order failed: {reason}. You were refunded.",
     "numberNotFound": "Number not found.",
@@ -414,8 +418,8 @@
     "voiceNameRequired": "Give the voice a name.",
     "consentRequired": "You must confirm this is your voice or that you have the speaker's consent.",
     "audioRequired": "Upload or record an audio sample.",
-    "audioTooLarge": "Audio sample must be under {size}.",
-    "cloneInsufficientBalance": "Insufficient balance. A voice clone costs {price} — top up first.",
+    "audioTooLarge": "Audio sample must be under {size, number} MB.",
+    "cloneInsufficientBalance": "Insufficient balance. A voice clone costs {price, number, ::currency/USD} — top up first.",
     "cloneLimit": "You can have up to {max} cloned voices.",
     "cloneLimitElevenLabs": "You can have up to {max} cloned voices with ElevenLabs.",
     "cloneFailed": "Cloning failed: {reason}",
@@ -446,9 +450,17 @@
     "conversationNotFound": "Conversation not found.",
     "missingNumber": "Missing number.",
     "contactNameTooLong": "Keep the name under {max} characters.",
-    "minTopup": "Minimum top-up is {amount}.",
-    "maxTopup": "Maximum top-up is {amount}.",
+    "minTopup": "Minimum top-up is {amount, number, ::currency/USD}.",
+    "maxTopup": "Maximum top-up is {amount, number, ::currency/USD}.",
     "invalidAmount": "Invalid amount.",
     "paymentsNotConfigured": "Payments aren't configured yet. Please try again later."
+  },
+  "errorPage": {
+    "notFoundTitle": "Page not found",
+    "notFoundBody": "This page doesn't exist, or it isn't yours to see.",
+    "errorTitle": "Something went wrong",
+    "errorBody": "We couldn't load this page. Try again in a moment.",
+    "retry": "Try again",
+    "home": "Go to the dashboard"
   }
 }

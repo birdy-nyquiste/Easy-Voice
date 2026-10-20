@@ -14,7 +14,8 @@
     "agent": "助理",
     "inbound": "↙ 呼入",
     "outbound": "↗ 呼出",
-    "language": "语言"
+    "language": "语言",
+    "sentenceGap": ""
   },
   "languages": {
     "en": "英语",
@@ -26,7 +27,9 @@
   "localeSwitcher": {
     "label": "语言",
     "en": "English",
-    "zh": "中文"
+    "zh": "中文",
+    "es": "Español",
+    "ja": "日本語"
   },
   "status": {
     "active": "使用中",
@@ -335,11 +338,12 @@
     "segmentNote": "一段短信最多 160 个字符；包含中文或表情符号时最多 70 个字符。",
     "activity": "账户明细",
     "noActivity": "暂无记录。",
-    "payments": "付款"
+    "payments": "付款",
+    "checkoutItem": "Easy Voice 余额"
   },
   "stored": {
-    "ledgerTopup": "充值 {amount}",
-    "ledgerDevCredit": "开发额度 {amount}（未付款）",
+    "ledgerTopup": "充值 {amount, number, ::currency/USD}",
+    "ledgerDevCredit": "开发额度 {amount, number, ::currency/USD}（未付款）",
     "ledgerNumberFirstMonth": "电话号码 {number}——首月",
     "ledgerNumberMonthly": "电话号码 {number}——月租",
     "ledgerNumberRefund": "退款——号码 {number} 未能激活",
@@ -393,7 +397,7 @@
     "areaCodeDigits": "区号必须是 3 位数字。",
     "invalidUsNumber": "无效的美国号码。",
     "numberLimit": "你最多可以有 {max} 个号码。",
-    "numberInsufficientBalance": "余额不足。一个号码每月 {price}，请先充值。",
+    "numberInsufficientBalance": "余额不足。一个号码每月 {price, number, ::currency/USD}，请先充值。",
     "numberOrderFailed": "无法订购该号码。你的付款已退回，请换一个号码试试。",
     "orderFailed": "订购失败：{reason}。已为你退款。",
     "numberNotFound": "找不到该号码。",
@@ -414,8 +418,8 @@
     "voiceNameRequired": "请为声音命名。",
     "consentRequired": "你必须确认这是你本人的声音，或已获得说话人的同意。",
     "audioRequired": "请上传或录制一段音频样本。",
-    "audioTooLarge": "音频样本必须小于 {size}。",
-    "cloneInsufficientBalance": "余额不足。克隆一个声音需要 {price}，请先充值。",
+    "audioTooLarge": "音频样本必须小于 {size, number} MB。",
+    "cloneInsufficientBalance": "余额不足。克隆一个声音需要 {price, number, ::currency/USD}，请先充值。",
     "cloneLimit": "你最多可以有 {max} 个克隆声音。",
     "cloneLimitElevenLabs": "你最多可以用 ElevenLabs 克隆 {max} 个声音。",
     "cloneFailed": "克隆失败：{reason}",
@@ -446,9 +450,17 @@
     "conversationNotFound": "找不到该对话。",
     "missingNumber": "缺少号码。",
     "contactNameTooLong": "名称请控制在 {max} 个字符以内。",
-    "minTopup": "最低充值金额为 {amount}。",
-    "maxTopup": "最高充值金额为 {amount}。",
+    "minTopup": "最低充值金额为 {amount, number, ::currency/USD}。",
+    "maxTopup": "最高充值金额为 {amount, number, ::currency/USD}。",
     "invalidAmount": "金额无效。",
     "paymentsNotConfigured": "付款功能尚未配置，请稍后再试。"
+  },
+  "errorPage": {
+    "notFoundTitle": "页面不存在",
+    "notFoundBody": "这个页面不存在，或者你无权查看。",
+    "errorTitle": "出了点问题",
+    "errorBody": "页面加载失败，请稍后再试。",
+    "retry": "重试",
+    "home": "返回概览"
   }
 }

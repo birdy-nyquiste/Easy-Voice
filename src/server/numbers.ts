@@ -5,7 +5,6 @@ import { agents, phoneNumbers, type PhoneNumber, type User } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
 import { failureColumns, stored, type StoredText } from "@/lib/stored-text";
-import { formatCents } from "@/lib/format";
 import { applyLedger, chargePurchase, refundPurchase, type Purchase } from "./billing/ledger";
 import { enableInboundSms } from "./messages";
 import { voiceProvider } from "./telnyx";
@@ -52,7 +51,7 @@ export async function purchaseNumber(user: User, e164: string): Promise<PhoneNum
     const [inserted] = await tx.insert(phoneNumbers).values({ userId: user.id, e164, status: "pending" }).returning();
     await chargePurchase(
       numberPurchase(inserted),
-      new UserError("numberInsufficientBalance", { price: formatCents(config.pricing.numberMonthlyCents) }),
+      new UserError("numberInsufficientBalance", { price: config.pricing.numberMonthlyCents / 100 }),
       tx,
     );
     return inserted;

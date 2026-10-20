@@ -1,12 +1,10 @@
-import { LANGUAGES, type Language } from "@/lib/language";
-
-/** Interface languages. The same codes as an agent's call language, but chosen separately. */
-export const LOCALES = LANGUAGES;
-export type Locale = Language;
+/** Interface languages. Separate from an agent's call language (src/lib/language.ts). */
+export const LOCALES = ["en", "zh", "es", "ja"] as const;
+export type Locale = (typeof LOCALES)[number];
 export const DEFAULT_LOCALE: Locale = "en";
 
-/** For <html lang> and Intl formatting. Chinese is Simplified only. */
-export const BCP47: Record<Locale, string> = { en: "en-US", zh: "zh-CN" };
+/** For <html lang> and Intl formatting. Chinese is Simplified only; Spanish is Latin American. */
+export const BCP47: Record<Locale, string> = { en: "en-US", zh: "zh-CN", es: "es-419", ja: "ja-JP" };
 
 export function parseLocale(v: unknown): Locale | null {
   return LOCALES.find((l) => l === v) ?? null;
@@ -25,6 +23,8 @@ export function localeFromAcceptLanguage(header: string | null): Locale {
   for (const { tag } of ranked) {
     // Traditional Chinese readers get English rather than Simplified.
     if (tag === "zh" || tag.startsWith("zh-cn") || tag.startsWith("zh-sg") || tag.startsWith("zh-hans")) return "zh";
+    if (tag === "es" || tag.startsWith("es-")) return "es";
+    if (tag === "ja" || tag.startsWith("ja-")) return "ja";
     if (tag.startsWith("en")) return "en";
   }
   return DEFAULT_LOCALE;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { buttonClass, inputClass } from "@/components/ui";
 import { formatMegabytes } from "@/lib/format";
@@ -9,6 +9,7 @@ import { formatMegabytes } from "@/lib/format";
 export function SampleInput({ maxBytes }: { maxBytes: number }) {
   const t = useTranslations("voices");
   const tc = useTranslations("common");
+  const locale = useLocale();
   const fileRef = useRef<HTMLInputElement>(null);
   const recRef = useRef<MediaRecorder | null>(null);
   const [recording, setRecording] = useState(false);
@@ -23,7 +24,7 @@ export function SampleInput({ maxBytes }: { maxBytes: number }) {
   function setSample(file: File | null) {
     setError(null);
     if (file && file.size > maxBytes) {
-      setError(t("sampleTooLarge", { size: formatMegabytes(file.size), max: formatMegabytes(maxBytes) }));
+      setError(t("sampleTooLarge", { size: formatMegabytes(file.size, locale), max: formatMegabytes(maxBytes, locale) }));
       file = null;
     }
     const dt = new DataTransfer();
