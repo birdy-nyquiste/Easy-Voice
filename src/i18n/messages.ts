@@ -2,11 +2,12 @@ import { createTranslator } from "next-intl";
 import en from "@/messages/en.json";
 import es from "@/messages/es.json";
 import ja from "@/messages/ja.json";
+import vi from "@/messages/vi.json";
 import zh from "@/messages/zh.json";
 import { BCP47, type Locale } from "./locales";
 
 export type Messages = typeof en;
-export const MESSAGES: Record<Locale, Messages> = { en, zh, es, ja };
+export const MESSAGES: Record<Locale, Messages> = { en, zh, es, ja, vi };
 
 function create<N extends keyof Messages>(locale: Locale, namespace: N) {
   // Numbers in messages (amounts in errors and stored text) format like formatCents: es-419, not Spain.
