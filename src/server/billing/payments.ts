@@ -15,7 +15,7 @@ import { applyLedger } from "./ledger";
 const MAX_TOPUP_CENTS = 50_000;
 
 /** Checkout pages in the interface language. */
-const CHECKOUT_LOCALE: Record<Locale, Stripe.Checkout.SessionCreateParams.Locale> = { en: "en", zh: "zh", es: "es-419", ja: "ja" };
+const CHECKOUT_LOCALE: Record<Locale, Stripe.Checkout.SessionCreateParams.Locale> = { en: "en", zh: "zh", es: "es-419", ja: "ja", vi: "vi" };
 
 let stripeClient: Stripe | undefined;
 function stripe(): Stripe {

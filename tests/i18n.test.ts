@@ -73,6 +73,11 @@ describe("localeFromAcceptLanguage", () => {
     expect(localeFromAcceptLanguage("en-US,zh-CN;q=0.9")).toBe("en");
   });
 
+  it("picks Vietnamese for vi and vi-VN", () => {
+    expect(localeFromAcceptLanguage("vi-VN,vi;q=0.9,en;q=0.8")).toBe("vi");
+    expect(localeFromAcceptLanguage("vi")).toBe("vi");
+  });
+
   it("picks Spanish and Japanese for any regional variant", () => {
     expect(localeFromAcceptLanguage("es-MX,es;q=0.9,en;q=0.8")).toBe("es");
     expect(localeFromAcceptLanguage("es")).toBe("es");
@@ -115,6 +120,7 @@ describe("stored text", () => {
     expect(formatCents(-1050, "en")).toBe("-$10.50");
     expect(plain(formatCents(2500, "es", { whole: true }))).toBe("USD 25");
     expect(formatCents(1000, "ja", { signed: true })).toBe("+$10.00");
+    expect(plain(formatCents(1050, "vi"))).toBe("10,50 US$");
     expect(formatMegabytes(4613734, "es")).toBe("4.4 MB");
   });
 

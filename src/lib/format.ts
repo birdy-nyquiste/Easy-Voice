@@ -9,7 +9,7 @@ function numberFormat(locale: Locale, options: Intl.NumberFormatOptions): Intl.N
 }
 
 /**
- * US dollars in the interface language: 1050 → "$10.50" (en, ja), "US$10.50" (zh), "USD 10.50" (es,
+ * US dollars in the interface language: 1050 → "$10.50" (en, ja), "US$10.50" (zh), "10,50 US$" (vi), "USD 10.50" (es,
  * where a bare "$" would read as pesos). `whole` drops the cents; `signed` adds "+" to credits.
  */
 export function formatCents(cents: number, locale: Locale, { whole = false, signed = false } = {}): string {
