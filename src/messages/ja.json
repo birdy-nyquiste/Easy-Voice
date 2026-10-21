@@ -155,7 +155,6 @@
     "sectionConversationHint": "やり取りの進め方。",
     "sectionEnding": "通話の終了",
     "sectionEndingHint": "通話を終えるタイミング。",
-    "speechModel": "音声モデル: {name}。",
     "voiceSpeed": "話す速さ",
     "voiceSpeedHint": "1.00× が標準の速さです。",
     "speedValue": "{speed}×",
@@ -192,7 +191,7 @@
     "greetingInterruptible": "あいさつをさえぎれる",
     "greetingInterruptibleHint": "オフにすると、録音のお知らせを必ず最後まで流せます。",
     "keyTerms": "キーワード",
-    "keyTermsHint": "聞き取ってほしい名前や用語をカンマ区切りで入力します。音声認識: {name}。",
+    "keyTermsHint": "聞き取ってほしい名前や用語をカンマ区切りで入力します。",
     "keyTermsPlaceholder": "Nyquiste, 岡田先生, Wi-Fi",
     "endCallWhenDone": "会話が終わったら電話を切る",
     "endCallWhenDoneHint": "相手が切るのを待たず、エージェントがあいさつをして切ります。",
@@ -202,7 +201,10 @@
     "silenceHangupHint": "この時間だれも話さない場合。保留になりそうな通話ではオフにしてください。",
     "afterSeconds": "{count} 秒後",
     "never": "切らない",
-    "undefinedVariables": "{names} を埋める変数がないため、エージェントにはそのまま渡されます。「変数」に追加するか、つづりを直してください。"
+    "undefinedVariables": "{names} を埋める変数がないため、エージェントにはそのまま渡されます。「変数」に追加するか、つづりを直してください。",
+    "stt": "音声認識",
+    "tts": "音声合成",
+    "setByVoice": " · 音声により決定"
   },
   "agentTemplates": {
     "pick": "出発点を選んでください。作成前にすべて変更できます。",
@@ -598,7 +600,8 @@
     "variableKeyReserved": "「{key}」は組み込みの名前です。別の名前にしてください。",
     "variableKeyDuplicate": "「{key}」という変数が 2 つあります。",
     "variableValueRequired": "「{key}」に値を入れるか、「通話ごとに入力」をオンにしてください。",
-    "variableValueTooLong": "「{key}」の値は {max} 文字までです。"
+    "variableValueTooLong": "「{key}」の値は {max} 文字までです。",
+    "variableNameRequired": "すべての変数に名前を付けてください。"
   },
   "errorPage": {
     "notFoundTitle": "ページが見つかりません",

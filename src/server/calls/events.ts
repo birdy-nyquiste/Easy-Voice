@@ -66,8 +66,9 @@ function assistantStart(agent: Agent, call: Call): AssistantStart {
       ...call.variables,
       call_direction: call.direction,
       call_goal: call.goal ?? "",
-      contact_number: outbound ? call.toNumber : call.fromNumber,
-      current_time: currentTimeText(readBehavior(agent.behavior).timeZone),
+      // Callers without caller ID are stored as "unknown"; the agent gets nothing rather than that word.
+      contact_number: outbound ? call.toNumber : call.fromNumber.startsWith("+") ? call.fromNumber : "",
+      current_time: currentTimeText(readBehavior(agent.behavior).timeZone, agent.language),
     },
     // Inbound calls use the agent's stored greeting (which already includes the recording notice).
     greetingOverride: outbound ? OUTBOUND_GREETING[agent.language] : undefined,

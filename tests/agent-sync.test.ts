@@ -201,6 +201,8 @@ describe("agent behavior and variables", () => {
     [[{ key: "telnyx_x", value: "A" }], /built-in name/],
     [[{ key: "a", value: "1" }, { key: "a", value: "2" }], /two variables named/],
     [[{ key: "owner_name", value: "" }], /Give “owner_name” a value/],
+    [[{ key: "", value: "Alex" }], /Give every variable a name/],
+    [[{ key: "notes", value: "x".repeat(501) }], /value for “notes” can be at most 500/],
     [Array.from({ length: 11 }, (_, i) => ({ key: `v${i}`, value: "x" })), /at most 10 variables/],
   ])("rejects invalid variables %#", async (variables, error) => {
     const u = await makeUser();

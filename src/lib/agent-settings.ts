@@ -1,8 +1,9 @@
 import { z } from "zod";
+import type { Language } from "./language";
 
 /** Seconds the agent waits after the caller stops before it replies (Telnyx start_speaking_plan.wait_seconds). */
 export const RESPONSE_TIMING = { quick: 0.4, balanced: 0.8, patient: 1.2 } as const;
-export type ResponseTiming = keyof typeof RESPONSE_TIMING;
+const TIMINGS = Object.keys(RESPONSE_TIMING) as [keyof typeof RESPONSE_TIMING, ...(keyof typeof RESPONSE_TIMING)[]];
 
 export const MAX_CALL_MINUTES = [5, 10, 15, 30] as const;
 /** 0 means the agent never hangs up because of silence. */
@@ -33,7 +34,7 @@ const oneOf = (values: readonly number[], fallback: number) =>
 export const agentBehavior = z.object({
   voiceSpeed: z.coerce.number().min(VOICE_SPEED.min).max(VOICE_SPEED.max).catch(1),
   backgroundSound: z.enum(["none", "office"]).catch("none"),
-  responseTiming: z.enum(["quick", "balanced", "patient"]).catch("quick"),
+  responseTiming: z.enum(TIMINGS).catch("quick"),
   allowInterruptions: z.boolean().catch(true),
   greetingInterruptible: z.boolean().catch(true),
   /** Comma-separated words speech recognition should listen for (names, jargon). */
@@ -55,14 +56,15 @@ export function readBehavior(raw: unknown): AgentBehavior {
 
 /** Variables every call gets, filled in by us when the call starts. */
 export const BUILT_IN_VARIABLES = ["call_direction", "call_goal", "contact_number", "current_time"] as const;
-export type BuiltInVariable = (typeof BUILT_IN_VARIABLES)[number];
 
 export const MAX_VARIABLES = 10;
 export const MAX_VARIABLE_VALUE_LENGTH = 500;
-const KEY = /^[a-z][a-z0-9_]{0,39}$/;
+export const MAX_VARIABLE_KEY_LENGTH = 40;
+const KEY = new RegExp(`^[a-z][a-z0-9_]{0,${MAX_VARIABLE_KEY_LENGTH - 1}}$`);
 
 /** Why a custom variable key can't be used, or null if it can. */
-export function variableKeyProblem(key: string): "format" | "reserved" | null {
+export function variableKeyProblem(key: string): "missing" | "format" | "reserved" | null {
+  if (!key) return "missing";
   if (!KEY.test(key)) return "format";
   if ((BUILT_IN_VARIABLES as readonly string[]).includes(key) || key.startsWith("telnyx_")) return "reserved";
   return null;
@@ -70,7 +72,8 @@ export function variableKeyProblem(key: string): "format" | "reserved" | null {
 
 export const agentVariable = z.object({
   key: z.string().trim(),
-  value: z.string().trim().max(MAX_VARIABLE_VALUE_LENGTH).default(""),
+  /** Length is checked when saving, so the error can name the variable. */
+  value: z.string().trim().default(""),
   /** Ask for this variable's value each time the user places a call. */
   askPerCall: z.boolean().default(false),
 });
@@ -82,7 +85,7 @@ export function readVariables(raw: unknown): AgentVariable[] {
 }
 
 /** Names used as {{name}} in a script, in order of first use. Filters ({{ x | date: … }}) count as x. */
-export function referencedVariables(...texts: string[]): string[] {
+function referencedVariables(...texts: string[]): string[] {
   const names = texts.flatMap((t) => [...t.matchAll(/\{\{\s*([A-Za-z_][\w/]*)/g)].map((m) => m[1]));
   return [...new Set(names)];
 }
@@ -93,9 +96,9 @@ export function undefinedVariables(texts: string[], variables: Pick<AgentVariabl
   return referencedVariables(...texts).filter((n) => !known.has(n) && !n.startsWith("telnyx_"));
 }
 
-/** {{current_time}} for a call: e.g. "Wednesday, October 21, 2026, 10:48 AM EDT". */
-export function currentTimeText(timeZone: string, at = new Date()): string {
-  return new Intl.DateTimeFormat("en-US", {
+/** {{current_time}} for a call, in the agent's language: e.g. "Wednesday, October 21, 2026, 10:48 AM EDT". */
+export function currentTimeText(timeZone: string, language: Language, at = new Date()): string {
+  return new Intl.DateTimeFormat(language === "zh" ? "zh-CN" : "en-US", {
     timeZone,
     weekday: "long",
     year: "numeric",

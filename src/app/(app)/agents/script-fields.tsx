@@ -6,8 +6,10 @@ import { buttonClass, inputClass } from "@/components/ui";
 import {
   BUILT_IN_VARIABLES,
   isTimeZone,
+  MAX_VARIABLE_KEY_LENGTH,
   MAX_VARIABLE_VALUE_LENGTH,
   MAX_VARIABLES,
+  undefinedVariables,
   variableKeyProblem,
   type AgentVariable,
 } from "@/lib/agent-settings";
@@ -40,6 +42,9 @@ export function ScriptFields({
   const instructionsRef = useRef<HTMLTextAreaElement>(null);
   const nextId = useRef(variables.length);
   const [rows, setRows] = useState<Row[]>(() => variables.map((v, id) => ({ ...v, id })));
+  // Tracked only to warn, as the user types, about {{names}} that nothing fills in.
+  const [texts, setTexts] = useState({ greeting, instructions });
+  const unfilled = undefinedVariables([texts.greeting, texts.instructions], rows);
   const [tz, setTz] = useState(timeZone);
   // The zone list differs between runtimes, so it's filled in after hydration.
   const [zones, setZones] = useState([timeZone]);
@@ -65,6 +70,10 @@ export function ScriptFields({
           required
           maxLength={500}
           defaultValue={greeting}
+          onInput={(e) => {
+            const value = e.currentTarget.value;
+            setTexts((x) => ({ ...x, greeting: value }));
+          }}
           placeholder={t("greetingPlaceholder")}
           className={inputClass}
         />
@@ -81,6 +90,10 @@ export function ScriptFields({
           rows={10}
           maxLength={8000}
           defaultValue={instructions}
+          onInput={(e) => {
+            const value = e.currentTarget.value;
+            setTexts((x) => ({ ...x, instructions: value }));
+          }}
           placeholder={t("instructionsPlaceholder")}
           className={`${inputClass} font-mono text-xs leading-relaxed`}
         />
@@ -92,6 +105,11 @@ export function ScriptFields({
           <span className="text-sm font-medium text-stone-700">{t("variables")}</span>
           <span className="block text-xs text-stone-500">{t.rich("variablesHint", { code: (c) => <code>{c}</code> })}</span>
         </div>
+        {unfilled.length > 0 && (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            {t("undefinedVariables", { names: unfilled.map((n) => `{{${n}}}`).join(", ") })}
+          </p>
+        )}
         <dl className="divide-y divide-stone-100 rounded-lg border border-stone-200 text-sm">
           {BUILT_IN_VARIABLES.map((name) => (
             <div key={name} className="grid gap-1 px-3 py-2 sm:grid-cols-[11rem_1fr]">
@@ -116,7 +134,7 @@ export function ScriptFields({
                   value={r.key}
                   onChange={(e) => update(r.id, { key: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_") })}
                   placeholder="owner_name"
-                  maxLength={40}
+                  maxLength={MAX_VARIABLE_KEY_LENGTH}
                   className={`${inputClass} font-mono text-xs`}
                 />
                 <input
@@ -124,6 +142,7 @@ export function ScriptFields({
                   value={r.value}
                   onChange={(e) => update(r.id, { value: e.target.value })}
                   placeholder={r.askPerCall ? t("variableValueOptional") : t("variableValuePlaceholder")}
+                  required={!r.askPerCall}
                   maxLength={MAX_VARIABLE_VALUE_LENGTH}
                   className={inputClass}
                 />
@@ -194,6 +213,8 @@ function InsertVariable({ names, target }: { names: string[]; target: RefObject<
         const el = target.current;
         if (!el || !e.target.value) return;
         el.setRangeText(`{{${e.target.value}}}`, el.selectionStart ?? el.value.length, el.selectionEnd ?? el.value.length, "end");
+        // setRangeText doesn't fire input events; let listeners see the new text.
+        el.dispatchEvent(new Event("input", { bubbles: true }));
         el.focus();
       }}
       className="rounded-md border border-stone-200 bg-white px-2 py-1 text-xs font-medium text-stone-600 hover:bg-stone-50"

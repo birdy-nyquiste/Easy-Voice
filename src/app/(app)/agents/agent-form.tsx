@@ -1,7 +1,7 @@
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 import { ActionForm, SubmitButton } from "@/components/forms";
-import { Field, inputClass } from "@/components/ui";
+import { Card, CardTitle, Field, inputClass } from "@/components/ui";
 import { MAX_CALL_MINUTES, MAX_KEY_TERMS_LENGTH, readBehavior, readVariables, SILENCE_HANGUP_SECS } from "@/lib/agent-settings";
 import type { AgentTemplate } from "@/lib/agent-templates";
 import { config } from "@/lib/config";
@@ -11,6 +11,7 @@ import type { LlmModel, StockVoice } from "@/server/telnyx";
 import { modelName, sttModelName } from "@/server/telnyx/models";
 import { DEFAULT_VOICE_REF, ttsModelName } from "@/server/telnyx/stock-voices";
 import { saveAgentAction } from "./actions";
+import { ModelRow } from "./model-row";
 import { ScriptFields } from "./script-fields";
 import { VoiceFields } from "./voice-fields";
 
@@ -64,20 +65,20 @@ export function AgentForm({
     ...stock.map((v) => [`stock:${v.ref}`, ttsModelName(v.ref)]),
     ...readyClones.map((v) => [`clone:${v.id}`, ttsModelName(v.voiceRef ?? "")]),
   ]);
-  const start = agent ?? template;
+  const initial = agent ?? template;
   const behavior = readBehavior(agent ? agent.behavior : template?.behavior);
   const variables = agent ? readVariables(agent.variables) : (template?.variables ?? []);
   return (
-    <ActionForm action={saveAgentAction} className="divide-y divide-stone-100">
+    <ActionForm action={saveAgentAction} className="space-y-6">
       {agent && <input type="hidden" name="id" value={agent.id} />}
 
-      <Section title={t("sectionIdentity")} description={t("sectionIdentityHint")} first>
+      <Section title={t("sectionIdentity")} description={t("sectionIdentityHint")}>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label={tc("name")}>
             <input name="name" required maxLength={80} defaultValue={agent?.name ?? templateName} placeholder={t("namePlaceholder")} className={inputClass} />
           </Field>
           <Field label={t("language")} hint={t("languageHint")}>
-            <select name="language" defaultValue={start?.language ?? "en"} className={inputClass}>
+            <select name="language" defaultValue={initial?.language ?? "en"} className={inputClass}>
               <option value="en">{tl("en")}</option>
               <option value="zh">{tl("zhNative")}</option>
             </select>
@@ -120,8 +121,8 @@ export function AgentForm({
 
       <Section title={t("sectionInstructions")} description={t("sectionInstructionsHint")}>
         <ScriptFields
-          greeting={start?.greeting ?? ""}
-          instructions={start?.instructions ?? ""}
+          greeting={initial?.greeting ?? ""}
+          instructions={initial?.instructions ?? ""}
           variables={variables}
           timeZone={behavior.timeZone}
           guessTimeZone={!agent}
@@ -159,7 +160,10 @@ export function AgentForm({
             hint={t("greetingInterruptibleHint")}
           />
         </div>
-        <Field label={t("keyTerms")} hint={t("keyTermsHint", { name: sttModelName(config.telnyx.sttModel) })}>
+        <ModelRow label={t("stt")}>
+          <span className="font-medium">{sttModelName(config.telnyx.sttModel)}</span>
+        </ModelRow>
+        <Field label={t("keyTerms")} hint={t("keyTermsHint")}>
           <input
             name="keyTerms"
             maxLength={MAX_KEY_TERMS_LENGTH}
@@ -190,22 +194,23 @@ export function AgentForm({
         </div>
       </Section>
 
-      <div className="pt-5">
+      <div>
         <SubmitButton pendingText={tc("saving")}>{agent ? t("saveChanges") : t("create")}</SubmitButton>
       </div>
     </ActionForm>
   );
 }
 
-function Section({ title, description, first, children }: { title: string; description: string; first?: boolean; children: ReactNode }) {
+/** One card of the form, styled like the page's other cards (knowledge base, danger zone). */
+function Section({ title, description, children }: { title: string; description: string; children: ReactNode }) {
   return (
-    <section className={`space-y-4 ${first ? "pb-6" : "py-6"}`}>
-      <div>
-        <h2 className="text-base font-semibold text-stone-900">{title}</h2>
-        <p className="text-sm text-stone-500">{description}</p>
+    <Card>
+      <CardTitle>{title}</CardTitle>
+      <div className="space-y-4">
+        <p className="text-sm text-stone-600">{description}</p>
+        {children}
       </div>
-      {children}
-    </section>
+    </Card>
   );
 }
 
