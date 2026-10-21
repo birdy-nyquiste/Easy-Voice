@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
-import { calls, ledgerEntries, users } from "@/db/schema";
+import { agents, calls, ledgerEntries, users } from "@/db/schema";
 import { showStored } from "@/lib/stored-text";
 import { handleCallEvent } from "@/server/calls/events";
 import { mockProvider } from "@/server/telnyx/mock";
@@ -35,7 +35,7 @@ describe("inbound calls", () => {
     expect(mockProvider.answer).toHaveBeenCalledWith("cc-1", created.id, {
       assistantId: "assistant-test",
       voiceRef: "Telnyx.KokoroTTS.af_heart",
-      variables: { call_direction: "inbound", call_goal: "" },
+      variables: { call_direction: "inbound", call_goal: "", contact_number: "+12025550123", current_time: expect.any(String) },
       greetingOverride: undefined, // inbound keeps the agent's own greeting
     });
 
@@ -188,9 +188,36 @@ describe("outbound calls", () => {
     expect(mockProvider.startAssistant).toHaveBeenCalledWith("cc-out", {
       assistantId: "assistant-test",
       voiceRef: "Telnyx.KokoroTTS.af_heart",
-      variables: { call_direction: "outbound", call_goal: "Move my Thursday appointment" },
+      variables: {
+        call_direction: "outbound",
+        call_goal: "Move my Thursday appointment",
+        contact_number: "+14155550100",
+        current_time: expect.any(String),
+      },
       greetingOverride: "Hi, this is an AI assistant calling. This call may be recorded.",
     });
     expect(await callByCcid("cc-out")).toMatchObject({ status: "answered", providerConversationId: "conv-1" });
+  });
+
+  it("fills in the agent's variables, with this call's values taking precedence, and the time in its zone", async () => {
+    const { user, agent, number } = await makeLine(1000);
+    await db
+      .update(agents)
+      .set({
+        behavior: { timeZone: "Asia/Tokyo" },
+        variables: [
+          { key: "owner_name", value: "Alex", askPerCall: false },
+          { key: "callback_number", value: "+12025550199", askPerCall: true },
+        ],
+      })
+      .where(eq(agents.id, agent.id));
+    const [c] = await db
+      .insert(calls)
+      .values({ userId: user.id, agentId: agent.id, phoneNumberId: number.id, direction: "outbound", fromNumber: number.e164, toNumber: "+14155550100", providerCallControlId: "cc-out", variables: { callback_number: "+12025550111" } })
+      .returning();
+    await handleCallEvent(event("call.answered", { callControlId: "cc-out", clientState: c.id }));
+    const vars = vi.mocked(mockProvider.startAssistant).mock.calls[0][1].variables;
+    expect(vars).toMatchObject({ owner_name: "Alex", callback_number: "+12025550111", call_direction: "outbound" });
+    expect(vars.current_time).toMatch(/GMT\+9/);
   });
 });

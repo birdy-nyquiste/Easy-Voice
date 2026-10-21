@@ -11,6 +11,7 @@ import { requireUser } from "@/server/auth";
 import { cleanUpKnowledge } from "@/server/knowledge";
 
 function fields(form: FormData) {
+  const checked = (name: string) => form.get(name) === "on";
   return {
     name: form.get("name"),
     instructions: form.get("instructions"),
@@ -18,7 +19,30 @@ function fields(form: FormData) {
     language: form.get("language"),
     voice: form.get("voice"),
     model: form.get("model") ?? undefined,
+    behavior: {
+      voiceSpeed: form.get("voiceSpeed"),
+      backgroundSound: form.get("backgroundSound"),
+      responseTiming: form.get("responseTiming"),
+      allowInterruptions: checked("allowInterruptions"),
+      greetingInterruptible: checked("greetingInterruptible"),
+      keyTerms: form.get("keyTerms") ?? "",
+      endCallWhenDone: checked("endCallWhenDone"),
+      maxCallMinutes: form.get("maxCallMinutes"),
+      silenceHangupSecs: form.get("silenceHangupSecs"),
+      timeZone: form.get("timeZone"),
+    },
+    variables: variablesField(form.get("variables")),
   };
+}
+
+/** The variable editor posts its rows as JSON; rows left completely empty are dropped. */
+function variablesField(raw: FormDataEntryValue | null): unknown {
+  try {
+    const rows = JSON.parse(String(raw ?? "[]"));
+    return Array.isArray(rows) ? rows.filter((r) => r && (String(r.key ?? "").trim() || String(r.value ?? "").trim())) : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function saveAgentAction(_: ActionState, form: FormData): Promise<ActionState> {

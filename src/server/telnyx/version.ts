@@ -6,5 +6,6 @@
  * v3: default dynamic_variables for {{call_direction}} / {{call_goal}}.
  * v4: English-only voices get an "always reply in English" instruction.
  * v5: `tools` is always sent (empty, or the knowledge-base retrieval tool).
+ * v6: per-agent behavior (hangup tool, call limits, turn-taking, voice speed, key terms) and variables.
  */
-export const ASSISTANT_BODY_VERSION = 5;
+export const ASSISTANT_BODY_VERSION = 6;

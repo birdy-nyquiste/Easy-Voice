@@ -4,6 +4,15 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, withUserLock } from "@/db";
 import { agentKnowledge, agents, elevenLabsKeys, knowledgeSources, phoneNumbers, voices, type Agent, type KnowledgeMode } from "@/db/schema";
+import {
+  agentVariable,
+  MAX_KEY_TERMS_LENGTH,
+  MAX_VARIABLES,
+  readBehavior,
+  readVariables,
+  variableKeyProblem,
+  type AgentVariable,
+} from "@/lib/agent-settings";
 import { config } from "@/lib/config";
 import { UserError, type ErrorKey } from "@/lib/errors";
 import { failureColumns, stored, storedFromError } from "@/lib/stored-text";
@@ -30,7 +39,14 @@ export const OUTBOUND_GREETING = {
 
 export const MAX_CALL_GOAL_LENGTH = 1000;
 
-const INPUT_ERRORS = { nameRequired: 1, instructionsRequired: 1, greetingRequired: 1, voiceRequired: 1 } satisfies Partial<Record<ErrorKey, 1>>;
+const INPUT_ERRORS = {
+  nameRequired: 1,
+  instructionsRequired: 1,
+  greetingRequired: 1,
+  voiceRequired: 1,
+  keyTermsTooLong: 1,
+  tooManyVariables: 1,
+} satisfies Partial<Record<ErrorKey, 1>>;
 
 export const agentInput = z.object({
   name: z.string().trim().min(1, "nameRequired").max(80),
@@ -41,6 +57,12 @@ export const agentInput = z.object({
   voice: z.string().min(1, "voiceRequired"),
   /** LLM id from listModels(); empty means the platform default. */
   model: z.string().trim().optional().transform((m) => m || null),
+  /** Anything missing or out of range falls back to its default (see agentBehavior). */
+  behavior: z
+    .looseObject({ keyTerms: z.string().trim().max(MAX_KEY_TERMS_LENGTH, "keyTermsTooLong").optional() })
+    .default({})
+    .transform(readBehavior),
+  variables: z.array(agentVariable).max(MAX_VARIABLES, "tooManyVariables").default([]),
 });
 export type AgentInput = z.infer<typeof agentInput>;
 
@@ -164,8 +186,13 @@ export async function desiredKnowledge(agentIds: string[]): Promise<Map<string, 
   return out;
 }
 
+/** The agent's own variables with their default values. */
+export function variableDefaults(a: Pick<Agent, "variables">): Record<string, string> {
+  return Object.fromEntries(readVariables(a.variables).map((v) => [v.key, v.value]));
+}
+
 function toSpec(
-  a: Pick<Agent, "name" | "instructions" | "greeting" | "language" | "voiceRef" | "model">,
+  a: Pick<Agent, "name" | "instructions" | "greeting" | "language" | "voiceRef" | "model" | "behavior" | "variables">,
   voiceApiKeyRef?: string,
   knowledge?: KnowledgeState,
 ): AssistantSpec {
@@ -179,6 +206,8 @@ function toSpec(
     voiceRef: a.voiceRef,
     voiceApiKeyRef,
     model: a.model ?? config.telnyx.llmModel,
+    behavior: readBehavior(a.behavior),
+    variables: variableDefaults(a),
     knowledgeBucket: knowledge?.bucket,
   };
 }
@@ -341,8 +370,24 @@ export async function deleteAgent(userId: string, agentId: string): Promise<void
 
 function parse(raw: unknown): AgentInput {
   const r = agentInput.safeParse(raw);
-  if (r.success) return r.data;
-  // Our own messages (above) are error keys; anything else zod reports gets a generic one.
-  const message = r.error.issues[0]?.message;
-  throw new UserError(message && message in INPUT_ERRORS ? (message as ErrorKey) : "invalidInput");
+  if (!r.success) {
+    // Our own messages (above) are error keys; anything else zod reports gets a generic one.
+    const message = r.error.issues[0]?.message;
+    throw new UserError(message && message in INPUT_ERRORS ? (message as ErrorKey) : "invalidInput");
+  }
+  checkVariables(r.data.variables);
+  return r.data;
+}
+
+function checkVariables(variables: AgentVariable[]) {
+  const seen = new Set<string>();
+  for (const { key, value, askPerCall } of variables) {
+    const problem = variableKeyProblem(key);
+    if (problem === "format") throw new UserError("variableKeyInvalid", { key });
+    if (problem === "reserved") throw new UserError("variableKeyReserved", { key });
+    if (seen.has(key)) throw new UserError("variableKeyDuplicate", { key });
+    // A value asked for on each call may be left blank there; any other needs one here.
+    if (!value && !askPerCall) throw new UserError("variableValueRequired", { key });
+    seen.add(key);
+  }
 }

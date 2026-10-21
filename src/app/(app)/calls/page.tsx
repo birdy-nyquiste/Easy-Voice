@@ -10,6 +10,14 @@ import { listUserCalls } from "@/server/calls";
 import { listUserNumbers } from "@/server/numbers";
 import { startCallAction } from "./actions";
 import { AutoRefresh } from "@/components/auto-refresh";
+import { readVariables } from "@/lib/agent-settings";
+import type { Agent } from "@/db/schema";
+import { AgentFields, type CallAgent } from "./agent-fields";
+
+function callAgent(a: Agent): CallAgent {
+  const ask = readVariables(a.variables).filter((v) => v.askPerCall);
+  return { id: a.id, name: a.name, ask: ask.map(({ key, value }) => ({ key, value })) };
+}
 
 export default async function CallsPage() {
   const user = await requireUser();
@@ -45,18 +53,11 @@ export default async function CallsPage() {
           </Notice>
         ) : (
           <ActionForm action={startCallAction} className="space-y-3">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label={tc("agent")}>
-                <select name="agentId" defaultValue={activeNumber.agentId ?? readyAgents[0].id} className={inputClass}>
-                  {readyAgents.map((a) => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))}
-                </select>
-              </Field>
+            <AgentFields agents={readyAgents.map(callAgent)} defaultAgentId={activeNumber.agentId ?? readyAgents[0].id}>
               <Field label={t("to")}>
                 <input name="to" required inputMode="tel" placeholder="(415) 555-0100" className={inputClass} />
               </Field>
-            </div>
+            </AgentFields>
             <Field
               label={t("goal")}
               hint={t.rich("goalHint", { code: (chunks) => <code>{chunks}</code> })}

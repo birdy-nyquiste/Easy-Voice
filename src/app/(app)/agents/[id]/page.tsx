@@ -3,6 +3,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { Card, CardTitle, Notice, PageHeader, StatusBadge } from "@/components/ui";
 import { showStored } from "@/lib/stored-text";
+import { readVariables, undefinedVariables } from "@/lib/agent-settings";
 import { config } from "@/lib/config";
 import { getUserAgent, listModels, resyncStaleAgents } from "@/server/agents";
 import Link from "next/link";
@@ -41,6 +42,7 @@ export default async function AgentPage({
   ]);
   const [t, tc, locale] = await Promise.all([getTranslations("agents"), getTranslations("common"), getLocale()]);
   const keyRejected = isElevenLabsVoice(agent.voiceRef) && Boolean(elKey?.keyInvalidAt);
+  const unfilled = undefinedVariables([agent.greeting, agent.instructions], readVariables(agent.variables));
   return (
     <div className="space-y-6">
       <PageHeader back={{ href: "/agents", label: t("all") }} title={agent.name} action={<StatusBadge status={agent.status} />} />
@@ -56,6 +58,9 @@ export default async function AgentPage({
             ),
           })}
         </Notice>
+      )}
+      {unfilled.length > 0 && (
+        <Notice>{t("undefinedVariables", { names: unfilled.map((n) => `{{${n}}}`).join(", ") })}</Notice>
       )}
       <Card>
         {/* Keyed on updatedAt: React resets a form to its initial defaults after an action, so

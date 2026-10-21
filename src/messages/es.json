@@ -139,19 +139,99 @@
     "chooseVoice": "Elige una voz…",
     "voiceWithGender": "{name} ({gender})",
     "yourClones": "Tus voces clonadas",
-    "models": "Modelos",
-    "stt": "Reconocimiento de voz",
     "llm": "Modelo de lenguaje",
-    "tts": "Texto a voz",
-    "setByVoice": " · definido por la voz",
-    "modelsHint": "El modelo de lenguaje decide lo que dice el agente. Las llamadas cuestan lo mismo con cualquier modelo.",
     "defaultModel": "{name} (predeterminado)",
     "greeting": "Saludo",
     "greetingHint": "Lo primero que dice el agente al contestar. Se agrega automáticamente un aviso de grabación (\"{noticeEn}\" / \"{noticeZh}\"). En las llamadas que hace el agente, empieza con \"{outboundEn}\" / \"{outboundZh}\".",
     "instructions": "Instrucciones",
-    "instructionsHint": "Cómo debe comportarse el agente en las llamadas. Usa <code>'{{'call_direction'}}'</code> (entrante o saliente) y <code>'{{'call_goal'}}'</code> (lo que pides al hacer una llamada).",
+    "instructionsHint": "Cómo debe comportarse el agente en las llamadas. Inserta variables para completar los datos de cada llamada.",
     "saveChanges": "Guardar cambios",
-    "create": "Crear agente"
+    "create": "Crear agente",
+    "sectionIdentity": "Identidad",
+    "sectionIdentityHint": "Quién contesta y cómo suena.",
+    "sectionInstructions": "Instrucciones",
+    "sectionInstructionsHint": "Qué dice y hace el agente en las llamadas.",
+    "sectionConversation": "Conversación",
+    "sectionConversationHint": "Cómo lleva el agente el ida y vuelta.",
+    "sectionEnding": "Fin de las llamadas",
+    "sectionEndingHint": "Cuándo termina una llamada.",
+    "speechModel": "Modelo de voz: {name}.",
+    "voiceSpeed": "Velocidad al hablar",
+    "voiceSpeedHint": "1.00× es el ritmo normal de la voz.",
+    "speedValue": "{speed}×",
+    "backgroundSound": "Sonido de fondo",
+    "backgroundNone": "Ninguno",
+    "backgroundOffice": "Oficina",
+    "greetingPlaceholder": "Hola, has llamado a mi asistente. ¿En qué puedo ayudarte?",
+    "instructionsPlaceholder": "Describe quién es el agente, qué debe hacer en las llamadas y qué no debe hacer nunca.",
+    "variables": "Variables",
+    "variablesHint": "Escribe <code>'{{'name'}}'</code> en el saludo o las instrucciones y se sustituye por su valor al empezar cada llamada.",
+    "builtIn": {
+      "call_direction": "inbound (entrante) u outbound (saliente)",
+      "call_goal": "lo que pides al hacer una llamada",
+      "contact_number": "el número de la otra persona: quien llama o a quien llama el agente",
+      "current_time": "la fecha y hora en que empieza la llamada, en la zona horaria de abajo"
+    },
+    "variableName": "Nombre",
+    "variableValue": "Valor",
+    "variableValuePlaceholder": "p. ej., Alex",
+    "variableValueOptional": "Predeterminado (opcional)",
+    "askPerCall": "Preguntar en cada llamada",
+    "askPerCallHint": "Preguntar en cada llamada: lo completas al hacer una llamada. Si lo dejas en blanco, se usa el valor de aquí.",
+    "removeVariable": "Quitar",
+    "addVariable": "Añadir variable",
+    "insertVariable": "Insertar variable",
+    "timeZone": "Zona horaria",
+    "timeZoneHint": "Se usa para <code>'{{'current_time'}}'</code>.",
+    "llmHint": "El modelo de lenguaje decide lo que dice el agente. Las llamadas cuestan lo mismo con cualquier modelo.",
+    "responseTiming": "Tiempo de respuesta",
+    "timingQuick": "Rápido: responde enseguida",
+    "timingBalanced": "Equilibrado: espera un momento",
+    "timingPatient": "Paciente: deja que la otra persona termine",
+    "allowInterruptions": "Se puede interrumpir al agente",
+    "greetingInterruptible": "Se puede interrumpir el saludo",
+    "greetingInterruptibleHint": "Desactívalo para que el aviso de grabación se escuche siempre completo.",
+    "keyTerms": "Términos clave",
+    "keyTermsHint": "Nombres y palabras que el agente debe reconocer, separados por comas. Reconocimiento de voz: {name}.",
+    "keyTermsPlaceholder": "Nyquiste, Dra. Okafor, Wi-Fi",
+    "endCallWhenDone": "Colgar cuando termine la conversación",
+    "endCallWhenDoneHint": "El agente se despide y cuelga, en lugar de esperar a que lo haga la otra persona.",
+    "maxCallLength": "Duración máxima de la llamada",
+    "minutes": "{count, plural, one {# minuto} other {# minutos}}",
+    "silenceHangup": "Colgar tras un silencio",
+    "silenceHangupHint": "Si nadie habla durante este tiempo. Déjalo desactivado en llamadas en las que te puedan poner en espera.",
+    "afterSeconds": "Tras {count} segundos",
+    "never": "Nunca",
+    "undefinedVariables": "El agente leerá {names} tal cual, porque ninguna variable lo completa. Añádela en Variables o corrige la ortografía."
+  },
+  "agentTemplates": {
+    "pick": "Elige un punto de partida. Puedes cambiarlo todo antes de crear el agente.",
+    "startingFrom": "Basado en: {name}",
+    "change": "Cambiar plantilla",
+    "blank": {
+      "name": "En blanco",
+      "description": "Empieza de cero y escribe tu propio saludo e instrucciones."
+    },
+    "receptionist": {
+      "name": "Recepcionista personal",
+      "description": "Toma recados cuando no puedes contestar y hace llamadas por ti."
+    },
+    "screener": {
+      "name": "Filtro de llamadas",
+      "description": "Rechaza llamadas comerciales y spam, y toma recados del resto."
+    },
+    "booking": {
+      "name": "Gestor de reservas",
+      "description": "Llama a negocios para reservar o cambiar citas y reservas."
+    },
+    "frontDesk": {
+      "name": "Recepción",
+      "description": "Responde preguntas sobre tu negocio con su base de conocimiento y toma recados."
+    },
+    "bilingual": {
+      "name": "Asistente bilingüe",
+      "description": "Habla primero en mandarín y responde en inglés a quien lo use."
+    }
   },
   "knowledge": {
     "title": "Base de conocimiento",
@@ -295,7 +375,8 @@
     "fetchingTranscript": "Obteniendo la transcripción…",
     "noTranscript": "No hay transcripción disponible.",
     "deleteConfirm": "¿Eliminar la grabación, la transcripción y el resumen de esta llamada? Los registros de facturación se conservan.",
-    "delete": "Eliminar registro de llamada"
+    "delete": "Eliminar registro de llamada",
+    "variableDefault": "Déjalo en blanco para usar: {value}"
   },
   "messages": {
     "title": "Mensajes",
@@ -510,7 +591,14 @@
     "knowledgeFileTooLarge": "Los PDF deben pesar menos de {size, number} MB.",
     "knowledgeUrlInvalid": "Escribe una dirección web completa que empiece por http:// o https://.",
     "knowledgeSourceNotFound": "Esa fuente ya no existe.",
-    "knowledgeNotFound": "Primero añade una fuente."
+    "knowledgeNotFound": "Primero añade una fuente.",
+    "keyTermsTooLong": "Los términos clave son demasiado largos. Usa menos de 1.000 caracteres.",
+    "tooManyVariables": "Un agente puede tener como máximo 10 variables.",
+    "variableKeyInvalid": "“{key}” no puede ser un nombre de variable. Usa minúsculas, números y guiones bajos, y empieza por una letra.",
+    "variableKeyReserved": "“{key}” es un nombre integrado. Elige otro nombre para tu variable.",
+    "variableKeyDuplicate": "Hay dos variables llamadas “{key}”.",
+    "variableValueRequired": "Da un valor a “{key}” o marca Preguntar en cada llamada.",
+    "variableValueTooLong": "El valor de “{key}” puede tener como máximo {max} caracteres."
   },
   "errorPage": {
     "notFoundTitle": "Página no encontrada",

@@ -1,6 +1,9 @@
 import { useTranslations } from "next-intl";
+import type { ReactNode } from "react";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { Field, inputClass } from "@/components/ui";
+import { MAX_CALL_MINUTES, MAX_KEY_TERMS_LENGTH, readBehavior, readVariables, SILENCE_HANGUP_SECS } from "@/lib/agent-settings";
+import type { AgentTemplate } from "@/lib/agent-templates";
 import { config } from "@/lib/config";
 import type { Agent, Voice } from "@/db/schema";
 import { OUTBOUND_GREETING, RECORDING_NOTICE } from "@/server/agents";
@@ -8,24 +11,25 @@ import type { LlmModel, StockVoice } from "@/server/telnyx";
 import { modelName, sttModelName } from "@/server/telnyx/models";
 import { DEFAULT_VOICE_REF, ttsModelName } from "@/server/telnyx/stock-voices";
 import { saveAgentAction } from "./actions";
-import { VoiceModelFields } from "./voice-model-fields";
+import { ScriptFields } from "./script-fields";
+import { VoiceFields } from "./voice-fields";
 
-const DEFAULT_INSTRUCTIONS = `You are my personal phone assistant. Be concise and warm.
-
-This call is {{call_direction}}.
-- If inbound: someone called me. Ask for their name and why they're calling, and offer to take a message. Confirm the message back to them.
-- If outbound: you are calling on my behalf. Your goal for this call: {{call_goal}}
-  Introduce yourself as my assistant, work toward the goal, and confirm any details you agree on.
-
-Never make commitments on my behalf beyond what the goal asks for.`;
-
+/**
+ * The agent's settings, in setup order: who answers and how it sounds, what it says, how it handles
+ * the conversation, and when calls end. A new agent starts from a template.
+ */
 export function AgentForm({
   agent,
+  template,
+  templateName = "",
   stock,
   clones,
   models,
 }: {
   agent?: Agent;
+  /** For a new agent: what the form starts with. */
+  template?: AgentTemplate;
+  templateName?: string;
   stock: StockVoice[];
   clones: Voice[];
   models: LlmModel[];
@@ -60,79 +64,159 @@ export function AgentForm({
     ...stock.map((v) => [`stock:${v.ref}`, ttsModelName(v.ref)]),
     ...readyClones.map((v) => [`clone:${v.id}`, ttsModelName(v.voiceRef ?? "")]),
   ]);
+  const start = agent ?? template;
+  const behavior = readBehavior(agent ? agent.behavior : template?.behavior);
+  const variables = agent ? readVariables(agent.variables) : (template?.variables ?? []);
   return (
-    <ActionForm action={saveAgentAction} className="space-y-5">
+    <ActionForm action={saveAgentAction} className="divide-y divide-stone-100">
       {agent && <input type="hidden" name="id" value={agent.id} />}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label={tc("name")}>
-          <input name="name" required maxLength={80} defaultValue={agent?.name} placeholder={t("namePlaceholder")} className={inputClass} />
-        </Field>
-        <Field label={t("language")} hint={t("languageHint")}>
-          <select name="language" defaultValue={agent?.language ?? "en"} className={inputClass}>
-            <option value="en">{tl("en")}</option>
-            <option value="zh">{tl("zhNative")}</option>
-          </select>
-        </Field>
-      </div>
-      <VoiceModelFields
-        defaultVoice={currentVoice}
-        ttsByVoice={ttsByVoice}
-        sttName={sttModelName(config.telnyx.sttModel)}
-        voiceOptions={
-          <>
-            <option value="" disabled>{t("chooseVoice")}</option>
-            {readyClones.length > 0 && (
-              <optgroup label={t("yourClones")}>
-                {readyClones.map((v) => (
-                  <option key={v.id} value={`clone:${v.id}`}>
-                    {v.name}{v.provider === "elevenlabs" ? " (ElevenLabs)" : ""}
+
+      <Section title={t("sectionIdentity")} description={t("sectionIdentityHint")} first>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label={tc("name")}>
+            <input name="name" required maxLength={80} defaultValue={agent?.name ?? templateName} placeholder={t("namePlaceholder")} className={inputClass} />
+          </Field>
+          <Field label={t("language")} hint={t("languageHint")}>
+            <select name="language" defaultValue={start?.language ?? "en"} className={inputClass}>
+              <option value="en">{tl("en")}</option>
+              <option value="zh">{tl("zhNative")}</option>
+            </select>
+          </Field>
+        </div>
+        <VoiceFields
+          defaultVoice={currentVoice}
+          ttsByVoice={ttsByVoice}
+          behavior={behavior}
+          voiceOptions={
+            <>
+              <option value="" disabled>{t("chooseVoice")}</option>
+              {readyClones.length > 0 && (
+                <optgroup label={t("yourClones")}>
+                  {readyClones.map((v) => (
+                    <option key={v.id} value={`clone:${v.id}`}>
+                      {v.name}{v.provider === "elevenlabs" ? " (ElevenLabs)" : ""}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              <optgroup label={tl("bilingual")}>
+                {bilingual.map((v) => (
+                  <option key={v.ref} value={`stock:${v.ref}`}>
+                    {v.gender ? t("voiceWithGender", { name: v.name, gender: gender(v.gender) }) : v.name}
                   </option>
                 ))}
               </optgroup>
-            )}
-            <optgroup label={tl("bilingual")}>
-              {bilingual.map((v) => (
-                <option key={v.ref} value={`stock:${v.ref}`}>
-                  {v.gender ? t("voiceWithGender", { name: v.name, gender: gender(v.gender) }) : v.name}
-                </option>
-              ))}
-            </optgroup>
-            <optgroup label={tl("englishOnly")}>
-              {englishOnly.map((v) => (
-                <option key={v.ref} value={`stock:${v.ref}`}>
-                  {v.gender ? t("voiceWithGender", { name: v.name, gender: gender(v.gender) }) : v.name}
-                </option>
-              ))}
-            </optgroup>
-          </>
-        }
-        modelSelect={
+              <optgroup label={tl("englishOnly")}>
+                {englishOnly.map((v) => (
+                  <option key={v.ref} value={`stock:${v.ref}`}>
+                    {v.gender ? t("voiceWithGender", { name: v.name, gender: gender(v.gender) }) : v.name}
+                  </option>
+                ))}
+              </optgroup>
+            </>
+          }
+        />
+      </Section>
+
+      <Section title={t("sectionInstructions")} description={t("sectionInstructionsHint")}>
+        <ScriptFields
+          greeting={start?.greeting ?? ""}
+          instructions={start?.instructions ?? ""}
+          variables={variables}
+          timeZone={behavior.timeZone}
+          guessTimeZone={!agent}
+          greetingHint={t("greetingHint", {
+            noticeEn: RECORDING_NOTICE.en,
+            noticeZh: RECORDING_NOTICE.zh,
+            outboundEn: OUTBOUND_GREETING.en,
+            outboundZh: OUTBOUND_GREETING.zh,
+          })}
+        />
+        <Field label={t("llm")} hint={t("llmHint")}>
           <select name="model" defaultValue={agent?.model ?? ""} className={inputClass}>
             <option value="">{t("defaultModel", { name: modelName(defaultModel) })}</option>
             {otherModels.map((m) => (
               <option key={m.id} value={m.id}>{m.name}</option>
             ))}
           </select>
-        }
-      />
-      <Field
-        label={t("greeting")}
-        hint={t("greetingHint", {
-          noticeEn: RECORDING_NOTICE.en,
-          noticeZh: RECORDING_NOTICE.zh,
-          outboundEn: OUTBOUND_GREETING.en,
-          outboundZh: OUTBOUND_GREETING.zh,
-        })}
-      >
-        <input name="greeting" required maxLength={500} defaultValue={agent?.greeting ?? "Hi, you've reached my assistant. How can I help?"} className={inputClass} />
-      </Field>
-      <Field
-        label={t("instructions")}
-        hint={t.rich("instructionsHint", { code: (chunks) => <code>{chunks}</code> })}
-      >
-        <textarea name="instructions" required rows={8} maxLength={8000} defaultValue={agent?.instructions ?? DEFAULT_INSTRUCTIONS} className={`${inputClass} font-mono text-xs leading-relaxed`} />
-      </Field>
-      <SubmitButton pendingText={tc("saving")}>{agent ? t("saveChanges") : t("create")}</SubmitButton>
+        </Field>
+      </Section>
+
+      <Section title={t("sectionConversation")} description={t("sectionConversationHint")}>
+        <Field label={t("responseTiming")}>
+          <select name="responseTiming" defaultValue={behavior.responseTiming} className={inputClass}>
+            <option value="quick">{t("timingQuick")}</option>
+            <option value="balanced">{t("timingBalanced")}</option>
+            <option value="patient">{t("timingPatient")}</option>
+          </select>
+        </Field>
+        <div className="space-y-2">
+          <Toggle name="allowInterruptions" defaultChecked={behavior.allowInterruptions} label={t("allowInterruptions")} />
+          <Toggle
+            name="greetingInterruptible"
+            defaultChecked={behavior.greetingInterruptible}
+            label={t("greetingInterruptible")}
+            hint={t("greetingInterruptibleHint")}
+          />
+        </div>
+        <Field label={t("keyTerms")} hint={t("keyTermsHint", { name: sttModelName(config.telnyx.sttModel) })}>
+          <input
+            name="keyTerms"
+            maxLength={MAX_KEY_TERMS_LENGTH}
+            defaultValue={behavior.keyTerms}
+            placeholder={t("keyTermsPlaceholder")}
+            className={inputClass}
+          />
+        </Field>
+      </Section>
+
+      <Section title={t("sectionEnding")} description={t("sectionEndingHint")}>
+        <Toggle name="endCallWhenDone" defaultChecked={behavior.endCallWhenDone} label={t("endCallWhenDone")} hint={t("endCallWhenDoneHint")} />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label={t("maxCallLength")}>
+            <select name="maxCallMinutes" defaultValue={behavior.maxCallMinutes} className={inputClass}>
+              {MAX_CALL_MINUTES.map((m) => (
+                <option key={m} value={m}>{t("minutes", { count: m })}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label={t("silenceHangup")} hint={t("silenceHangupHint")}>
+            <select name="silenceHangupSecs" defaultValue={behavior.silenceHangupSecs} className={inputClass}>
+              {SILENCE_HANGUP_SECS.map((secs) => (
+                <option key={secs} value={secs}>{secs ? t("afterSeconds", { count: secs }) : t("never")}</option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      </Section>
+
+      <div className="pt-5">
+        <SubmitButton pendingText={tc("saving")}>{agent ? t("saveChanges") : t("create")}</SubmitButton>
+      </div>
     </ActionForm>
+  );
+}
+
+function Section({ title, description, first, children }: { title: string; description: string; first?: boolean; children: ReactNode }) {
+  return (
+    <section className={`space-y-4 ${first ? "pb-6" : "py-6"}`}>
+      <div>
+        <h2 className="text-base font-semibold text-stone-900">{title}</h2>
+        <p className="text-sm text-stone-500">{description}</p>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function Toggle({ name, label, hint, defaultChecked }: { name: string; label: string; hint?: string; defaultChecked: boolean }) {
+  return (
+    <label className="flex items-start gap-3">
+      <input type="checkbox" name={name} defaultChecked={defaultChecked} className="mt-0.5 h-4 w-4 accent-stone-900" />
+      <span>
+        <span className="block text-sm font-medium text-stone-700">{label}</span>
+        {hint && <span className="block text-xs text-stone-500">{hint}</span>}
+      </span>
+    </label>
   );
 }

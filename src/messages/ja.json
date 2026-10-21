@@ -139,19 +139,99 @@
     "chooseVoice": "音声を選択…",
     "voiceWithGender": "{name}（{gender}）",
     "yourClones": "クローンした音声",
-    "models": "モデル",
-    "stt": "音声認識",
     "llm": "言語モデル",
-    "tts": "音声合成",
-    "setByVoice": " · 音声により決定",
-    "modelsHint": "言語モデルはエージェントの発言内容を決めます。どのモデルでも通話料金は同じです。",
     "defaultModel": "{name}（デフォルト）",
     "greeting": "あいさつ",
     "greetingHint": "電話に応答したときにエージェントが最初に話す言葉です。録音のお知らせ（「{noticeEn}」/「{noticeZh}」）が自動的に追加されます。エージェントが発信する通話では、代わりに「{outboundEn}」/「{outboundZh}」で始めます。",
     "instructions": "指示",
-    "instructionsHint": "通話中のエージェントの振る舞いを指定します。<code>'{{'call_direction'}}'</code>（inbound または outbound）と <code>'{{'call_goal'}}'</code>（発信時に依頼した内容）を使用できます。",
+    "instructionsHint": "通話でのエージェントのふるまい。変数を挿入すると、通話ごとの情報が入ります。",
     "saveChanges": "変更を保存",
-    "create": "エージェントを作成"
+    "create": "エージェントを作成",
+    "sectionIdentity": "基本情報",
+    "sectionIdentityHint": "誰が応答し、どんな声で話すか。",
+    "sectionInstructions": "指示",
+    "sectionInstructionsHint": "通話でエージェントが話す内容と行動。",
+    "sectionConversation": "会話",
+    "sectionConversationHint": "やり取りの進め方。",
+    "sectionEnding": "通話の終了",
+    "sectionEndingHint": "通話を終えるタイミング。",
+    "speechModel": "音声モデル: {name}。",
+    "voiceSpeed": "話す速さ",
+    "voiceSpeedHint": "1.00× が標準の速さです。",
+    "speedValue": "{speed}×",
+    "backgroundSound": "背景音",
+    "backgroundNone": "なし",
+    "backgroundOffice": "オフィス",
+    "greetingPlaceholder": "お電話ありがとうございます。アシスタントです。ご用件をどうぞ。",
+    "instructionsPlaceholder": "エージェントの役割、通話でやること、絶対にしてはいけないことを書いてください。",
+    "variables": "変数",
+    "variablesHint": "あいさつや指示に <code>'{{'name'}}'</code> と書くと、通話開始時に値へ置き換わります。",
+    "builtIn": {
+      "call_direction": "inbound（着信）または outbound（発信）",
+      "call_goal": "発信時に入力する通話の目的",
+      "contact_number": "相手の番号（着信なら発信者、発信なら通話先）",
+      "current_time": "通話開始時の日時（下のタイムゾーン）"
+    },
+    "variableName": "名前",
+    "variableValue": "値",
+    "variableValuePlaceholder": "例: 山田",
+    "variableValueOptional": "既定値（任意）",
+    "askPerCall": "通話ごとに入力",
+    "askPerCallHint": "通話ごとに入力: 発信時に値を入力します。空欄の場合はここの値を使います。",
+    "removeVariable": "削除",
+    "addVariable": "変数を追加",
+    "insertVariable": "変数を挿入",
+    "timeZone": "タイムゾーン",
+    "timeZoneHint": "<code>'{{'current_time'}}'</code> に使われます。",
+    "llmHint": "言語モデルがエージェントの発言を決めます。どのモデルでも通話料金は同じです。",
+    "responseTiming": "応答のタイミング",
+    "timingQuick": "速い: すぐに返答",
+    "timingBalanced": "標準: 少し待ってから返答",
+    "timingPatient": "ゆっくり: 相手が話し終えるのを待つ",
+    "allowInterruptions": "相手がエージェントの話をさえぎれる",
+    "greetingInterruptible": "あいさつをさえぎれる",
+    "greetingInterruptibleHint": "オフにすると、録音のお知らせを必ず最後まで流せます。",
+    "keyTerms": "キーワード",
+    "keyTermsHint": "聞き取ってほしい名前や用語をカンマ区切りで入力します。音声認識: {name}。",
+    "keyTermsPlaceholder": "Nyquiste, 岡田先生, Wi-Fi",
+    "endCallWhenDone": "会話が終わったら電話を切る",
+    "endCallWhenDoneHint": "相手が切るのを待たず、エージェントがあいさつをして切ります。",
+    "maxCallLength": "最大通話時間",
+    "minutes": "{count} 分",
+    "silenceHangup": "無音が続いたら切る",
+    "silenceHangupHint": "この時間だれも話さない場合。保留になりそうな通話ではオフにしてください。",
+    "afterSeconds": "{count} 秒後",
+    "never": "切らない",
+    "undefinedVariables": "{names} を埋める変数がないため、エージェントにはそのまま渡されます。「変数」に追加するか、つづりを直してください。"
+  },
+  "agentTemplates": {
+    "pick": "出発点を選んでください。作成前にすべて変更できます。",
+    "startingFrom": "テンプレート: {name}",
+    "change": "テンプレートを変更",
+    "blank": {
+      "name": "空白",
+      "description": "一から始めて、あいさつと指示を自分で書きます。"
+    },
+    "receptionist": {
+      "name": "パーソナル受付",
+      "description": "出られないときに伝言を受け、代わりに電話もかけます。"
+    },
+    "screener": {
+      "name": "着信フィルター",
+      "description": "営業や迷惑電話を断り、それ以外の相手から伝言を受けます。"
+    },
+    "booking": {
+      "name": "予約の電話",
+      "description": "お店や施設に電話して、予約の作成や変更をします。"
+    },
+    "frontDesk": {
+      "name": "受付窓口",
+      "description": "ナレッジベースをもとにお店に関する質問に答え、伝言を受けます。"
+    },
+    "bilingual": {
+      "name": "バイリンガル・アシスタント",
+      "description": "まず中国語（普通話）で話し、英語の相手には英語で返します。"
+    }
   },
   "knowledge": {
     "title": "ナレッジベース",
@@ -295,7 +375,8 @@
     "fetchingTranscript": "文字起こしを取得中…",
     "noTranscript": "文字起こしはありません。",
     "deleteConfirm": "この通話の録音、文字起こし、要約を削除しますか？請求記録は保持されます。",
-    "delete": "通話記録を削除"
+    "delete": "通話記録を削除",
+    "variableDefault": "空欄の場合: {value}"
   },
   "messages": {
     "title": "メッセージ",
@@ -510,7 +591,14 @@
     "knowledgeFileTooLarge": "PDF は {size, number} MB 未満にしてください。",
     "knowledgeUrlInvalid": "http:// または https:// で始まる完全なウェブアドレスを入力してください。",
     "knowledgeSourceNotFound": "そのソースはもう存在しません。",
-    "knowledgeNotFound": "先にソースを追加してください。"
+    "knowledgeNotFound": "先にソースを追加してください。",
+    "keyTermsTooLong": "キーワードが長すぎます。1,000 文字以内にしてください。",
+    "tooManyVariables": "変数は 1 つのエージェントにつき 10 個までです。",
+    "variableKeyInvalid": "「{key}」は変数名に使えません。英小文字・数字・アンダースコアを使い、英字で始めてください。",
+    "variableKeyReserved": "「{key}」は組み込みの名前です。別の名前にしてください。",
+    "variableKeyDuplicate": "「{key}」という変数が 2 つあります。",
+    "variableValueRequired": "「{key}」に値を入れるか、「通話ごとに入力」をオンにしてください。",
+    "variableValueTooLong": "「{key}」の値は {max} 文字までです。"
   },
   "errorPage": {
     "notFoundTitle": "ページが見つかりません",

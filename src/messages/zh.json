@@ -139,19 +139,99 @@
     "chooseVoice": "选择声音…",
     "voiceWithGender": "{name}（{gender}）",
     "yourClones": "你的克隆声音",
-    "models": "模型",
-    "stt": "语音识别",
     "llm": "语言模型",
-    "tts": "语音合成",
-    "setByVoice": " · 由声音决定",
-    "modelsHint": "语言模型决定助理说什么。无论选择哪个模型，通话费用都相同。",
     "defaultModel": "{name}（默认）",
     "greeting": "开场白",
     "greetingHint": "助理接听电话时说的第一句话。系统会自动加上录音提示（“{noticeEn}” / “{noticeZh}”）。助理主动拨打电话时，会改用“{outboundEn}” / “{outboundZh}”开场。",
     "instructions": "指令",
-    "instructionsHint": "助理在通话中应如何表现。可使用 <code>'{{'call_direction'}}'</code>（inbound 呼入或 outbound 呼出）和 <code>'{{'call_goal'}}'</code>（你发起通话时填写的目标）。",
+    "instructionsHint": "Agent 在通话中的行为方式。插入变量，可在每次通话时填入具体信息。",
     "saveChanges": "保存更改",
-    "create": "创建助理"
+    "create": "创建助理",
+    "sectionIdentity": "基本信息",
+    "sectionIdentityHint": "由谁接听，听起来是什么声音。",
+    "sectionInstructions": "指令",
+    "sectionInstructionsHint": "Agent 在通话中说什么、做什么。",
+    "sectionConversation": "对话",
+    "sectionConversationHint": "Agent 如何与对方一来一回地交谈。",
+    "sectionEnding": "结束通话",
+    "sectionEndingHint": "通话何时结束。",
+    "speechModel": "语音模型：{name}。",
+    "voiceSpeed": "语速",
+    "voiceSpeedHint": "1.00× 为该声音的正常语速。",
+    "speedValue": "{speed}×",
+    "backgroundSound": "背景音",
+    "backgroundNone": "无",
+    "backgroundOffice": "办公室",
+    "greetingPlaceholder": "您好，这里是我的助理，请问有什么可以帮您？",
+    "instructionsPlaceholder": "写明 Agent 的身份、通话中要做什么，以及绝对不能做什么。",
+    "variables": "变量",
+    "variablesHint": "在开场白或指令中写 <code>'{{'name'}}'</code>，每次通话开始时会替换为对应的值。",
+    "builtIn": {
+      "call_direction": "inbound（呼入）或 outbound（呼出）",
+      "call_goal": "发起呼叫时填写的通话目标",
+      "contact_number": "对方的号码：来电者，或 Agent 拨打的号码",
+      "current_time": "通话开始时的日期和时间（按下方时区）"
+    },
+    "variableName": "名称",
+    "variableValue": "值",
+    "variableValuePlaceholder": "例如：小王",
+    "variableValueOptional": "默认值（可选）",
+    "askPerCall": "每次通话时填写",
+    "askPerCallHint": "每次通话时填写：发起呼叫时再填写；留空则使用这里的值。",
+    "removeVariable": "移除",
+    "addVariable": "添加变量",
+    "insertVariable": "插入变量",
+    "timeZone": "时区",
+    "timeZoneHint": "用于 <code>'{{'current_time'}}'</code>。",
+    "llmHint": "语言模型决定 Agent 说什么。无论选择哪个模型，通话费用都相同。",
+    "responseTiming": "回应时机",
+    "timingQuick": "快：立即回应",
+    "timingBalanced": "适中：稍等片刻再回应",
+    "timingPatient": "耐心：给对方时间把话说完",
+    "allowInterruptions": "对方可以打断 Agent",
+    "greetingInterruptible": "对方可以打断开场白",
+    "greetingInterruptibleHint": "关闭后，录音告知一定会完整播放。",
+    "keyTerms": "关键词",
+    "keyTermsHint": "希望 Agent 准确识别的名字和词语，用逗号分隔。语音识别：{name}。",
+    "keyTermsPlaceholder": "Nyquiste, 王医生, Wi-Fi",
+    "endCallWhenDone": "对话结束后挂断",
+    "endCallWhenDoneHint": "Agent 道别后主动挂断，而不是等对方挂断。",
+    "maxCallLength": "最长通话时间",
+    "minutes": "{count} 分钟",
+    "silenceHangup": "静默后挂断",
+    "silenceHangupHint": "若在这段时间内无人说话。可能被要求等待（保留）的通话请保持关闭。",
+    "afterSeconds": "{count} 秒后",
+    "never": "从不",
+    "undefinedVariables": "没有变量为 {names} 提供值，Agent 会原样读到它。请在“变量”中添加，或检查拼写。"
+  },
+  "agentTemplates": {
+    "pick": "选择一个起点。创建前可以修改所有内容。",
+    "startingFrom": "模板：{name}",
+    "change": "更换模板",
+    "blank": {
+      "name": "空白",
+      "description": "从零开始，自己编写开场白和指令。"
+    },
+    "receptionist": {
+      "name": "私人接待",
+      "description": "您无法接听时代为留言，也能替您拨打电话。"
+    },
+    "screener": {
+      "name": "来电筛选",
+      "description": "婉拒推销和骚扰电话，其他来电则代为留言。"
+    },
+    "booking": {
+      "name": "预约代打",
+      "description": "致电商家，预约或更改预约。"
+    },
+    "frontDesk": {
+      "name": "前台",
+      "description": "根据知识库回答有关您业务的问题，并代为留言。"
+    },
+    "bilingual": {
+      "name": "双语助理",
+      "description": "默认说普通话，对方说英语时用英语回复。"
+    }
   },
   "knowledge": {
     "title": "知识库",
@@ -295,7 +375,8 @@
     "fetchingTranscript": "正在获取通话记录…",
     "noTranscript": "暂无通话记录。",
     "deleteConfirm": "删除这通电话的录音、通话记录和摘要？账单记录会保留。",
-    "delete": "删除通话记录"
+    "delete": "删除通话记录",
+    "variableDefault": "留空则使用：{value}"
   },
   "messages": {
     "title": "短信",
@@ -510,7 +591,14 @@
     "knowledgeFileTooLarge": "PDF 必须小于 {size, number} MB。",
     "knowledgeUrlInvalid": "请输入以 http:// 或 https:// 开头的完整网址。",
     "knowledgeSourceNotFound": "该资料已不存在。",
-    "knowledgeNotFound": "请先添加一条资料。"
+    "knowledgeNotFound": "请先添加一条资料。",
+    "keyTermsTooLong": "关键词太长，请控制在 1,000 个字符以内。",
+    "tooManyVariables": "每个 Agent 最多 10 个变量。",
+    "variableKeyInvalid": "“{key}”不能作为变量名。请使用小写字母、数字和下划线，并以字母开头。",
+    "variableKeyReserved": "“{key}”是内置名称，请为变量换个名字。",
+    "variableKeyDuplicate": "有两个变量都叫“{key}”。",
+    "variableValueRequired": "请为“{key}”填写值，或勾选“每次通话时填写”。",
+    "variableValueTooLong": "“{key}”的值最多 {max} 个字符。"
   },
   "errorPage": {
     "notFoundTitle": "页面不存在",

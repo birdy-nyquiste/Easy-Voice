@@ -1,3 +1,4 @@
+import type { AgentBehavior } from "@/lib/agent-settings";
 import type { Language } from "@/lib/language";
 import type { StoredText } from "@/lib/stored-text";
 
@@ -77,6 +78,10 @@ export interface AssistantSpec {
   voiceApiKeyRef?: string;
   /** LLM id; see listModels(). */
   model: string;
+  /** Voice speed, turn-taking and when the assistant hangs up. */
+  behavior: AgentBehavior;
+  /** Default values for the agent's own {{variables}}; built-in ones are added by the adapter. */
+  variables: Record<string, string>;
   /** Storage bucket the assistant may search during calls (the retrieval tool); none when absent. */
   knowledgeBucket?: string;
 }
@@ -161,6 +166,12 @@ export interface CallVariables {
   call_direction: "inbound" | "outbound";
   /** What the user asked the agent to do on this call (outbound only; may be empty). */
   call_goal: string;
+  /** The other party's number: the caller on inbound calls, the number called on outbound ones. */
+  contact_number: string;
+  /** When the call started, in the agent's time zone. */
+  current_time: string;
+  /** The agent's own variables. */
+  [key: string]: string;
 }
 
 export interface AssistantStart {

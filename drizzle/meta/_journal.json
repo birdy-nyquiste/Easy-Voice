@@ -106,6 +106,13 @@
       "when": 1792553342286,
       "tag": "0014_knowledge_base",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1792594235073,
+      "tag": "0015_agent_behavior",
+      "breakpoints": true
     }
   ]
 }

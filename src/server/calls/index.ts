@@ -1,7 +1,8 @@
 import "server-only";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { db, withUserLock } from "@/db";
-import { agents, calls, phoneNumbers, type Call, type User } from "@/db/schema";
+import { agents, calls, phoneNumbers, type Agent, type Call, type User } from "@/db/schema";
+import { MAX_VARIABLE_VALUE_LENGTH, readVariables } from "@/lib/agent-settings";
 import { UserError } from "@/lib/errors";
 import { outcomeColumns, stored } from "@/lib/stored-text";
 import { toE164US } from "@/lib/format";
@@ -32,7 +33,10 @@ export async function getUserCall(userId: string, callId: string): Promise<Call 
   return fetchCallResults(c);
 }
 
-export async function startOutboundCall(user: User, input: { agentId: string; to: string; goal?: string }): Promise<Call> {
+export async function startOutboundCall(
+  user: User,
+  input: { agentId: string; to: string; goal?: string; variables?: Record<string, string> },
+): Promise<Call> {
   const to = toE164US(input.to);
   if (!to) throw new UserError("invalidPhone");
   const goal = input.goal?.trim() || null;
@@ -47,6 +51,7 @@ export async function startOutboundCall(user: User, input: { agentId: string; to
     .where(and(eq(agents.id, input.agentId), eq(agents.userId, user.id), isNull(agents.deletedAt)));
   if (!agent) throw new UserError("agentNotFound");
   if (agent.status !== "ready") throw new UserError("agentNotReady");
+  const variables = perCallVariables(agent, input.variables ?? {});
   if (isElevenLabsVoice(agent.voiceRef) && !(await elevenLabsKeyUsable(user.id))) {
     throw new UserError("agentVoiceKeyRejected");
   }
@@ -73,6 +78,7 @@ export async function startOutboundCall(user: User, input: { agentId: string; to
         fromNumber: from.e164,
         toNumber: to,
         goal,
+        variables,
       })
       .returning();
     return inserted;
@@ -95,6 +101,18 @@ export async function startOutboundCall(user: User, input: { agentId: string; to
       .returning();
     return u;
   }
+}
+
+/** Values given for the agent's ask-on-each-call variables; blank ones fall back to the default. */
+function perCallVariables(agent: Agent, given: Record<string, string>): Record<string, string> | null {
+  const out: Record<string, string> = {};
+  for (const v of readVariables(agent.variables)) {
+    const value = given[v.key]?.trim();
+    if (!v.askPerCall || !value) continue;
+    if (value.length > MAX_VARIABLE_VALUE_LENGTH) throw new UserError("variableValueTooLong", { key: v.key, max: MAX_VARIABLE_VALUE_LENGTH });
+    out[v.key] = value;
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 export async function hangupCall(userId: string, callId: string): Promise<void> {
