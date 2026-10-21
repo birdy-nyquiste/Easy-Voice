@@ -8,7 +8,7 @@ import { getUserAgent } from "@/server/agents";
 import { requireUser } from "@/server/auth";
 import { getUserCall } from "@/server/calls";
 import { deleteCallAction, hangupAction } from "../actions";
-import { AutoRefresh } from "../auto-refresh";
+import { AutoRefresh } from "@/components/auto-refresh";
 
 export default async function CallPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();

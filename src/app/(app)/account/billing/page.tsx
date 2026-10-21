@@ -67,6 +67,9 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
             <div className="flex justify-between"><dt>{t("calls")}</dt><dd className="font-medium">{t("perMin", { price: formatCents(p.callPerMinuteCents, locale) })}</dd></div>
             <div className="flex justify-between"><dt>{t("number")}</dt><dd className="font-medium">{t("perMonth", { price: formatCents(p.numberMonthlyCents, locale) })}</dd></div>
             <div className="flex justify-between"><dt>{t("clone")}</dt><dd className="font-medium">{t("each", { price: formatCents(p.voiceCloneCents, locale) })}</dd></div>
+            {config.features.knowledgeBase && (
+              <div className="flex justify-between"><dt>{t("knowledgeSource")}</dt><dd className="font-medium">{t("each", { price: formatCents(p.knowledgeSourceCents, locale) })}</dd></div>
+            )}
             {config.features.inboundSms && (
               <div className="flex justify-between"><dt>{t("textReceived")}</dt><dd className="font-medium">{t("perSegment", { price: formatCents(p.smsInboundPerPartCents, locale) })}</dd></div>
             )}

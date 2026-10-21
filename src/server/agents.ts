@@ -1,9 +1,9 @@
 import "server-only";
 import { createHash } from "node:crypto";
-import { and, eq, isNull, ne, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, withUserLock } from "@/db";
-import { agents, elevenLabsKeys, phoneNumbers, voices, type Agent } from "@/db/schema";
+import { agentKnowledge, agents, elevenLabsKeys, knowledgeSources, phoneNumbers, voices, type Agent, type KnowledgeMode } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError, type ErrorKey } from "@/lib/errors";
 import { failureColumns, stored, storedFromError } from "@/lib/stored-text";
@@ -115,19 +115,71 @@ async function voiceApiKeyRef(a: Pick<Agent, "userId" | "voiceRef">): Promise<st
   return k.ref;
 }
 
+/** What deleting clears at once: nothing from the source stays with us (SPEC §18.2). */
+export const DELETED_SOURCE = {
+  status: "deleting",
+  name: null,
+  content: null,
+  url: null,
+  sizeBytes: null,
+  failureReason: null,
+  failureMsg: null,
+} as const;
+
+/** Appended when the agent searches its knowledge base on calls (SPEC §18.2). */
+export const KNOWLEDGE_RULES: Record<Exclude<KnowledgeMode, "off">, string> = {
+  reference:
+    "You can search a knowledge base with your owner's reference material. Prefer it for factual questions. " +
+    "If it doesn't cover a question you may answer from general knowledge; if you aren't sure, say so and offer to pass the question on.",
+  strict:
+    "You can search a knowledge base with your owner's reference material. Answer factual questions only from the knowledge base, " +
+    "these instructions and this call's goal. If none of them covers a question, say you don't know and offer to pass the question on. " +
+    "This doesn't stop you from following your instructions and working toward the call's goal.",
+};
+
+/** What the assistant should have from the agent's knowledge base: a bucket to search and how to use it. */
+export interface KnowledgeState {
+  bucket: string;
+  mode: Exclude<KnowledgeMode, "off">;
+}
+
+/**
+ * The knowledge state each agent should have on the provider. An agent gets the retrieval tool when
+ * the feature is on, its mode isn't off, embedding is on for its bucket, and no deleted source is still
+ * being removed (so deleted content can't be quoted on a call).
+ */
+export async function desiredKnowledge(agentIds: string[]): Promise<Map<string, KnowledgeState>> {
+  const out = new Map<string, KnowledgeState>();
+  if (!config.features.knowledgeBase || !agentIds.length) return out;
+  const kbs = await db.select().from(agentKnowledge).where(inArray(agentKnowledge.agentId, agentIds));
+  const deleting = await db
+    .selectDistinct({ agentId: knowledgeSources.agentId })
+    .from(knowledgeSources)
+    .where(and(inArray(knowledgeSources.agentId, agentIds), eq(knowledgeSources.status, "deleting")));
+  const blocked = new Set(deleting.map((d) => d.agentId));
+  for (const kb of kbs) {
+    if (kb.mode === "off" || kb.status !== "ready" || !kb.embeddedAt || blocked.has(kb.agentId)) continue;
+    out.set(kb.agentId, { bucket: kb.bucket, mode: kb.mode });
+  }
+  return out;
+}
+
 function toSpec(
   a: Pick<Agent, "name" | "instructions" | "greeting" | "language" | "voiceRef" | "model">,
   voiceApiKeyRef?: string,
+  knowledge?: KnowledgeState,
 ): AssistantSpec {
   const englishOnly = !voiceSpeaks(a.voiceRef).includes("zh");
+  const rules = [englishOnly && ENGLISH_ONLY_VOICE_RULE, knowledge && KNOWLEDGE_RULES[knowledge.mode]].filter(Boolean);
   return {
     name: a.name,
-    instructions: englishOnly ? `${a.instructions}\n\n${ENGLISH_ONLY_VOICE_RULE}` : a.instructions,
+    instructions: [a.instructions, ...rules].join("\n\n"),
     greeting: providerGreeting(a.language, a.greeting),
     language: a.language,
     voiceRef: a.voiceRef,
     voiceApiKeyRef,
     model: a.model ?? config.telnyx.llmModel,
+    knowledgeBucket: knowledge?.bucket,
   };
 }
 
@@ -163,19 +215,47 @@ export async function updateAgent(userId: string, agentId: string, raw: unknown)
   return syncAgent(row);
 }
 
+async function push(a: Agent, knowledge?: KnowledgeState): Promise<Agent> {
+  const spec = toSpec(a, await voiceApiKeyRef(a), knowledge);
+  let assistantId = a.providerAssistantId;
+  if (assistantId) await voiceProvider().updateAssistant(assistantId, spec);
+  else assistantId = (await voiceProvider().createAssistant(spec)).assistantId;
+  const [u] = await db
+    .update(agents)
+    .set({ providerAssistantId: assistantId, status: "ready", failureReason: null, failureMsg: null, syncedConfig: agentFingerprint(knowledge) })
+    .where(eq(agents.id, a.id))
+    .returning();
+  return u;
+}
+
+/**
+ * Re-push an agent after its knowledge base changed (mode, bucket, deletions), or to catch up a stale
+ * one. Never changes the agent's status: on failure the provider keeps the previous assistant and the
+ * fingerprint stays stale, so it is retried later (SPEC §18.3). Returns whether it was pushed.
+ */
+export async function syncAgentQuietly(a: Agent): Promise<boolean> {
+  try {
+    await push(a, (await desiredKnowledge([a.id])).get(a.id));
+    return true;
+  } catch (err) {
+    console.error("syncAgentQuietly failed", a.id, err);
+    return false;
+  }
+}
+
 /** Push the agent config to the provider; records failure instead of throwing. */
 export async function syncAgent(a: Agent): Promise<Agent> {
   try {
-    const spec = toSpec(a, await voiceApiKeyRef(a));
-    let assistantId = a.providerAssistantId;
-    if (assistantId) await voiceProvider().updateAssistant(assistantId, spec);
-    else assistantId = (await voiceProvider().createAssistant(spec)).assistantId;
-    const [u] = await db
-      .update(agents)
-      .set({ providerAssistantId: assistantId, status: "ready", failureReason: null, failureMsg: null, syncedConfig: platformFingerprint() })
-      .where(eq(agents.id, a.id))
-      .returning();
-    return u;
+    const knowledge = (await desiredKnowledge([a.id])).get(a.id);
+    try {
+      return await push(a, knowledge);
+    } catch (err) {
+      if (!knowledge) throw err;
+      // A knowledge-base problem must not fail the save: push without it. The stale fingerprint
+      // shows the knowledge base as not applied yet, and it is retried later.
+      console.error("syncAgent with knowledge failed; retrying without", a.id, err);
+      return await push(a);
+    }
   } catch (err) {
     console.error("syncAgent failed", a.id, err);
     const reason = failureColumns(
@@ -210,21 +290,27 @@ export function platformFingerprint(): string {
   return createHash("sha256").update(JSON.stringify(settings)).digest("hex").slice(0, 16);
 }
 
-/** Re-push agents whose provider copy predates the current platform settings. */
-export async function resyncStaleAgents(userId?: string): Promise<number> {
+/** What an agent's provider copy should match: the platform settings plus its knowledge state. */
+export function agentFingerprint(knowledge?: KnowledgeState): string {
   const fp = platformFingerprint();
-  const stale = await db
+  if (!knowledge) return fp;
+  return `${fp}:${createHash("sha256").update(JSON.stringify(knowledge)).digest("hex").slice(0, 16)}`;
+}
+
+/** Ready agents whose provider copy doesn't match the current settings and knowledge state. */
+export async function staleAgents(userId?: string): Promise<Agent[]> {
+  const ready = await db
     .select()
     .from(agents)
-    .where(
-      and(
-        isNull(agents.deletedAt),
-        eq(agents.status, "ready"),
-        or(isNull(agents.syncedConfig), ne(agents.syncedConfig, fp)),
-        userId ? eq(agents.userId, userId) : undefined,
-      ),
-    );
-  for (const a of stale) await syncAgent(a);
+    .where(and(isNull(agents.deletedAt), eq(agents.status, "ready"), userId ? eq(agents.userId, userId) : undefined));
+  const knowledge = await desiredKnowledge(ready.map((a) => a.id));
+  return ready.filter((a) => a.syncedConfig !== agentFingerprint(knowledge.get(a.id)));
+}
+
+/** Re-push agents whose provider copy is out of date. Failures leave the agent as it is, to retry later. */
+export async function resyncStaleAgents(userId?: string): Promise<number> {
+  const stale = await staleAgents(userId);
+  for (const a of stale) await syncAgentQuietly(a);
   return stale.length;
 }
 
@@ -238,8 +324,19 @@ export async function deleteAgent(userId: string, agentId: string): Promise<void
       console.error("deleteAssistant failed", a.id, err);
     }
   }
-  await db.update(phoneNumbers).set({ agentId: null }).where(eq(phoneNumbers.agentId, a.id));
-  await db.update(agents).set({ deletedAt: new Date() }).where(eq(agents.id, a.id));
+  await db.transaction(async (tx) => {
+    await tx.update(phoneNumbers).set({ agentId: null }).where(eq(phoneNumbers.agentId, a.id));
+    await tx.update(agents).set({ deletedAt: new Date() }).where(eq(agents.id, a.id));
+    // The knowledge base goes with the agent, permanently: clear what we hold now; the provider copy is
+    // removed by cleanUpKnowledge() (SPEC §18.3). Whatever the feature flag says, but only where the
+    // tables exist (previews run before the production migration).
+    const [{ exists }] = (await tx.execute(sql`select to_regclass('public.knowledge_sources') is not null as exists`)) as unknown as {
+      exists: boolean;
+    }[];
+    if (!exists) return;
+    await tx.update(knowledgeSources).set(DELETED_SOURCE).where(eq(knowledgeSources.agentId, a.id));
+    await tx.update(agentKnowledge).set({ status: "deleting" }).where(eq(agentKnowledge.agentId, a.id));
+  });
 }
 
 function parse(raw: unknown): AgentInput {

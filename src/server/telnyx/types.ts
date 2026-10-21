@@ -77,7 +77,19 @@ export interface AssistantSpec {
   voiceApiKeyRef?: string;
   /** LLM id; see listModels(). */
   model: string;
+  /** Storage bucket the assistant may search during calls (the retrieval tool); none when absent. */
+  knowledgeBucket?: string;
 }
+
+/** Embedding progress of one object in a knowledge bucket. */
+export type EmbeddingStatus = "processing" | "ready" | "failed";
+
+export interface StoredObject {
+  key: string;
+  sizeBytes: number;
+}
+
+export type CrawlStatus = "processing" | "success" | "partial_success" | "failure";
 
 export interface DialResult {
   callControlId: string;
@@ -196,6 +208,22 @@ export interface VoiceProvider {
   createAssistant(spec: AssistantSpec): Promise<{ assistantId: string }>;
   updateAssistant(assistantId: string, spec: AssistantSpec): Promise<void>;
   deleteAssistant(assistantId: string): Promise<void>;
+
+  /** Create a knowledge storage bucket (versioning off). Succeeds if we already own it. */
+  createBucket(bucket: string): Promise<void>;
+  /** Turn on embedding; objects added afterwards are embedded automatically. */
+  enableEmbedding(bucket: string): Promise<void>;
+  putObject(bucket: string, key: string, body: Blob, contentType: string): Promise<void>;
+  listObjects(bucket: string): Promise<StoredObject[]>;
+  /** Succeeds if the object is already gone. */
+  deleteObject(bucket: string, key: string): Promise<void>;
+  /** Embedding status by object key; objects not listed yet are still processing. */
+  embeddingStatuses(bucket: string): Promise<Map<string, EmbeddingStatus>>;
+  /** Crawl a website into the bucket (same-domain pages, embedded as they arrive). */
+  crawlUrl(bucket: string, url: string): Promise<{ taskId: string }>;
+  getCrawlStatus(taskId: string): Promise<CrawlStatus>;
+  /** Turn embedding off, then delete the (empty) bucket. Succeeds if it is already gone. */
+  deleteBucket(bucket: string): Promise<void>;
 
   /** Dials with recording on; start the assistant on call.answered. */
   dial(input: { from: string; to: string; clientState: string }): Promise<DialResult>;

@@ -142,6 +142,15 @@ describe("assistant config", () => {
     expect(sent).toEqual([{ voice: "ElevenLabs.eleven_flash_v2_5.v1", api_key_ref: "elevenlabs_u_1" }, { voice: "Telnyx.KokoroTTS.af_heart" }]);
   });
 
+  it("always sends tools: the retrieval tool for a knowledge bucket, otherwise none", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "assistant-1" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await provider.createAssistant({ ...spec, knowledgeBucket: "ev-kb-abc" });
+    await provider.updateAssistant("assistant-1", spec);
+    const sent = fetchMock.mock.calls.map((c) => JSON.parse(String((c as unknown as [string, RequestInit])[1].body)).tools);
+    expect(sent).toEqual([[{ type: "retrieval", retrieval: { bucket_ids: ["ev-kb-abc"], max_num_results: 3 } }], []]);
+  });
+
   it("stores integration secrets as bearer tokens", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: { id: "sec-1", identifier: "elevenlabs_u_1" } }), { status: 201 }));
     vi.stubGlobal("fetch", fetchMock);
@@ -251,5 +260,50 @@ describe("inbound messaging", () => {
     });
     const e = await provider.parseWebhook(payload, headers(Math.floor(Date.now() / 1000), payload));
     expect(e).toMatchObject({ type: "message.received", messageId: "msg", from: "+1202", to: "+1415", text: "hi" });
+  });
+});
+
+describe("knowledge storage", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("talks S3 to the regional storage host with the API key as the SigV4 access key", async () => {
+    const fetchMock = vi.fn(async () => new Response("", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await provider.putObject("ev-kb-abc", "src/s1.txt", new Blob(["hi"], { type: "text/plain" }), "text/plain");
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://us-central-1.telnyxcloudstorage.com/ev-kb-abc/src/s1.txt");
+    expect(init.method).toBe("PUT");
+    expect((init.headers as Record<string, string>).Authorization).toMatch(/^AWS4-HMAC-SHA256 Credential=test\/\d{8}\/us-central-1\/s3\/aws4_request, /);
+  });
+
+  it("treats a bucket we already own as created, and a missing object as deleted", async () => {
+    const owned = "<Error><Code>BucketAlreadyOwnedByYou</Code></Error>";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(owned, { status: 409 })));
+    await expect(provider.createBucket("ev-kb-abc")).resolves.toBeUndefined();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("<Error><Code>NoSuchKey</Code></Error>", { status: 404 })));
+    await expect(provider.deleteObject("ev-kb-abc", "src/gone.txt")).resolves.toBeUndefined();
+  });
+
+  it("reads a blank per-file status as embedded, and a missing bucket as nothing yet", async () => {
+    const files = [{ filename: "src/a.txt", status: "" }, { filename: "src/b.txt", status: "processing" }, { filename: "src/c.pdf", status: "failed" }];
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: files }), { status: 200 })));
+    expect(Object.fromEntries(await provider.embeddingStatuses("ev-kb-abc"))).toEqual({ "src/a.txt": "ready", "src/b.txt": "processing", "src/c.pdf": "failed" });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 404 })));
+    expect((await provider.embeddingStatuses("ev-kb-abc")).size).toBe(0);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("<Error><Code>NoSuchBucket</Code></Error>", { status: 404 })));
+    expect(await provider.listObjects("ev-kb-abc")).toEqual([]);
+  });
+
+  it("lists objects across pages", async () => {
+    const page = (keys: string[], next?: string) =>
+      `<ListBucketResult>${keys.map((k) => `<Contents><Key>${k}</Key><Size>10</Size></Contents>`).join("")}` +
+      `<IsTruncated>${next ? "true" : "false"}</IsTruncated>${next ? `<NextContinuationToken>${next}</NextContinuationToken>` : ""}</ListBucketResult>`;
+    const fetchMock = vi.fn(async (url: string) => new Response(url.includes("continuation-token") ? page(["depth-4-1.txt"]) : page(["src/a.txt", "depth-4-0.txt"], "t2")));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await provider.listObjects("ev-kb-abc")).toEqual([
+      { key: "src/a.txt", sizeBytes: 10 },
+      { key: "depth-4-0.txt", sizeBytes: 10 },
+      { key: "depth-4-1.txt", sizeBytes: 10 },
+    ]);
   });
 });

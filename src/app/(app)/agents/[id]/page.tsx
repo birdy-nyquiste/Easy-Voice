@@ -3,14 +3,17 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { Card, CardTitle, Notice, PageHeader, StatusBadge } from "@/components/ui";
 import { showStored } from "@/lib/stored-text";
-import { getUserAgent, listModels } from "@/server/agents";
+import { config } from "@/lib/config";
+import { getUserAgent, listModels, resyncStaleAgents } from "@/server/agents";
 import Link from "next/link";
 import { requireUser } from "@/server/auth";
 import { getElevenLabsKey } from "@/server/elevenlabs-keys";
+import { hasPendingKnowledge, refreshKnowledge } from "@/server/knowledge";
 import { isElevenLabsVoice } from "@/server/telnyx/stock-voices";
 import { listStockVoices, listUserVoices } from "@/server/voices";
 import { deleteAgentAction } from "../actions";
 import { AgentForm } from "../agent-form";
+import { KnowledgeSection } from "../knowledge-section";
 
 export default async function AgentPage({
   params,
@@ -22,8 +25,13 @@ export default async function AgentPage({
   const user = await requireUser();
   const { id } = await params;
   const { saved } = await searchParams;
-  const agent = await getUserAgent(user.id, id);
+  let agent = await getUserAgent(user.id, id);
   if (!agent) notFound();
+  if (config.features.knowledgeBase) {
+    // Settle sources and catch up the assistant here too, not only in the daily job.
+    if (await hasPendingKnowledge(agent.id)) await refreshKnowledge({ agentId: agent.id });
+    if (await resyncStaleAgents(user.id)) agent = (await getUserAgent(user.id, id)) ?? agent;
+  }
   const [stock, clones, models, elKey] = await Promise.all([
     listStockVoices(),
     listUserVoices(user.id),
@@ -54,6 +62,7 @@ export default async function AgentPage({
             without a remount the fields would show pre-save values (and a second save would revert). */}
         <AgentForm key={agent.updatedAt.toISOString()} agent={agent} stock={stock} clones={clones} models={models} />
       </Card>
+      {config.features.knowledgeBase && <KnowledgeSection agent={agent} />}
       <Card>
         <CardTitle>{t("dangerZone")}</CardTitle>
         <ActionForm action={deleteAgentAction}>

@@ -6,7 +6,7 @@ import { config } from "@/lib/config";
 import { formatCents, formatDateTime, formatPhone } from "@/lib/format";
 import { requireUser } from "@/server/auth";
 import { getContactName, getConversation, MAX_CONTACT_NAME_LENGTH } from "@/server/messages";
-import { AutoRefresh } from "../../calls/auto-refresh";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { deleteConversationAction, saveContactNameAction } from "../actions";
 import { attachmentNote } from "../format";
 import { MarkRead } from "./mark-read";

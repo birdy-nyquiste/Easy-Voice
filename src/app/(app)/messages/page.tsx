@@ -6,7 +6,7 @@ import { formatCents, formatDateTime, formatPhone } from "@/lib/format";
 import { requireUser } from "@/server/auth";
 import { listConversations } from "@/server/messages";
 import { listUserNumbers } from "@/server/numbers";
-import { AutoRefresh } from "../calls/auto-refresh";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { messagePreview, threadHref } from "./format";
 
 export default async function MessagesPage() {

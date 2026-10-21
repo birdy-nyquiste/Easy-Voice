@@ -8,6 +8,7 @@ import { UserError } from "@/lib/errors";
 import { showStored } from "@/lib/stored-text";
 import { createAgent, deleteAgent, updateAgent } from "@/server/agents";
 import { requireUser } from "@/server/auth";
+import { cleanUpKnowledge } from "@/server/knowledge";
 
 function fields(form: FormData) {
   return {
@@ -45,7 +46,10 @@ export async function saveAgentAction(_: ActionState, form: FormData): Promise<A
 export async function deleteAgentAction(_: ActionState, form: FormData): Promise<ActionState> {
   const result = await attempt(async () => {
     const user = await requireUser();
-    await deleteAgent(user.id, String(form.get("id")));
+    const agentId = String(form.get("id"));
+    await deleteAgent(user.id, agentId);
+    // Remove the agent's knowledge base at the provider now; the daily job retries what fails.
+    await cleanUpKnowledge({ agentId }).catch((err) => console.error("knowledge cleanup failed", agentId, err));
     revalidatePath("/", "layout");
   });
   if (!result?.error) redirect("/agents");

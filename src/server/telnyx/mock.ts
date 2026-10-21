@@ -5,7 +5,7 @@ import { stored } from "@/lib/stored-text";
 import { encodeClientState, parseCallEnvelope, parseTelnyxEnvelope } from "./events";
 import { MOCK_MODELS, toOfferedModels } from "./models";
 import { MOCK_CATALOG, toStockVoices } from "./stock-voices";
-import type { CallResults, ClonedVoiceResult, VoiceProvider } from "./types";
+import type { AssistantSpec, CallResults, ClonedVoiceResult, CrawlStatus, EmbeddingStatus, VoiceProvider } from "./types";
 
 /**
  * In-memory stand-in for Telnyx so the whole product loop runs locally
@@ -14,11 +14,44 @@ import type { CallResults, ClonedVoiceResult, VoiceProvider } from "./types";
  */
 
 type SimCall = { from: string; to: string; direction: "inbound" | "outbound"; clientState?: string; sessionId: string; answeredAt?: Date };
+type SimObject = { sizeBytes: number; at: number; unreadable: boolean };
+type SimBucket = { embedded: boolean; objects: Map<string, SimObject> };
+type SimCrawl = { bucket: string; at: number; pages: number; fails: boolean };
 
 const g = globalThis as unknown as {
-  __mockTelnyx?: { calls: Map<string, SimCall>; clones: Map<string, { createdAt: number }> };
+  __mockTelnyx?: {
+    calls: Map<string, SimCall>;
+    clones: Map<string, { createdAt: number }>;
+    buckets: Map<string, SimBucket>;
+    crawls: Map<string, SimCrawl>;
+  };
 };
-const state = (g.__mockTelnyx ??= { calls: new Map(), clones: new Map() });
+const state = (g.__mockTelnyx ??= { calls: new Map(), clones: new Map(), buckets: new Map(), crawls: new Map() });
+state.buckets ??= new Map();
+state.crawls ??= new Map();
+
+/**
+ * Knowledge-base simulation knobs. In dev, failure paths are triggered by content instead:
+ * text containing "mock:unreadable" fails to embed; crawled URLs containing "too-large", "empty"
+ * or "fail" bring in 60 pages, none, or fail outright.
+ */
+export const mockKnowledge = {
+  /** How long embedding and crawls take. */
+  delayMs: 2000,
+  bucketLimitReached: false,
+  failDeletes: false,
+  rejectRetrieval: false,
+};
+
+function bucketOf(name: string): SimBucket {
+  const b = state.buckets.get(name);
+  if (!b) throw new Error(`[mock-telnyx] no bucket ${name}`);
+  return b;
+}
+
+function checkRetrieval(spec: AssistantSpec) {
+  if (spec.knowledgeBucket && mockKnowledge.rejectRetrieval) throw new Error("[mock-telnyx] retrieval tool rejected");
+}
 
 /** Seconds a simulated answered call lasts. */
 export const MOCK_CALL_SECONDS = 75;
@@ -134,11 +167,74 @@ export const mockProvider: VoiceProvider = {
   },
   async deleteIntegrationSecret() {},
 
-  async createAssistant() {
+  async createAssistant(spec) {
+    checkRetrieval(spec);
     return { assistantId: `assistant-${randomUUID()}` };
   },
-  async updateAssistant() {},
+  async updateAssistant(_id, spec) {
+    checkRetrieval(spec);
+  },
   async deleteAssistant() {},
+
+  async createBucket(bucket) {
+    if (state.buckets.has(bucket)) return;
+    if (mockKnowledge.bucketLimitReached) throw new Error("[mock-telnyx] TooManyBuckets");
+    state.buckets.set(bucket, { embedded: false, objects: new Map() });
+  },
+
+  async enableEmbedding(bucket) {
+    bucketOf(bucket).embedded = true;
+  },
+
+  async putObject(bucket, key, body) {
+    const text = body.type.startsWith("text/") ? await body.text() : "";
+    bucketOf(bucket).objects.set(key, { sizeBytes: body.size, at: Date.now(), unreadable: text.includes("mock:unreadable") });
+  },
+
+  async listObjects(bucket) {
+    const b = state.buckets.get(bucket);
+    return b ? [...b.objects].map(([key, o]) => ({ key, sizeBytes: o.sizeBytes })) : [];
+  },
+
+  async deleteObject(bucket, key) {
+    if (mockKnowledge.failDeletes) throw new Error("[mock-telnyx] delete failed");
+    state.buckets.get(bucket)?.objects.delete(key);
+  },
+
+  async embeddingStatuses(bucket) {
+    const b = state.buckets.get(bucket);
+    const out = new Map<string, EmbeddingStatus>();
+    if (!b?.embedded) return out;
+    for (const [key, o] of b.objects) {
+      out.set(key, Date.now() - o.at < mockKnowledge.delayMs ? "processing" : o.unreadable ? "failed" : "ready");
+    }
+    return out;
+  },
+
+  async crawlUrl(bucket, url) {
+    const b = bucketOf(bucket);
+    const pages = url.includes("too-large") ? 60 : url.includes("empty") ? 0 : 3;
+    const taskId = `task-${randomUUID()}`;
+    state.crawls.set(taskId, { bucket, at: Date.now(), pages, fails: url.includes("fail") });
+    // Pages land as plain text named by crawl depth, like the real crawler.
+    for (let i = 0; i < pages; i++) b.objects.set(`depth-4-${i}.txt`, { sizeBytes: 2000, at: Date.now(), unreadable: false });
+    return { taskId };
+  },
+
+  async getCrawlStatus(taskId): Promise<CrawlStatus> {
+    const c = state.crawls.get(taskId);
+    // After a dev-server restart the task is gone; treat it as finished.
+    if (!c) return "success";
+    if (Date.now() - c.at < mockKnowledge.delayMs) return "processing";
+    return c.fails ? "failure" : "success";
+  },
+
+  async deleteBucket(bucket) {
+    if (mockKnowledge.failDeletes) throw new Error("[mock-telnyx] delete failed");
+    const b = state.buckets.get(bucket);
+    if (b?.objects.size) throw new Error("[mock-telnyx] BucketNotEmpty");
+    state.buckets.delete(bucket);
+  },
 
   async dial({ from, to, clientState }) {
     const id = `v3:mock-${randomUUID()}`;

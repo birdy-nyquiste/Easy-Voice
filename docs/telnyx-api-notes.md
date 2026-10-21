@@ -513,3 +513,34 @@ https://developers.telnyx.com/docs/messaging/10dlc/phone-number-assignment
   - Whether SMS conversations appear in `/v2/ai/conversations` like calls do.
   - Whether a "send message" tool exists that lets the assistant text during a voice call (a Telnyx release note
     URL for it now 404s).
+
+## 15. Knowledge bases (storage buckets + embeddings) — checked in the portal 2026-10-20, not built
+
+Spike for SPEC §18, run through the Telnyx portal (the Telnyx MCP connector rejected calls as unauthenticated). Test
+resources: assistant `assistant-0174c0a2-f25b-4b9a-8c6d-9ceea00663af` ("Blank") and bucket `ev-kb-spike-20261020`.
+
+Confirmed:
+
+- **Assistants we create through the API have no tools.** The portal shows "You haven't added any tools yet" on an
+  app-created assistant (`First`). Portal templates, including Blank, add a Hang Up tool; that is a portal default,
+  not an API one. So sending `tools: []` (or only a `retrieval` tool) removes nothing we rely on.
+- **The account had no storage buckets** before the spike.
+- **A portal "knowledge base" is a storage bucket.** The Assistant → Agent → Knowledge Bases block has *Sources* (a
+  multi-select of bucket names, so one bucket can be picked by several assistants) and *Max Number of Results*
+  (blank by default). Saving labels the new assistant version "Added knowledge base bucket ID".
+- **Bucket creation:** name 3–63 characters of lowercase letters, digits, `.` and `-`, globally unique; region
+  defaults to `us-central-1`; advanced option *Storage Versioning* Disable/Enable. With Disable the bucket shows
+  "Bucket Versioning: Suspended" and no lifecycle configuration, so deleted objects are not kept as old versions.
+- **Embedding an empty bucket works:** the portal reported "Knowledge base creation initiated" before any file was
+  added; files uploaded afterwards were embedded, and the bucket list showed "AI Embedding: Embedded" within about a
+  minute. The per-object "Embedding Status" column stayed blank for these small text files.
+- **Uploaded files keep their names as object keys** (`spike-en.txt`, `spike-zh.txt`).
+- **URL crawl naming:** crawling `https://example.com` (no same-domain links) produced one object,
+  `depth-4-0.txt` (158 bytes of extracted text), at the bucket root, 1–2 minutes after submission. Crawled pages are
+  stored as plain-text `depth-<level>-<n>.txt` objects, never under a prefix of ours, and a second crawl into the same
+  bucket would reuse the same names.
+- **No text chat for assistants in the portal.** "Test assistant" offers a web call, a call to a phone, or a text from
+  the assistant. The LLM Playground has no retrieval option. Retrieval during a call can only be checked by calling.
+
+Still open: see `docs/telnyx-support-questions-knowledge-base.md` (retention after 30 days, vector deletion, crawl
+limits and billing, behaviour with an empty bucket, retrieval during calls on each model).
