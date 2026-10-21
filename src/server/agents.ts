@@ -7,6 +7,7 @@ import { agentKnowledge, agents, elevenLabsKeys, knowledgeSources, phoneNumbers,
 import {
   agentVariable,
   MAX_KEY_TERMS_LENGTH,
+  MAX_VARIABLE_VALUE_LENGTH,
   MAX_VARIABLES,
   readBehavior,
   readVariables,
@@ -383,11 +384,13 @@ function checkVariables(variables: AgentVariable[]) {
   const seen = new Set<string>();
   for (const { key, value, askPerCall } of variables) {
     const problem = variableKeyProblem(key);
+    if (problem === "missing") throw new UserError("variableNameRequired");
     if (problem === "format") throw new UserError("variableKeyInvalid", { key });
     if (problem === "reserved") throw new UserError("variableKeyReserved", { key });
     if (seen.has(key)) throw new UserError("variableKeyDuplicate", { key });
     // A value asked for on each call may be left blank there; any other needs one here.
     if (!value && !askPerCall) throw new UserError("variableValueRequired", { key });
+    if (value.length > MAX_VARIABLE_VALUE_LENGTH) throw new UserError("variableValueTooLong", { key, max: MAX_VARIABLE_VALUE_LENGTH });
     seen.add(key);
   }
 }

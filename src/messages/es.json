@@ -155,7 +155,6 @@
     "sectionConversationHint": "Cómo lleva el agente el ida y vuelta.",
     "sectionEnding": "Fin de las llamadas",
     "sectionEndingHint": "Cuándo termina una llamada.",
-    "speechModel": "Modelo de voz: {name}.",
     "voiceSpeed": "Velocidad al hablar",
     "voiceSpeedHint": "1.00× es el ritmo normal de la voz.",
     "speedValue": "{speed}×",
@@ -192,7 +191,7 @@
     "greetingInterruptible": "Se puede interrumpir el saludo",
     "greetingInterruptibleHint": "Desactívalo para que el aviso de grabación se escuche siempre completo.",
     "keyTerms": "Términos clave",
-    "keyTermsHint": "Nombres y palabras que el agente debe reconocer, separados por comas. Reconocimiento de voz: {name}.",
+    "keyTermsHint": "Nombres y palabras que el agente debe reconocer, separados por comas.",
     "keyTermsPlaceholder": "Nyquiste, Dra. Okafor, Wi-Fi",
     "endCallWhenDone": "Colgar cuando termine la conversación",
     "endCallWhenDoneHint": "El agente se despide y cuelga, en lugar de esperar a que lo haga la otra persona.",
@@ -202,7 +201,10 @@
     "silenceHangupHint": "Si nadie habla durante este tiempo. Déjalo desactivado en llamadas en las que te puedan poner en espera.",
     "afterSeconds": "Tras {count} segundos",
     "never": "Nunca",
-    "undefinedVariables": "El agente leerá {names} tal cual, porque ninguna variable lo completa. Añádela en Variables o corrige la ortografía."
+    "undefinedVariables": "El agente leerá {names} tal cual, porque ninguna variable lo completa. Añádela en Variables o corrige la ortografía.",
+    "stt": "Reconocimiento de voz",
+    "tts": "Texto a voz",
+    "setByVoice": " · definido por la voz"
   },
   "agentTemplates": {
     "pick": "Elige un punto de partida. Puedes cambiarlo todo antes de crear el agente.",
@@ -598,7 +600,8 @@
     "variableKeyReserved": "“{key}” es un nombre integrado. Elige otro nombre para tu variable.",
     "variableKeyDuplicate": "Hay dos variables llamadas “{key}”.",
     "variableValueRequired": "Da un valor a “{key}” o marca Preguntar en cada llamada.",
-    "variableValueTooLong": "El valor de “{key}” puede tener como máximo {max} caracteres."
+    "variableValueTooLong": "El valor de “{key}” puede tener como máximo {max} caracteres.",
+    "variableNameRequired": "Pon un nombre a cada variable."
   },
   "errorPage": {
     "notFoundTitle": "Página no encontrada",

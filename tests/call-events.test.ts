@@ -199,6 +199,12 @@ describe("outbound calls", () => {
     expect(await callByCcid("cc-out")).toMatchObject({ status: "answered", providerConversationId: "conv-1" });
   });
 
+  it("leaves contact_number empty for callers without caller ID", async () => {
+    const { number } = await makeLine(1000);
+    await handleCallEvent(event("call.initiated", { callControlId: "cc-anon", callSessionId: "sess-anon", direction: "inbound", to: number.e164 }));
+    expect(vi.mocked(mockProvider.answer).mock.calls[0][2].variables.contact_number).toBe("");
+  });
+
   it("fills in the agent's variables, with this call's values taking precedence, and the time in its zone", async () => {
     const { user, agent, number } = await makeLine(1000);
     await db

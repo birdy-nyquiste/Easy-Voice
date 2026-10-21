@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
-import { Card, PageHeader } from "@/components/ui";
+import { PageHeader } from "@/components/ui";
 import { AGENT_TEMPLATES, TEMPLATE_IDS, toTemplateId } from "@/lib/agent-templates";
 import { listModels } from "@/server/agents";
 import { requireUser } from "@/server/auth";
@@ -52,15 +52,13 @@ export default async function NewAgentPage({ searchParams }: { searchParams: Pro
           </Link>
         }
       />
-      <Card>
-        <AgentForm
-          template={AGENT_TEMPLATES[templateId]}
-          templateName={templateId === "blank" ? "" : tt(`${templateId}.name`)}
-          stock={stock}
-          clones={clones}
-          models={models}
-        />
-      </Card>
+      <AgentForm
+        template={AGENT_TEMPLATES[templateId]}
+        templateName={templateId === "blank" ? "" : tt(`${templateId}.name`)}
+        stock={stock}
+        clones={clones}
+        models={models}
+      />
     </div>
   );
 }

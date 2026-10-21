@@ -155,7 +155,6 @@
     "sectionConversationHint": "How the agent handles the back-and-forth.",
     "sectionEnding": "Ending calls",
     "sectionEndingHint": "When a call stops.",
-    "speechModel": "Speech model: {name}.",
     "voiceSpeed": "Speaking speed",
     "voiceSpeedHint": "1.00× is the voice's normal pace.",
     "speedValue": "{speed}×",
@@ -192,7 +191,7 @@
     "greetingInterruptible": "Callers can interrupt the greeting",
     "greetingInterruptibleHint": "Turn off to make sure the recording notice is always heard in full.",
     "keyTerms": "Key terms",
-    "keyTermsHint": "Names and words the agent should recognize, separated by commas. Speech recognition: {name}.",
+    "keyTermsHint": "Names and words the agent should recognize, separated by commas.",
     "keyTermsPlaceholder": "Nyquiste, Dr. Okafor, Wi-Fi",
     "endCallWhenDone": "End the call when the conversation is done",
     "endCallWhenDoneHint": "The agent says goodbye and hangs up, instead of waiting for the other person to.",
@@ -202,7 +201,10 @@
     "silenceHangupHint": "If nobody speaks for this long. Keep it off for calls that may be put on hold.",
     "afterSeconds": "After {count} seconds",
     "never": "Never",
-    "undefinedVariables": "The agent will read {names} as written, because no variable fills it in. Add it under Variables or fix the spelling."
+    "undefinedVariables": "The agent will read {names} as written, because no variable fills it in. Add it under Variables or fix the spelling.",
+    "stt": "Speech recognition",
+    "tts": "Text-to-speech",
+    "setByVoice": " · set by the voice"
   },
   "agentTemplates": {
     "pick": "Pick a starting point. You can change everything before you create the agent.",
@@ -598,7 +600,8 @@
     "variableKeyReserved": "“{key}” is a built-in name. Pick another name for your variable.",
     "variableKeyDuplicate": "There are two variables named “{key}”.",
     "variableValueRequired": "Give “{key}” a value, or tick Ask on each call.",
-    "variableValueTooLong": "The value for “{key}” can be at most {max} characters."
+    "variableValueTooLong": "The value for “{key}” can be at most {max} characters.",
+    "variableNameRequired": "Give every variable a name."
   },
   "errorPage": {
     "notFoundTitle": "Page not found",

@@ -5,6 +5,7 @@ import { useState, type ReactNode } from "react";
 import { Field, inputClass } from "@/components/ui";
 import { PreviewButton } from "@/components/voice-preview";
 import { VOICE_SPEED, type AgentBehavior } from "@/lib/agent-settings";
+import { ModelRow } from "./model-row";
 
 /** The agent's voice picker (with preview), its speech model, and how it sounds on calls. */
 export function VoiceFields({
@@ -24,14 +25,7 @@ export function VoiceFields({
   const [speed, setSpeed] = useState(behavior.voiceSpeed);
   return (
     <>
-      <Field
-        label={t("voice")}
-        hint={
-          <>
-            {t("voiceHint")} {t("speechModel", { name: ttsByVoice[voice] ?? "—" })}
-          </>
-        }
-      >
+      <Field label={t("voice")} hint={t("voiceHint")}>
         <div className="flex gap-2">
           <select name="voice" required value={voice} onChange={(e) => setVoice(e.target.value)} className={inputClass}>
             {voiceOptions}
@@ -39,6 +33,10 @@ export function VoiceFields({
           <PreviewButton voice={voice} />
         </div>
       </Field>
+      <ModelRow label={t("tts")}>
+        <span className="font-medium">{ttsByVoice[voice] ?? "—"}</span>
+        <span className="text-stone-500">{t("setByVoice")}</span>
+      </ModelRow>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label={t("voiceSpeed")} hint={t("voiceSpeedHint")}>
           <div className="flex items-center gap-3">
