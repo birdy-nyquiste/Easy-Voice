@@ -157,6 +157,8 @@ describe("pre-i18n backfill (drizzle/0013)", () => {
       expect(storedColumns(stored(key)).text, key).toBe(text.replace(/''/g, "'"));
       checked.push(key);
     }
-    expect(new Set(checked)).toEqual(new Set(Object.keys(MESSAGES.en.stored).filter((k) => /^(ledger|outcome)/.test(k))));
+    // Knowledge-base lines came after i18n, so no rows predate their messages.
+    const backfilled = Object.keys(MESSAGES.en.stored).filter((k) => /^(ledger|outcome)/.test(k) && !k.startsWith("ledgerKnowledge"));
+    expect(new Set(checked)).toEqual(new Set(backfilled));
   });
 });

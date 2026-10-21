@@ -9,7 +9,7 @@ import { requireUser } from "@/server/auth";
 import { listUserCalls } from "@/server/calls";
 import { listUserNumbers } from "@/server/numbers";
 import { startCallAction } from "./actions";
-import { AutoRefresh } from "./auto-refresh";
+import { AutoRefresh } from "@/components/auto-refresh";
 
 export default async function CallsPage() {
   const user = await requireUser();

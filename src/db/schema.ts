@@ -77,6 +77,7 @@ export const ledgerKind = pgEnum("ledger_kind", [
   "number_monthly",
   "voice_clone",
   "sms",
+  "knowledge_source",
   "refund",
   "adjustment",
 ]);
@@ -201,6 +202,56 @@ export const agents = pgTable("agents", {
   deletedAt: ts("deleted_at"),
 });
 
+// ---------- Knowledge base (SPEC §18) ----------
+
+/** How an agent uses its knowledge base on calls. */
+export const knowledgeMode = pgEnum("knowledge_mode", ["off", "reference", "strict"]);
+export const knowledgeBaseStatus = pgEnum("knowledge_base_status", ["ready", "deleting"]);
+export const knowledgeSourceType = pgEnum("knowledge_source_type", ["text", "file", "url"]);
+export const knowledgeSourceStatus = pgEnum("knowledge_source_status", ["processing", "ready", "failed", "deleting"]);
+
+/**
+ * An agent's knowledge base: one provider storage bucket. A separate table rather than columns on
+ * `agents`, because previews share the production database before migrations run (SPEC §18.3).
+ */
+export const agentKnowledge = pgTable("agent_knowledge", {
+  agentId: uuid("agent_id").primaryKey().references(() => agents.id),
+  userId: uuid("user_id").notNull().references(() => users.id),
+  mode: knowledgeMode("mode").notNull().default("reference"),
+  /** Provider bucket name; derived from the agent id so creating it can be retried. */
+  bucket: text("bucket").notNull(),
+  status: knowledgeBaseStatus("status").notNull().default("ready"),
+  /** When embedding was turned on for the bucket; null until it is. */
+  embeddedAt: ts("embedded_at"),
+  createdAt: createdAt(),
+});
+
+/** A source in an agent's knowledge base. Never edited; deleting it removes the row once the provider copy is gone. */
+export const knowledgeSources = pgTable(
+  "knowledge_sources",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    agentId: uuid("agent_id").notNull().references(() => agents.id),
+    type: knowledgeSourceType("type").notNull(),
+    /** Shown in the list: the title, file name or URL. Cleared on delete. */
+    name: text("name"),
+    /** Typed text, kept to show it. Cleared on delete. */
+    content: text("content"),
+    url: text("url"),
+    /** Provider crawl task (URL sources). */
+    crawlTaskId: text("crawl_task_id"),
+    sizeBytes: integer("size_bytes"),
+    /** What was charged, so a refund matches it even if the price changes. */
+    priceCents: integer("price_cents").notNull(),
+    status: knowledgeSourceStatus("status").notNull().default("processing"),
+    failureReason: text("failure_reason"),
+    failureMsg: jsonb("failure_msg").$type<StoredMessage>(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("knowledge_sources_user_idx").on(t.userId), index("knowledge_sources_agent_idx").on(t.agentId)],
+);
+
 // ---------- Calls ----------
 
 export const callDirection = pgEnum("call_direction", ["inbound", "outbound"]);
@@ -321,3 +372,6 @@ export type Call = typeof calls.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type Contact = typeof contacts.$inferSelect;
 export type LedgerEntry = typeof ledgerEntries.$inferSelect;
+export type AgentKnowledge = typeof agentKnowledge.$inferSelect;
+export type KnowledgeSource = typeof knowledgeSources.$inferSelect;
+export type KnowledgeMode = AgentKnowledge["mode"];

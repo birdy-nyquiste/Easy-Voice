@@ -4,10 +4,13 @@ import { stored } from "@/lib/stored-text";
 import { encodeClientState, parseTelnyxEnvelope } from "./events";
 import { toOfferedModels, type CatalogModel } from "./models";
 import { toStockVoices, type CatalogVoice } from "./stock-voices";
+import { createStorageClient } from "./storage";
 import {
   FeatureNotPermittedError,
   type AssistantSpec,
   type CallRef,
+  type CrawlStatus,
+  type EmbeddingStatus,
   type ClonedVoiceResult,
   type LlmModel,
   type NumberOrderResult,
@@ -24,6 +27,8 @@ import {
 
 const BASE = "https://api.telnyx.com/v2";
 const SIGNATURE_TOLERANCE_SEC = 300;
+/** Passages the retrieval tool returns per lookup (the portal's default). */
+const KNOWLEDGE_RESULTS = 3;
 /** 100 messages per page; a 30-minute call stays well under this. */
 const MAX_MESSAGE_PAGES = 10;
 // DER prefix that wraps a raw 32-byte Ed25519 key as SPKI.
@@ -106,6 +111,11 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
         language: cfg.sttLanguage === "primary" ? spec.language : cfg.sttLanguage,
       },
       dynamic_variables: { call_direction: "inbound", call_goal: "" },
+      // Always sent: an omitted `tools` keeps whatever the assistant had, so detaching a knowledge base
+      // needs an explicit empty list. Our assistants have no other tools (checked 2026-10-20).
+      tools: spec.knowledgeBucket
+        ? [{ type: "retrieval", retrieval: { bucket_ids: [spec.knowledgeBucket], max_num_results: KNOWLEDGE_RESULTS } }]
+        : [],
       enabled_features: ["telephony"],
       privacy_settings: { data_retention: true },
       // Calls are recorded by our answer/dial commands. The assistant's own recording is on by
@@ -155,6 +165,20 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
       `/ai/conversations?metadata->call_control_id=eq.${encodeURIComponent(ref.callControlId)}&limit=1`,
     );
     return res.data[0]?.id ?? null;
+  }
+
+  const storage = createStorageClient(cfg.apiKey);
+
+  /**
+   * Per-file statuses aren't enumerated in the docs. In the portal spike the status stayed blank for
+   * files that were embedded (docs/telnyx-api-notes.md §15), so only explicit progress words mean
+   * "still processing"; a file that is listed with any other status is done.
+   */
+  function toEmbeddingStatus(status: string | undefined): EmbeddingStatus {
+    const s = (status ?? "").toLowerCase();
+    if (/fail|error/.test(s)) return "failed";
+    if (/queue|pending|process|progress|running/.test(s)) return "processing";
+    return "ready";
   }
 
   async function listRecordings(ref: CallRef) {
@@ -301,6 +325,47 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
 
     async deleteAssistant(assistantId) {
       await api("DELETE", `/ai/assistants/${encodeURIComponent(assistantId)}?hard_delete=true`);
+    },
+
+    createBucket: (bucket) => storage.createBucket(bucket),
+
+    async enableEmbedding(bucket) {
+      await api("POST", "/ai/embeddings", { bucket_name: bucket });
+    },
+
+    putObject: (bucket, key, body, contentType) => storage.putObject(bucket, key, body, contentType),
+    listObjects: (bucket) => storage.listObjects(bucket),
+    deleteObject: (bucket, key) => storage.deleteObject(bucket, key),
+
+    async embeddingStatuses(bucket) {
+      try {
+        const res = await api<{ data: { filename: string; status?: string }[] }>("GET", `/ai/embeddings/buckets/${encodeURIComponent(bucket)}`);
+        return new Map(res.data.map((f) => [f.filename, toEmbeddingStatus(f.status)]));
+      } catch (err) {
+        // Nothing embedded yet.
+        if (err instanceof TelnyxApiError && err.status === 404) return new Map();
+        throw err;
+      }
+    },
+
+    async crawlUrl(bucket, url) {
+      const res = await api<{ data: { task_id: string } }>("POST", "/ai/embeddings/url", { url, bucket_name: bucket });
+      return { taskId: res.data.task_id };
+    },
+
+    async getCrawlStatus(taskId) {
+      const res = await api<{ data: { status: string } }>("GET", `/ai/embeddings/${encodeURIComponent(taskId)}`);
+      const s = res.data.status;
+      return (["success", "partial_success", "failure"].includes(s) ? s : "processing") as CrawlStatus;
+    },
+
+    async deleteBucket(bucket) {
+      try {
+        await api("DELETE", `/ai/embeddings/buckets/${encodeURIComponent(bucket)}`);
+      } catch (err) {
+        if (!(err instanceof TelnyxApiError && err.status === 404)) throw err;
+      }
+      await storage.deleteBucket(bucket);
     },
 
     async dial({ from, to, clientState }) {

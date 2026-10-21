@@ -92,6 +92,8 @@ export const config = {
      * an unregistered (non-10DLC) carrier fee of ~$0.012; 2¢ stays above the worst case.
      */
     smsInboundPerPartCents: int("PRICE_SMS_INBOUND_PER_PART_CENTS", 2),
+    /** One-time charge per knowledge-base source, any type (SPEC §18.2). Embedding a typical source costs Telnyx cents. */
+    knowledgeSourceCents: int("PRICE_KNOWLEDGE_SOURCE_CENTS", 100),
     minTopupCents: int("MIN_TOPUP_CENTS", 1000),
   },
 
@@ -123,6 +125,19 @@ export const config = {
     get inboundSms() {
       return config.telnyx.mode !== "live" || Boolean(config.telnyx.messagingProfileId);
     },
+    /** Per-agent knowledge bases (SPEC §18). Off by default in live mode. KNOWLEDGE_BASE=on|off. */
+    get knowledgeBase() {
+      const v = process.env.KNOWLEDGE_BASE;
+      return v ? v === "on" : config.telnyx.mode !== "live";
+    },
+    /**
+     * Website URLs as knowledge sources. A Telnyx crawl can't be limited or cancelled, so this stays
+     * off in live mode until Telnyx confirms a crawl has a ceiling (SPEC §18.4). KNOWLEDGE_BASE_URLS=on|off.
+     */
+    get knowledgeUrls() {
+      const v = process.env.KNOWLEDGE_BASE_URLS;
+      return config.features.knowledgeBase && (v ? v === "on" : config.telnyx.mode !== "live");
+    },
   },
 
   limits: {
@@ -133,6 +148,17 @@ export const config = {
     // leave headroom for the other form fields and multipart overhead.
     cloneSampleBytes: 4.4 * 1024 * 1024,
     concurrentCalls: 1,
+    /** Knowledge sources per user, across all agents (SPEC §18.2). */
+    knowledgeSources: 5,
+    /** Sources a user can add in any 24 hours; deleting one doesn't give it back. */
+    knowledgeAddsPerDay: 5,
+    knowledgeTextChars: 20_000,
+    /** TXT / MD files, in characters: about $0.75 to embed at the most. */
+    knowledgeFileChars: 500_000,
+    knowledgePdfBytes: 4 * 1024 * 1024,
+    /** A crawl that brings in more than this fails and its pages are deleted. */
+    knowledgeCrawlPages: 50,
+    knowledgeCrawlBytes: 4 * 1024 * 1024,
   },
 };
 

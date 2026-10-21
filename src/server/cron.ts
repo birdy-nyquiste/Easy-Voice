@@ -7,6 +7,7 @@ import { stored } from "@/lib/stored-text";
 import { resyncStaleAgents } from "./agents";
 import { purgeCallContent } from "./calls";
 import { fetchCallResults } from "./calls/results";
+import { runKnowledgeJobs } from "./knowledge";
 import { enablePendingInboundSms, purgeExpiredMessages } from "./messages";
 import { chargeNumberRenewals, refreshPendingNumbers, releaseNumber } from "./numbers";
 
@@ -14,6 +15,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Daily maintenance: renewals, grace-period releases, retention purge, stuck orders, texting setup. */
 export async function runDailyJobs(now = new Date()) {
+  // First, so agents whose knowledge base changed are caught up by the resync below.
+  await runKnowledgeJobs();
   const resynced = await resyncStaleAgents();
   await refreshPendingNumbers();
   const renewed = await chargeNumberRenewals(now);
