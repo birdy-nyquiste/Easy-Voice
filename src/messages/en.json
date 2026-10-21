@@ -264,7 +264,7 @@
     "fileHint": "TXT or MD up to {chars, number} characters, or a PDF under {size, number} MB. Scanned PDFs can't be read.",
     "addUrl": "Add a website",
     "urlLabel": "Web address",
-    "urlHint": "The page and pages it links to on the same site are read. Sites with more than {pages} pages fail and aren't refunded. One website per agent.",
+    "urlHint": "The page and pages it links to on the same site are read, which can take over an hour. Sites with more than {size, number} MB of text fail and aren't refunded. One website per agent.",
     "addFor": "Add for {price}"
   },
   "voices": {

@@ -214,7 +214,7 @@ describe("assistant config", () => {
 });
 
 describe("LLM catalog", () => {
-  it("offers recommended, priced models up to the output price cap", () => {
+  it("offers recommended, priced models up to the output price cap, except ones that need our own key", () => {
     expect(toOfferedModels(MOCK_MODELS).map((m) => m.id)).toEqual([
       "anthropic/claude-haiku-4-5",
       "zai-org/GLM-5.3-Flash",
@@ -343,16 +343,17 @@ describe("knowledge storage", () => {
     expect(await provider.listObjects("ev-kb-abc")).toEqual([]);
   });
 
-  it("lists objects across pages", async () => {
+  it("lists objects across pages, with when each was last written", async () => {
+    const at = "2026-10-21T21:05:12.000Z";
     const page = (keys: string[], next?: string) =>
-      `<ListBucketResult>${keys.map((k) => `<Contents><Key>${k}</Key><Size>10</Size></Contents>`).join("")}` +
+      `<ListBucketResult>${keys.map((k) => `<Contents><Key>${k}</Key><LastModified>${at}</LastModified><Size>10</Size></Contents>`).join("")}` +
       `<IsTruncated>${next ? "true" : "false"}</IsTruncated>${next ? `<NextContinuationToken>${next}</NextContinuationToken>` : ""}</ListBucketResult>`;
     const fetchMock = vi.fn(async (url: string) => new Response(url.includes("continuation-token") ? page(["depth-4-1.txt"]) : page(["src/a.txt", "depth-4-0.txt"], "t2")));
     vi.stubGlobal("fetch", fetchMock);
     expect(await provider.listObjects("ev-kb-abc")).toEqual([
-      { key: "src/a.txt", sizeBytes: 10 },
-      { key: "depth-4-0.txt", sizeBytes: 10 },
-      { key: "depth-4-1.txt", sizeBytes: 10 },
+      { key: "src/a.txt", sizeBytes: 10, modifiedAt: new Date(at) },
+      { key: "depth-4-0.txt", sizeBytes: 10, modifiedAt: new Date(at) },
+      { key: "depth-4-1.txt", sizeBytes: 10, modifiedAt: new Date(at) },
     ]);
   });
 });

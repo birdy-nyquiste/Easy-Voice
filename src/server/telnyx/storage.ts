@@ -108,7 +108,11 @@ export function createStorageClient(apiKey: string) {
           throw err;
         }
         for (const item of xmlValues(xml, "Contents")) {
-          out.push({ key: unescapeXml(xmlValues(item, "Key")[0] ?? ""), sizeBytes: Number(xmlValues(item, "Size")[0] ?? 0) });
+          out.push({
+            key: unescapeXml(xmlValues(item, "Key")[0] ?? ""),
+            sizeBytes: Number(xmlValues(item, "Size")[0] ?? 0),
+            modifiedAt: new Date(xmlValues(item, "LastModified")[0] ?? 0),
+          });
         }
         token = xmlValues(xml, "IsTruncated")[0] === "true" ? unescapeXml(xmlValues(xml, "NextContinuationToken")[0] ?? "") : undefined;
       } while (token);

@@ -156,9 +156,18 @@ export const config = {
     /** TXT / MD files, in characters: about $0.75 to embed at the most. */
     knowledgeFileChars: 500_000,
     knowledgePdfBytes: 4 * 1024 * 1024,
-    /** A crawl that brings in more than this fails and its pages are deleted. */
-    knowledgeCrawlPages: 50,
+    /**
+     * A crawl that brings in more text than this fails and its pages are deleted. Pages arrive
+     * concatenated in ~2 MB chunks, so the number of objects says nothing about the number of pages.
+     */
     knowledgeCrawlBytes: 4 * 1024 * 1024,
+    /**
+     * A crawl is taken to be finished once nothing has been written for this long: Telnyx never says
+     * when one ends, and a live crawl wrote again after 10+ quiet minutes (docs/telnyx-api-notes.md §17).
+     */
+    get knowledgeCrawlQuietMs() {
+      return config.telnyx.mode === "live" ? 60 * 60 * 1000 : 5000;
+    },
   },
 };
 

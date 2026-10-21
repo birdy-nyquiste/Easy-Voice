@@ -18,6 +18,7 @@ import { failureColumns, stored, type StoredText } from "@/lib/stored-text";
 import { agentFingerprint, DELETED_SOURCE, desiredKnowledge, resyncStaleAgents, syncAgentQuietly } from "./agents";
 import { chargePurchase, refundPurchase, type Purchase } from "./billing/ledger";
 import { voiceProvider } from "./telnyx";
+import type { StoredObject } from "./telnyx/types";
 
 /**
  * Per-agent knowledge bases (SPEC §18): one provider storage bucket per agent that the assistant
@@ -46,6 +47,20 @@ function objectKey(sourceId: string, ext: "txt" | "pdf"): string {
 const objectKeys = (sourceId: string) => [objectKey(sourceId, "txt"), objectKey(sourceId, "pdf")];
 
 const isCrawledPage = (key: string) => !key.startsWith(OWN_PREFIX);
+
+async function crawledPages(bucket: string): Promise<StoredObject[]> {
+  return (await voiceProvider().listObjects(bucket)).filter((o) => isCrawledPage(o.key));
+}
+
+/**
+ * Whether a crawl has gone quiet: nothing written since its submission or its newest page for the
+ * quiet period. Telnyx reports a crawl finished as soon as it starts and never says when it ends
+ * (docs/telnyx-api-notes.md §17), so this is the only sign a crawl is done.
+ */
+function crawlIsQuiet(s: Pick<KnowledgeSource, "createdAt">, pages: StoredObject[]): boolean {
+  const lastWrite = Math.max(s.createdAt.getTime(), ...pages.map((p) => p.modifiedAt.getTime()));
+  return Date.now() - lastWrite >= config.limits.knowledgeCrawlQuietMs;
+}
 
 type SourceType = KnowledgeSource["type"];
 
@@ -299,13 +314,13 @@ const scoped = (scope: Scope) => (scope.agentId ? eq(knowledgeSources.agentId, s
 const isStuck = (s: KnowledgeSource) => Date.now() - s.createdAt.getTime() > STUCK_MS;
 
 /**
- * Whether a website source's crawl may still write pages: its task is running, or it is being
- * submitted (no task id yet, and recent enough that the submission may still succeed).
+ * Whether a website source's crawl may still write pages into the bucket: it hasn't gone quiet, or
+ * it is being submitted (no task id yet, and recent enough that the submission may still succeed).
  */
-async function crawlMayWrite(s: Pick<KnowledgeSource, "type" | "crawlTaskId" | "createdAt">): Promise<boolean> {
+async function crawlMayWrite(s: Pick<KnowledgeSource, "type" | "crawlTaskId" | "createdAt">, bucket: string): Promise<boolean> {
   if (s.type !== "url") return false;
   if (!s.crawlTaskId) return Date.now() - s.createdAt.getTime() < STUCK_MS;
-  return (await voiceProvider().getCrawlStatus(s.crawlTaskId)) === "processing";
+  return !crawlIsQuiet(s, await crawledPages(bucket));
 }
 
 /** Settle processing sources from the provider's embedding and crawl status. */
@@ -342,20 +357,15 @@ async function settleCrawl(s: KnowledgeSource, bucket: string, agentName: string
     if (isStuck(s)) await failSource(s, agentName, stored("knowledgeUploadFailed"));
     return;
   }
-  const provider = voiceProvider();
-  const status = await provider.getCrawlStatus(s.crawlTaskId);
-  if (status === "processing") return;
-  // A crawl can't be limited or cancelled, so its size is checked once it has finished.
-  const pages = (await provider.listObjects(bucket)).filter((o) => isCrawledPage(o.key));
+  const pages = await crawledPages(bucket);
+  // A crawl can't be limited or cancelled, so its size is checked once it has gone quiet.
+  if (!crawlIsQuiet(s, pages)) return;
   const bytes = pages.reduce((sum, p) => sum + p.sizeBytes, 0);
-  const removePages = async () => {
-    for (const p of pages) await provider.deleteObject(bucket, p.key);
-  };
-  if (status === "failure" || pages.length === 0) {
-    await removePages();
+  if (pages.length === 0) {
     await failSource(s, agentName, stored("knowledgeUrlUnreadable"));
-  } else if (pages.length > config.limits.knowledgeCrawlPages || bytes > config.limits.knowledgeCrawlBytes) {
-    await removePages();
+  } else if (bytes > config.limits.knowledgeCrawlBytes) {
+    const provider = voiceProvider();
+    for (const p of pages) await provider.deleteObject(bucket, p.key);
     // Not refunded: the provider already charged for embedding these pages.
     await failSource(s, agentName, stored("knowledgeSiteTooLarge"), false);
   } else {
@@ -387,7 +397,7 @@ export async function cleanUpKnowledge(scope: Scope = {}): Promise<void> {
         .from(knowledgeSources)
         .where(and(eq(knowledgeSources.agentId, base.agentId), eq(knowledgeSources.type, "url")));
       // A running crawl would keep writing pages into the bucket; wait for it to finish.
-      if (await someAsync(crawls, crawlMayWrite)) continue;
+      if (await someAsync(crawls, (c) => crawlMayWrite(c, base.bucket))) continue;
       // Always, even if embedding was never recorded: the bucket may exist anyway. Both steps
       // succeed when there is nothing to delete.
       for (const o of await provider.listObjects(base.bucket)) await provider.deleteObject(base.bucket, o.key);
@@ -411,7 +421,7 @@ export async function cleanUpKnowledge(scope: Scope = {}): Promise<void> {
     if (baseStatus === "deleting" || tornDown.has(s.agentId)) continue;
     try {
       if (s.type === "url") {
-        if (await crawlMayWrite(s)) continue;
+        if (await crawlMayWrite(s, bucket)) continue;
         for (const o of await provider.listObjects(bucket)) if (isCrawledPage(o.key)) await provider.deleteObject(bucket, o.key);
       } else {
         for (const key of objectKeys(s.id)) await provider.deleteObject(bucket, key);

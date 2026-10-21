@@ -7,6 +7,12 @@ import type { LlmModel } from "./types";
  */
 export const MAX_OUTPUT_PRICE_PER_M = 15;
 
+/**
+ * Providers whose models Telnyx only runs with the customer's own API key (`llm_api_key_ref`),
+ * which we don't have: an assistant on one of these is rejected on save (verified 2026-10-21).
+ */
+const BRING_YOUR_OWN_KEY = ["google/"];
+
 export interface CatalogModel {
   id: string;
   recommended_for_assistants?: boolean;
@@ -19,6 +25,7 @@ export function toOfferedModels(catalog: CatalogModel[]): LlmModel[] {
       const input = Number(m.pricing?.input);
       const output = Number(m.pricing?.output);
       if (!m.recommended_for_assistants || m.pricing?.unit !== "1M_tokens") return [];
+      if (BRING_YOUR_OWN_KEY.some((prefix) => m.id.startsWith(prefix))) return [];
       if (!Number.isFinite(input) || !Number.isFinite(output) || output > MAX_OUTPUT_PRICE_PER_M) return [];
       return [{ id: m.id, name: modelName(m.id), inputPricePerM: input, outputPricePerM: output }];
     })
@@ -50,5 +57,6 @@ export const MOCK_MODELS: CatalogModel[] = [
   { id: "anthropic/claude-haiku-4-5", recommended_for_assistants: true, pricing: { input: "1.000000", output: "5.000000", unit: "1M_tokens" } },
   { id: "openai/gpt-5.6-sol", recommended_for_assistants: true, pricing: { input: "5.000000", output: "30.000000", unit: "1M_tokens" } },
   { id: "google/gemini-2.5-flash", recommended_for_assistants: true, pricing: {} },
+  { id: "google/gemini-3.7-flash", recommended_for_assistants: true, pricing: { input: "0.600000", output: "0.600000", unit: "1M_tokens" } },
   { id: "deepseek-ai/DeepSeek-V4-Flash-0731", recommended_for_assistants: false, pricing: { input: "0.13", output: "0.26", unit: "1M_tokens" } },
 ];

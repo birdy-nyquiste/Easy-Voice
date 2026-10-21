@@ -92,9 +92,8 @@ export type EmbeddingStatus = "processing" | "ready" | "failed";
 export interface StoredObject {
   key: string;
   sizeBytes: number;
+  modifiedAt: Date;
 }
-
-export type CrawlStatus = "processing" | "success" | "partial_success" | "failure";
 
 export interface DialResult {
   callControlId: string;
@@ -230,9 +229,11 @@ export interface VoiceProvider {
   deleteObject(bucket: string, key: string): Promise<void>;
   /** Embedding status by object key; objects not listed yet are still processing. */
   embeddingStatuses(bucket: string): Promise<Map<string, EmbeddingStatus>>;
-  /** Crawl a website into the bucket (same-domain pages, embedded as they arrive). */
+  /**
+   * Crawl a website into the bucket (same-domain pages, embedded as they arrive). There is no way to
+   * tell when a crawl has finished: its task reports success at once (docs/telnyx-api-notes.md §17).
+   */
   crawlUrl(bucket: string, url: string): Promise<{ taskId: string }>;
-  getCrawlStatus(taskId: string): Promise<CrawlStatus>;
   /** Turn embedding off, then delete the (empty) bucket. Succeeds if it is already gone. */
   deleteBucket(bucket: string): Promise<void>;
 

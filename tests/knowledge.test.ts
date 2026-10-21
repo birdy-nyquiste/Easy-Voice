@@ -26,6 +26,7 @@ const price = config.pricing.knowledgeSourceCents;
 beforeEach(async () => {
   await resetDb();
   mockKnowledge.delayMs = 0;
+  crawlQuietMs(0);
 });
 afterEach(() => {
   Object.assign(mockKnowledge, knobs);
@@ -33,6 +34,11 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
 });
+
+/** How long a crawl must be quiet before it counts as finished. */
+function crawlQuietMs(ms: number) {
+  vi.spyOn(config.limits, "knowledgeCrawlQuietMs", "get").mockReturnValue(ms);
+}
 
 const text = (title = "Hours") => ({ title, text: "We open at 7:15 am on weekdays." });
 
@@ -64,7 +70,7 @@ describe("adding sources", () => {
     expect(ready.status).toBe("ready");
 
     const bucket = knowledgeBucketName(agent.id);
-    expect(await mockProvider.listObjects(bucket)).toEqual([{ key: `src/${s.id}.txt`, sizeBytes: expect.any(Number) }]);
+    expect(await mockProvider.listObjects(bucket)).toEqual([{ key: `src/${s.id}.txt`, sizeBytes: expect.any(Number), modifiedAt: expect.any(Date) }]);
     const last = specs.at(-1)!;
     expect(last.knowledgeBucket).toBe(bucket);
     expect(last.instructions).toContain(KNOWLEDGE_RULES.reference);
@@ -99,7 +105,7 @@ describe("adding sources", () => {
     const long = "a".repeat(config.limits.knowledgeFileChars + 1);
     await expect(addFileSource(user.id, agent.id, new File([long], "big.md"))).rejects.toThrow(/characters/);
     const md = await addFileSource(user.id, agent.id, new File(["# Menu\nTea"], "menu.md"));
-    expect(await mockProvider.listObjects(knowledgeBucketName(agent.id))).toEqual([{ key: `src/${md.id}.txt`, sizeBytes: 10 }]);
+    expect(await mockProvider.listObjects(knowledgeBucketName(agent.id))).toEqual([{ key: `src/${md.id}.txt`, sizeBytes: 10, modifiedAt: expect.any(Date) }]);
     expect(await balance(user.id)).toBe(1000 - config.pricing.knowledgeSourceCents);
   });
 
@@ -176,6 +182,29 @@ describe("website sources", () => {
     await expect(addUrlSource(user.id, agent.id, "https://example.org")).rejects.toThrow(errorText("en", "knowledgeOneUrl"));
   });
 
+  it("waits until the bucket has been quiet, however the crawl task reports, and restarts the wait on a late page", async () => {
+    const { user, agent } = await makeLine(1000);
+    crawlQuietMs(60_000);
+    const s = await addUrlSource(user.id, agent.id, "https://example.com");
+    const bucket = knowledgeBucketName(agent.id);
+    const status = async () => (await db.select().from(knowledgeSources).where(eq(knowledgeSources.id, s.id)))[0].status;
+    await refreshKnowledge();
+    expect(await status()).toBe("processing");
+
+    // Quiet since the pages landed, until one more arrives late.
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 61_000 });
+    try {
+      await mockProvider.putObject(bucket, "depth-1-0.txt", new Blob(["late"], { type: "text/plain" }), "text/plain");
+      await refreshKnowledge();
+      expect(await status()).toBe("processing");
+      vi.setSystemTime(Date.now() + 61_000);
+      await refreshKnowledge();
+      expect(await status()).toBe("ready");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("deletes an oversized crawl without a refund", async () => {
     const { user, agent } = await makeLine(1000);
     const s = await addUrlSource(user.id, agent.id, "https://too-large.example.com");
@@ -193,9 +222,9 @@ describe("website sources", () => {
     expect(await balance(user.id)).toBe(1000);
   });
 
-  it("keeps a website deleted mid-submission until its crawl ends, then removes its pages", async () => {
+  it("keeps a website deleted mid-submission until its crawl goes quiet, then removes its pages", async () => {
     const { user, agent } = await makeLine(1000);
-    mockKnowledge.delayMs = 60_000;
+    crawlQuietMs(60_000);
     const crawl = mockProvider.crawlUrl.bind(mockProvider);
     vi.spyOn(mockProvider, "crawlUrl").mockImplementation(async (bucket, url) => {
       // Deleted before the crawl's task id is recorded.
@@ -207,8 +236,10 @@ describe("website sources", () => {
     const [pending] = await db.select().from(knowledgeSources);
     expect(pending).toMatchObject({ status: "deleting", url: null, crawlTaskId: expect.any(String) });
     expect((await mockProvider.listObjects(knowledgeBucketName(agent.id))).length).toBe(3);
+    await cleanUpKnowledge();
+    expect((await mockProvider.listObjects(knowledgeBucketName(agent.id))).length).toBe(3);
 
-    mockKnowledge.delayMs = 0;
+    crawlQuietMs(0);
     await cleanUpKnowledge();
     expect(await db.select().from(knowledgeSources)).toEqual([]);
     expect(await mockProvider.listObjects(knowledgeBucketName(agent.id))).toEqual([]);

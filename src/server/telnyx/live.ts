@@ -10,7 +10,6 @@ import {
   FeatureNotPermittedError,
   type AssistantSpec,
   type CallRef,
-  type CrawlStatus,
   type EmbeddingStatus,
   type ClonedVoiceResult,
   type LlmModel,
@@ -378,12 +377,6 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
     async crawlUrl(bucket, url) {
       const res = await api<{ data: { task_id: string } }>("POST", "/ai/embeddings/url", { url, bucket_name: bucket });
       return { taskId: res.data.task_id };
-    },
-
-    async getCrawlStatus(taskId) {
-      const res = await api<{ data: { status: string } }>("GET", `/ai/embeddings/${encodeURIComponent(taskId)}`);
-      const s = res.data.status;
-      return (["success", "partial_success", "failure"].includes(s) ? s : "processing") as CrawlStatus;
     },
 
     async deleteBucket(bucket) {

@@ -264,7 +264,7 @@
     "fileHint": "TXT o MD de hasta {chars, number} caracteres, o un PDF de menos de {size, number} MB. Los PDF escaneados no se pueden leer.",
     "addUrl": "Añadir un sitio web",
     "urlLabel": "Dirección web",
-    "urlHint": "Se leen la página y las páginas del mismo sitio a las que enlaza. Los sitios con más de {pages} páginas fallan y no se reembolsan. Un sitio web por agente.",
+    "urlHint": "Se leen la página y las páginas del mismo sitio a las que enlaza, lo que puede tardar más de una hora. Los sitios con más de {size, number} MB de texto fallan y no se reembolsan. Un sitio web por agente.",
     "addFor": "Añadir por {price}"
   },
   "voices": {

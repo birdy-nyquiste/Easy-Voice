@@ -264,7 +264,7 @@
     "fileHint": "TXT hoặc MD tối đa {chars, number} ký tự, hoặc PDF dưới {size, number} MB. Không đọc được PDF dạng ảnh quét.",
     "addUrl": "Thêm website",
     "urlLabel": "Địa chỉ web",
-    "urlHint": "Hệ thống đọc trang này và các trang khác của cùng website mà nó liên kết đến. Website có hơn {pages} trang sẽ thất bại và không được hoàn tiền. Mỗi trợ lý một website.",
+    "urlHint": "Hệ thống đọc trang này và các trang khác của cùng website mà nó liên kết đến, có thể mất hơn một giờ. Website có hơn {size, number} MB văn bản sẽ thất bại và không được hoàn tiền. Mỗi trợ lý một website.",
     "addFor": "Thêm với giá {price}"
   },
   "voices": {

@@ -72,6 +72,10 @@ export function AgentForm({
     <ActionForm action={saveAgentAction} className="space-y-6">
       {agent && <input type="hidden" name="id" value={agent.id} />}
 
+      <div className="flex justify-end">
+        <SubmitButton pendingText={tc("saving")}>{agent ? t("saveChanges") : t("create")}</SubmitButton>
+      </div>
+
       <Section title={t("sectionIdentity")} description={t("sectionIdentityHint")}>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label={tc("name")}>
@@ -193,10 +197,6 @@ export function AgentForm({
           </Field>
         </div>
       </Section>
-
-      <div>
-        <SubmitButton pendingText={tc("saving")}>{agent ? t("saveChanges") : t("create")}</SubmitButton>
-      </div>
     </ActionForm>
   );
 }

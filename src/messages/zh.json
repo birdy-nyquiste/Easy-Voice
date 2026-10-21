@@ -264,7 +264,7 @@
     "fileHint": "TXT 或 MD 最多 {chars, number} 个字符，PDF 需小于 {size, number} MB。扫描版 PDF 无法读取。",
     "addUrl": "添加网站",
     "urlLabel": "网址",
-    "urlHint": "会读取该页面及其链接到的同站页面。超过 {pages} 页的网站会失败且不退款。每个 Agent 一个网站。",
+    "urlHint": "会读取该页面及其链接到的同站页面，可能需要一个多小时。文字超过 {size, number} MB 的网站会失败且不退款。每个 Agent 一个网站。",
     "addFor": "添加（{price}）"
   },
   "voices": {

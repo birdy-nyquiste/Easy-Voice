@@ -121,7 +121,7 @@ export async function KnowledgeSection({ agent }: { agent: Agent }) {
                 <summary className="cursor-pointer text-sm font-medium text-stone-700">{t("addUrl")}</summary>
                 <ActionForm action={addKnowledgeUrlAction} className="mt-3 space-y-3">
                   <input type="hidden" name="agentId" value={agent.id} />
-                  <Field label={t("urlLabel")} hint={t("urlHint", { pages: config.limits.knowledgeCrawlPages })}>
+                  <Field label={t("urlLabel")} hint={t("urlHint", { size: toMegabytes(config.limits.knowledgeCrawlBytes) })}>
                     <input name="url" type="url" required placeholder="https://" className={inputClass} />
                   </Field>
                   <SubmitButton>{t("addFor", { price })}</SubmitButton>
