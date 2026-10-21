@@ -1,6 +1,7 @@
 import { generateKeyPairSync, sign } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createTelnyxProvider } from "@/server/telnyx/live";
+import { DEFAULT_BEHAVIOR } from "@/lib/agent-settings";
+import { createTelnyxProvider, HANGUP_TOOL_DESCRIPTION } from "@/server/telnyx/live";
 import { MOCK_MODELS, toOfferedModels } from "@/server/telnyx/models";
 import { FeatureNotPermittedError } from "@/server/telnyx/types";
 
@@ -121,15 +122,26 @@ describe("call results", () => {
 describe("assistant config", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  const spec = { name: "A", instructions: "i", greeting: "g", language: "en", voiceRef: "Telnyx.KokoroTTS.af_heart", model: "openai/gpt-5.4-mini" } as const;
+  const spec = {
+    name: "A",
+    instructions: "i",
+    greeting: "g",
+    language: "en",
+    voiceRef: "Telnyx.KokoroTTS.af_heart",
+    model: "openai/gpt-5.4-mini",
+    behavior: DEFAULT_BEHAVIOR,
+    variables: {},
+  } as const;
+  const hangup = { type: "hangup", hangup: { description: HANGUP_TOOL_DESCRIPTION } };
+  const sentBodies = (m: ReturnType<typeof vi.fn>) => m.mock.calls.map((c) => JSON.parse(String((c as unknown as [string, RequestInit])[1].body)));
 
   it("turns off the assistant's own recording so each call is recorded once", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "assistant-1" }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     await provider.createAssistant(spec);
     const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body));
-    expect(body.telephony_settings).toEqual({ recording_settings: { enabled: false } });
-    expect(body.dynamic_variables).toEqual({ call_direction: "inbound", call_goal: "" });
+    expect(body.telephony_settings.recording_settings).toEqual({ enabled: false });
+    expect(body.dynamic_variables).toEqual({ call_direction: "inbound", call_goal: "", contact_number: "", current_time: "" });
     expect(body.model).toBe("openai/gpt-5.4-mini");
   });
 
@@ -139,16 +151,50 @@ describe("assistant config", () => {
     await provider.createAssistant({ ...spec, voiceRef: "ElevenLabs.eleven_flash_v2_5.v1", voiceApiKeyRef: "elevenlabs_u_1" });
     await provider.createAssistant(spec);
     const sent = fetchMock.mock.calls.map((c) => JSON.parse(String((c as unknown as [string, RequestInit])[1].body)).voice_settings);
-    expect(sent).toEqual([{ voice: "ElevenLabs.eleven_flash_v2_5.v1", api_key_ref: "elevenlabs_u_1" }, { voice: "Telnyx.KokoroTTS.af_heart" }]);
+    const silence = { type: "predefined_media", value: "silence", volume: 0.5 };
+    expect(sent).toEqual([
+      { voice: "ElevenLabs.eleven_flash_v2_5.v1", api_key_ref: "elevenlabs_u_1", speed: 1, background_audio: silence },
+      { voice: "Telnyx.KokoroTTS.af_heart", voice_speed: 1, background_audio: silence },
+    ]);
   });
 
-  it("always sends tools: the retrieval tool for a knowledge bucket, otherwise none", async () => {
+  it("always sends the full tool list: hangup when the agent ends calls, retrieval for a knowledge bucket", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "assistant-1" }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
+    const noHangup = { ...DEFAULT_BEHAVIOR, endCallWhenDone: false };
     await provider.createAssistant({ ...spec, knowledgeBucket: "ev-kb-abc" });
     await provider.updateAssistant("assistant-1", spec);
-    const sent = fetchMock.mock.calls.map((c) => JSON.parse(String((c as unknown as [string, RequestInit])[1].body)).tools);
-    expect(sent).toEqual([[{ type: "retrieval", retrieval: { bucket_ids: ["ev-kb-abc"], max_num_results: 3 } }], []]);
+    await provider.updateAssistant("assistant-1", { ...spec, behavior: noHangup });
+    const retrieval = { type: "retrieval", retrieval: { bucket_ids: ["ev-kb-abc"], max_num_results: 3 } };
+    expect(sentBodies(fetchMock).map((b) => b.tools)).toEqual([[hangup, retrieval], [hangup], []]);
+  });
+
+  it("maps the agent's behavior and variables to assistant settings", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "assistant-1" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const behavior = {
+      ...DEFAULT_BEHAVIOR,
+      voiceSpeed: 1.15,
+      backgroundSound: "office",
+      responseTiming: "patient",
+      allowInterruptions: false,
+      greetingInterruptible: false,
+      keyTerms: "Nyquiste, Okafor",
+      maxCallMinutes: 10,
+      silenceHangupSecs: 0,
+    } as const;
+    await provider.createAssistant({ ...spec, behavior, variables: { owner_name: "Alex" } });
+    await provider.updateAssistant("assistant-1", spec);
+    const [custom, defaults] = sentBodies(fetchMock);
+    expect(custom.voice_settings).toMatchObject({ voice_speed: 1.15, background_audio: { value: "office" } });
+    expect(custom.transcription.settings).toEqual({ keyterm: "Nyquiste, Okafor" });
+    expect(custom.interruption_settings).toEqual({ enable: false, disable_greeting_interruption: true, start_speaking_plan: { wait_seconds: 1.2 } });
+    expect(custom.telephony_settings).toEqual({ time_limit_secs: 600, user_idle_timeout_secs: null, recording_settings: { enabled: false } });
+    expect(custom.dynamic_variables.owner_name).toBe("Alex");
+    // Defaults: Telnyx's own turn-taking, 30-minute limit, hang up after a minute of silence, no key terms.
+    expect(defaults.transcription.settings).toEqual({ keyterm: null });
+    expect(defaults.interruption_settings).toEqual({ enable: true, disable_greeting_interruption: false, start_speaking_plan: { wait_seconds: 0.4 } });
+    expect(defaults.telephony_settings).toEqual({ time_limit_secs: 1800, user_idle_timeout_secs: 60, recording_settings: { enabled: false } });
   });
 
   it("stores integration secrets as bearer tokens", async () => {
@@ -214,10 +260,13 @@ describe("per-call variables", () => {
     await provider.answer("cc", "call-1", {
       assistantId: "assistant-1",
       voiceRef: "Telnyx.KokoroTTS.af_heart",
-      variables: { call_direction: "inbound", call_goal: "" },
+      variables: { call_direction: "inbound", call_goal: "", contact_number: "+14155550100", current_time: "now" },
     });
     const body = bodyOf(fetchMock);
-    expect(body.assistant).toEqual({ id: "assistant-1", dynamic_variables: { call_direction: "inbound", call_goal: "" } });
+    expect(body.assistant).toEqual({
+      id: "assistant-1",
+      dynamic_variables: { call_direction: "inbound", call_goal: "", contact_number: "+14155550100", current_time: "now" },
+    });
     expect(body.greeting).toBeUndefined();
   });
 
@@ -227,12 +276,12 @@ describe("per-call variables", () => {
     const res = await provider.startAssistant("cc", {
       assistantId: "assistant-1",
       voiceRef: "x",
-      variables: { call_direction: "outbound", call_goal: "Book a table for 2" },
+      variables: { call_direction: "outbound", call_goal: "Book a table for 2", contact_number: "+14155550100", current_time: "now" },
       greetingOverride: "Hi, this is an AI assistant calling.",
     });
     expect(res.conversationId).toBe("conv-9");
     const body = bodyOf(fetchMock);
-    expect(body.assistant.dynamic_variables).toEqual({ call_direction: "outbound", call_goal: "Book a table for 2" });
+    expect(body.assistant.dynamic_variables).toMatchObject({ call_direction: "outbound", call_goal: "Book a table for 2" });
     expect(body.greeting).toBe("Hi, this is an AI assistant calling.");
   });
 });

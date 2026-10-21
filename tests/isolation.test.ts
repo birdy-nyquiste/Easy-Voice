@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
-import { calls, voices } from "@/db/schema";
+import { agents, calls, voices } from "@/db/schema";
 import { deleteAgent, getUserAgent, listUserAgents, updateAgent } from "@/server/agents";
 import { deleteCallRecord, getRecordingUrl, getUserCall, hangupCall, listUserCalls, startOutboundCall } from "@/server/calls";
 import { assignAgentToNumber, listUserNumbers, releaseNumber } from "@/server/numbers";
@@ -79,6 +79,29 @@ describe("outbound call goal", () => {
     expect(call.goal).toBe("Reschedule my haircut");
     await db.update(calls).set({ status: "completed" }).where(eq(calls.id, call.id));
     await expect(startOutboundCall(user, { agentId: agent.id, to: "4155550101", goal: "x".repeat(1001) })).rejects.toThrow(/under 1000/);
+  });
+});
+
+describe("outbound call variables", () => {
+  it("keeps only values for the agent's ask-on-each-call variables, and skips blank ones", async () => {
+    const { user, agent } = await makeLine(1000);
+    await db
+      .update(agents)
+      .set({
+        variables: [
+          { key: "owner_name", value: "Alex", askPerCall: false },
+          { key: "callback_number", value: "", askPerCall: true },
+          { key: "party_size", value: "2", askPerCall: true },
+        ],
+      })
+      .where(eq(agents.id, agent.id));
+    vi.spyOn(mockProvider, "dial").mockResolvedValue({ callControlId: "cc-vars" });
+    const call = await startOutboundCall(user, {
+      agentId: agent.id,
+      to: "4155550100",
+      variables: { owner_name: "Mallory", callback_number: " +12025550111 ", party_size: "  ", unknown: "x" },
+    });
+    expect(call.variables).toEqual({ callback_number: "+12025550111" });
   });
 });
 

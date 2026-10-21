@@ -15,6 +15,9 @@ export async function startCallAction(_: ActionState, form: FormData): Promise<A
       agentId: String(form.get("agentId")),
       to: String(form.get("to") ?? ""),
       goal: String(form.get("goal") ?? ""),
+      variables: Object.fromEntries(
+        [...form.entries()].flatMap(([k, v]) => (k.startsWith("var.") ? [[k.slice(4), String(v)]] : [])),
+      ),
     });
     callId = call.id;
   });

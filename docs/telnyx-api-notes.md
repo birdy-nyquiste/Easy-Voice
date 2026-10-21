@@ -544,3 +544,30 @@ Confirmed:
 
 Still open: see `docs/telnyx-support-questions-knowledge-base.md` (retention after 30 days, vector deletion, crawl
 limits and billing, behaviour with an empty bucket, retrieval during calls on each model).
+
+## 16. Assistant behavior fields and variables — checked live 2026-10-21
+
+Probe: a throwaway assistant created with the fields below, updated, read back, then hard-deleted (its TeXML app
+went with it: `GET /texml_applications/{id}` answered 404 afterwards). Portal tour of the same account for context.
+
+- **Accepted and echoed back as sent:** `voice_settings.voice_speed` (on KokoroTTS and Ultra voices),
+  `voice_settings.background_audio {type: "predefined_media", value: "silence"|"office", volume}`,
+  `transcription.settings.keyterm` (comma-separated string), `interruption_settings {enable,
+  disable_greeting_interruption, start_speaking_plan.wait_seconds}`, `telephony_settings.time_limit_secs`,
+  `telephony_settings.user_idle_timeout_secs` (and `null` clears it), `transcription.settings.keyterm: null` (sent
+when an agent has no key terms), custom keys in `dynamic_variables`.
+- **`voice_speed` isn't range-checked:** 1.6 was accepted. We clamp to 0.8–1.2 ourselves. Whether every voice model
+  honors it is only provable on a call.
+- **Hangup tool:** `{"type": "hangup", "hangup": {"description": "…"}}`. Telnyx gives each inline tool a
+  `tool_id`; sending the full `tools` list again replaces them (one hangup tool after an update, with a new id).
+- **Variables in chat (`POST /ai/assistants/{id}/chat`):** `{{telnyx_current_date}}`, `{{telnyx_current_weekday}}`
+  and `{{telnyx_current_time}}` resolved (UTC: `2026-10-21T14:48:29Z`). A custom key with a default in the assistant's
+  `dynamic_variables` did **not** resolve, nor did `{{telnyx_end_user_target}}`. So we pass every value explicitly on
+  `answer` / `ai_assistant_start`, and fill in the other party's number (`contact_number`) and local time
+  (`current_time`) ourselves.
+- **Time zones:** `{{telnyx_current_time_<IANA zone>}}` and the `date` filter exist (prose docs); the shorthand
+  variables are UTC.
+- **Templates are portal-only.** The portal offers 30 (Blank, healthcare, sales, scheduling, collections, routing,
+  multilingual, video); there is no template endpoint. Its section list: Agent, Voice, Avatar, Workflow,
+  Integrations, Analysis, Calling, Messaging, Widget, Observability, Simulation, Advanced.
+

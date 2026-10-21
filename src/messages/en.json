@@ -139,19 +139,99 @@
     "chooseVoice": "Choose a voice…",
     "voiceWithGender": "{name} ({gender})",
     "yourClones": "Your cloned voices",
-    "models": "Models",
-    "stt": "Speech recognition",
     "llm": "Language model",
-    "tts": "Text-to-speech",
-    "setByVoice": " · set by the voice",
-    "modelsHint": "The language model decides what the agent says. Calls cost the same with any model.",
     "defaultModel": "{name} (default)",
     "greeting": "Greeting",
     "greetingHint": "The first thing the agent says when answering. A recording notice (\"{noticeEn}\" / \"{noticeZh}\") is added automatically. On calls the agent places, it opens with \"{outboundEn}\" / \"{outboundZh}\" instead.",
     "instructions": "Instructions",
-    "instructionsHint": "How the agent should behave on calls. Use <code>'{{'call_direction'}}'</code> (inbound or outbound) and <code>'{{'call_goal'}}'</code> (what you ask for when placing a call).",
+    "instructionsHint": "How the agent should behave on calls. Insert variables to fill in details for each call.",
     "saveChanges": "Save changes",
-    "create": "Create agent"
+    "create": "Create agent",
+    "sectionIdentity": "Identity",
+    "sectionIdentityHint": "Who answers, and how it sounds.",
+    "sectionInstructions": "Instructions",
+    "sectionInstructionsHint": "What the agent says and does on calls.",
+    "sectionConversation": "Conversation",
+    "sectionConversationHint": "How the agent handles the back-and-forth.",
+    "sectionEnding": "Ending calls",
+    "sectionEndingHint": "When a call stops.",
+    "speechModel": "Speech model: {name}.",
+    "voiceSpeed": "Speaking speed",
+    "voiceSpeedHint": "1.00× is the voice's normal pace.",
+    "speedValue": "{speed}×",
+    "backgroundSound": "Background sound",
+    "backgroundNone": "None",
+    "backgroundOffice": "Office",
+    "greetingPlaceholder": "Hi, you've reached my assistant. How can I help?",
+    "instructionsPlaceholder": "Describe who the agent is, what it should do on calls, and what it must never do.",
+    "variables": "Variables",
+    "variablesHint": "Write <code>'{{'name'}}'</code> in the greeting or instructions, and it's replaced with the value when each call starts.",
+    "builtIn": {
+      "call_direction": "inbound or outbound",
+      "call_goal": "what you ask for when placing a call",
+      "contact_number": "the other person's number: who called, or who the agent is calling",
+      "current_time": "the date and time the call starts, in the time zone below"
+    },
+    "variableName": "Name",
+    "variableValue": "Value",
+    "variableValuePlaceholder": "e.g. Alex",
+    "variableValueOptional": "Default (optional)",
+    "askPerCall": "Ask on each call",
+    "askPerCallHint": "Ask on each call: you fill it in when placing a call. The value here is used if you leave it blank.",
+    "removeVariable": "Remove",
+    "addVariable": "Add variable",
+    "insertVariable": "Insert variable",
+    "timeZone": "Time zone",
+    "timeZoneHint": "Used for <code>'{{'current_time'}}'</code>.",
+    "llmHint": "The language model decides what the agent says. Calls cost the same with any model.",
+    "responseTiming": "Response timing",
+    "timingQuick": "Quick: replies right away",
+    "timingBalanced": "Balanced: waits a moment",
+    "timingPatient": "Patient: gives callers time to finish",
+    "allowInterruptions": "Callers can interrupt the agent",
+    "greetingInterruptible": "Callers can interrupt the greeting",
+    "greetingInterruptibleHint": "Turn off to make sure the recording notice is always heard in full.",
+    "keyTerms": "Key terms",
+    "keyTermsHint": "Names and words the agent should recognize, separated by commas. Speech recognition: {name}.",
+    "keyTermsPlaceholder": "Nyquiste, Dr. Okafor, Wi-Fi",
+    "endCallWhenDone": "End the call when the conversation is done",
+    "endCallWhenDoneHint": "The agent says goodbye and hangs up, instead of waiting for the other person to.",
+    "maxCallLength": "Maximum call length",
+    "minutes": "{count, plural, one {# minute} other {# minutes}}",
+    "silenceHangup": "Hang up after silence",
+    "silenceHangupHint": "If nobody speaks for this long. Keep it off for calls that may be put on hold.",
+    "afterSeconds": "After {count} seconds",
+    "never": "Never",
+    "undefinedVariables": "The agent will read {names} as written, because no variable fills it in. Add it under Variables or fix the spelling."
+  },
+  "agentTemplates": {
+    "pick": "Pick a starting point. You can change everything before you create the agent.",
+    "startingFrom": "Starting from: {name}",
+    "change": "Change template",
+    "blank": {
+      "name": "Blank",
+      "description": "Start from scratch and write your own greeting and instructions."
+    },
+    "receptionist": {
+      "name": "Personal receptionist",
+      "description": "Takes messages when you can't answer, and makes calls for you."
+    },
+    "screener": {
+      "name": "Call screener",
+      "description": "Turns away sales and spam calls, and takes messages from everyone else."
+    },
+    "booking": {
+      "name": "Booking caller",
+      "description": "Calls businesses to book or change appointments and reservations."
+    },
+    "frontDesk": {
+      "name": "Front desk",
+      "description": "Answers questions about your business from its knowledge base, and takes messages."
+    },
+    "bilingual": {
+      "name": "Bilingual assistant",
+      "description": "Speaks Mandarin first, and replies in English to callers who use it."
+    }
   },
   "knowledge": {
     "title": "Knowledge base",
@@ -295,7 +375,8 @@
     "fetchingTranscript": "Fetching transcript…",
     "noTranscript": "No transcript available.",
     "deleteConfirm": "Delete this call's recording, transcript and summary? Billing records are kept.",
-    "delete": "Delete call record"
+    "delete": "Delete call record",
+    "variableDefault": "Leave blank to use: {value}"
   },
   "messages": {
     "title": "Messages",
@@ -510,7 +591,14 @@
     "knowledgeFileTooLarge": "PDFs must be under {size, number} MB.",
     "knowledgeUrlInvalid": "Enter a full web address starting with http:// or https://.",
     "knowledgeSourceNotFound": "That source no longer exists.",
-    "knowledgeNotFound": "Add a source first."
+    "knowledgeNotFound": "Add a source first.",
+    "keyTermsTooLong": "Key terms are too long. Keep them under 1,000 characters.",
+    "tooManyVariables": "An agent can have at most 10 variables.",
+    "variableKeyInvalid": "“{key}” can't be a variable name. Use lowercase letters, numbers and underscores, starting with a letter.",
+    "variableKeyReserved": "“{key}” is a built-in name. Pick another name for your variable.",
+    "variableKeyDuplicate": "There are two variables named “{key}”.",
+    "variableValueRequired": "Give “{key}” a value, or tick Ask on each call.",
+    "variableValueTooLong": "The value for “{key}” can be at most {max} characters."
   },
   "errorPage": {
     "notFoundTitle": "Page not found",

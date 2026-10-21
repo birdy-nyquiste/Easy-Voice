@@ -1,9 +1,10 @@
 import { createPublicKey, verify } from "node:crypto";
+import { RESPONSE_TIMING } from "@/lib/agent-settings";
 import { config } from "@/lib/config";
 import { stored } from "@/lib/stored-text";
 import { encodeClientState, parseTelnyxEnvelope } from "./events";
 import { toOfferedModels, type CatalogModel } from "./models";
-import { toStockVoices, type CatalogVoice } from "./stock-voices";
+import { isElevenLabsVoice, toStockVoices, type CatalogVoice } from "./stock-voices";
 import { createStorageClient } from "./storage";
 import {
   FeatureNotPermittedError,
@@ -29,6 +30,9 @@ const BASE = "https://api.telnyx.com/v2";
 const SIGNATURE_TOLERANCE_SEC = 300;
 /** Passages the retrieval tool returns per lookup (the portal's default). */
 const KNOWLEDGE_RESULTS = 3;
+/** Shown to the model as the hangup tool's description: when it may end the call. */
+export const HANGUP_TOOL_DESCRIPTION =
+  "End the call once the conversation is complete: the caller has said goodbye, or there is nothing left to do and you have said goodbye.";
 /** 100 messages per page; a 30-minute call stays well under this. */
 const MAX_MESSAGE_PAGES = 10;
 // DER prefix that wraps a raw 32-byte Ed25519 key as SPKI.
@@ -99,28 +103,51 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
   const recordOpts = { record: "record-from-answer", record_format: "mp3", record_channels: "dual" };
 
   function assistantBody(spec: AssistantSpec) {
+    const b = spec.behavior;
+    const tools: Record<string, unknown>[] = [];
+    if (b.endCallWhenDone) tools.push({ type: "hangup", hangup: { description: HANGUP_TOOL_DESCRIPTION } });
+    if (spec.knowledgeBucket) {
+      tools.push({ type: "retrieval", retrieval: { bucket_ids: [spec.knowledgeBucket], max_num_results: KNOWLEDGE_RESULTS } });
+    }
     return {
       name: spec.name,
       instructions: spec.instructions,
       greeting: spec.greeting,
       model: spec.model,
-      voice_settings: { voice: spec.voiceRef, ...(spec.voiceApiKeyRef ? { api_key_ref: spec.voiceApiKeyRef } : {}) },
+      voice_settings: {
+        voice: spec.voiceRef,
+        ...(spec.voiceApiKeyRef ? { api_key_ref: spec.voiceApiKeyRef } : {}),
+        // ElevenLabs voices take their own `speed`; Telnyx voices use voice_speed.
+        ...(isElevenLabsVoice(spec.voiceRef) ? { speed: b.voiceSpeed } : { voice_speed: b.voiceSpeed }),
+        background_audio: { type: "predefined_media", value: b.backgroundSound === "office" ? "office" : "silence", volume: 0.5 },
+      },
       transcription: {
         model: cfg.sttModel,
         // "auto" tolerates EN/ZH mixing; fall back to the agent's primary language otherwise.
         language: cfg.sttLanguage === "primary" ? spec.language : cfg.sttLanguage,
+        settings: { keyterm: b.keyTerms || null },
       },
-      dynamic_variables: { call_direction: "inbound", call_goal: "" },
-      // Always sent: an omitted `tools` keeps whatever the assistant had, so detaching a knowledge base
-      // needs an explicit empty list. Our assistants have no other tools (checked 2026-10-20).
-      tools: spec.knowledgeBucket
-        ? [{ type: "retrieval", retrieval: { bucket_ids: [spec.knowledgeBucket], max_num_results: KNOWLEDGE_RESULTS } }]
-        : [],
+      interruption_settings: {
+        enable: b.allowInterruptions,
+        disable_greeting_interruption: !b.greetingInterruptible,
+        start_speaking_plan: { wait_seconds: RESPONSE_TIMING[b.responseTiming] },
+      },
+      // Defaults for the variables we fill in on every call (see assistantStart in calls/events.ts),
+      // plus the agent's own.
+      dynamic_variables: { call_direction: "inbound", call_goal: "", contact_number: "", current_time: "", ...spec.variables },
+      // Always sent: an omitted `tools` keeps whatever the assistant had, so removing a tool needs the
+      // full list. Our assistants have no tools other than these.
+      tools,
       enabled_features: ["telephony"],
       privacy_settings: { data_retention: true },
-      // Calls are recorded by our answer/dial commands. The assistant's own recording is on by
-      // default and produced a second, duplicate recording on outbound calls.
-      telephony_settings: { recording_settings: { enabled: false } },
+      telephony_settings: {
+        time_limit_secs: b.maxCallMinutes * 60,
+        // null clears a timeout set earlier.
+        user_idle_timeout_secs: b.silenceHangupSecs || null,
+        // Calls are recorded by our answer/dial commands. The assistant's own recording is on by
+        // default and produced a second, duplicate recording on outbound calls.
+        recording_settings: { enabled: false },
+      },
       ...(cfg.insightGroupId ? { insight_settings: { insight_group_id: cfg.insightGroupId } } : {}),
     };
   }

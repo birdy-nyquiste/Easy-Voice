@@ -5,7 +5,8 @@ import { agents, calls, phoneNumbers, users, type Agent, type Call } from "@/db/
 import { outcomeColumns, stored, type StoredMessage } from "@/lib/stored-text";
 import { applyLedger, callChargeCents, hasSpendableBalance } from "@/server/billing/ledger";
 import { voiceProvider, type AssistantStart, type CallEvent } from "@/server/telnyx";
-import { OUTBOUND_GREETING } from "@/server/agents";
+import { currentTimeText, readBehavior } from "@/lib/agent-settings";
+import { OUTBOUND_GREETING, variableDefaults } from "@/server/agents";
 import { elevenLabsKeyUsable } from "@/server/elevenlabs-keys";
 import { isElevenLabsVoice } from "@/server/telnyx/stock-voices";
 import { withWebhookDedupe } from "@/server/webhooks";
@@ -60,7 +61,14 @@ function assistantStart(agent: Agent, call: Call): AssistantStart {
   return {
     assistantId: agent.providerAssistantId!,
     voiceRef: agent.voiceRef,
-    variables: { call_direction: call.direction, call_goal: call.goal ?? "" },
+    variables: {
+      ...variableDefaults(agent),
+      ...call.variables,
+      call_direction: call.direction,
+      call_goal: call.goal ?? "",
+      contact_number: outbound ? call.toNumber : call.fromNumber,
+      current_time: currentTimeText(readBehavior(agent.behavior).timeZone),
+    },
     // Inbound calls use the agent's stored greeting (which already includes the recording notice).
     greetingOverride: outbound ? OUTBOUND_GREETING[agent.language] : undefined,
   };

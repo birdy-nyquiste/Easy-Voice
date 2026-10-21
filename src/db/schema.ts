@@ -11,6 +11,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import type { Locale } from "@/i18n/locales";
+import type { AgentBehavior, AgentVariable } from "@/lib/agent-settings";
 import type { Language } from "@/lib/language";
 import type { StoredMessage } from "@/lib/stored-text";
 
@@ -191,6 +192,10 @@ export const agents = pgTable("agents", {
   voiceId: uuid("voice_id").references(() => voices.id),
   /** LLM id; null means the platform default (config.telnyx.llmModel). */
   model: text("model"),
+  /** Call behavior (voice speed, turn-taking, when to hang up…); read with readBehavior(). */
+  behavior: jsonb("behavior").$type<Partial<AgentBehavior>>().notNull().default({}),
+  /** The user's own {{variables}} with default values; read with readVariables(). */
+  variables: jsonb("variables").$type<AgentVariable[]>().notNull().default([]),
   providerAssistantId: text("provider_assistant_id"),
   /** Fingerprint of the platform model settings last pushed to the provider; see platformFingerprint(). */
   syncedConfig: text("synced_config"),
@@ -275,6 +280,8 @@ export const calls = pgTable(
     toNumber: text("to_number").notNull(),
     /** Outbound only: what the user asked the agent to do on this call ({{call_goal}}). */
     goal: text("goal"),
+    /** Outbound only: values the user gave for the agent's ask-on-each-call variables. */
+    variables: jsonb("variables").$type<Record<string, string>>(),
     providerCallControlId: text("provider_call_control_id").unique(),
     providerCallSessionId: text("provider_call_session_id"),
     providerConversationId: text("provider_conversation_id"),

@@ -2,6 +2,9 @@ import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
 import { agents, voices } from "@/db/schema";
+import { MESSAGES } from "@/i18n/messages";
+import { DEFAULT_BEHAVIOR, readBehavior, undefinedVariables } from "@/lib/agent-settings";
+import { AGENT_TEMPLATES, TEMPLATE_IDS } from "@/lib/agent-templates";
 import { config } from "@/lib/config";
 import { errorText } from "@/lib/errors";
 import { createAgent, ENGLISH_ONLY_VOICE_RULE, platformFingerprint, resyncStaleAgents } from "@/server/agents";
@@ -147,5 +150,85 @@ describe("voice cloning switched off", () => {
     const create = vi.spyOn(mockProvider, "createAssistant");
     await expect(createAgent(u.id, { ...input, voice: `clone:${clone.id}` })).rejects.toThrow(CLONING_UNAVAILABLE);
     expect(create).not.toHaveBeenCalled();
+  });
+});
+
+describe("agent behavior and variables", () => {
+  it("defaults to ending calls when done, the 30-minute limit and a one-minute silence timeout", async () => {
+    const u = await makeUser();
+    const create = vi.spyOn(mockProvider, "createAssistant");
+    await createAgent(u.id, input);
+    expect(create.mock.calls[0][0].behavior).toEqual(DEFAULT_BEHAVIOR);
+    expect(DEFAULT_BEHAVIOR).toMatchObject({ endCallWhenDone: true, maxCallMinutes: 30, silenceHangupSecs: 60, responseTiming: "quick" });
+  });
+
+  it("saves behavior, falling back to defaults for values we don't offer", async () => {
+    const u = await makeUser();
+    const create = vi.spyOn(mockProvider, "createAssistant");
+    await createAgent(u.id, {
+      ...input,
+      behavior: { voiceSpeed: "1.1", maxCallMinutes: "10", silenceHangupSecs: "45", endCallWhenDone: false, timeZone: "Mars/Olympus" },
+    });
+    expect(create.mock.calls[0][0].behavior).toMatchObject({ voiceSpeed: 1.1, maxCallMinutes: 10, silenceHangupSecs: 60, endCallWhenDone: false, timeZone: "America/New_York" });
+  });
+
+  it("reads agents saved before a setting existed with its default", () => {
+    expect(readBehavior({ voiceSpeed: 0.9 })).toEqual({ ...DEFAULT_BEHAVIOR, voiceSpeed: 0.9 });
+    expect(readBehavior(null)).toEqual(DEFAULT_BEHAVIOR);
+  });
+
+  it("rejects overly long key terms", async () => {
+    const u = await makeUser();
+    await expect(createAgent(u.id, { ...input, behavior: { keyTerms: "x".repeat(1001) } })).rejects.toThrow(/Key terms are too long/);
+  });
+
+  it("sends the agent's variables as defaults", async () => {
+    const u = await makeUser();
+    const create = vi.spyOn(mockProvider, "createAssistant");
+    await createAgent(u.id, {
+      ...input,
+      variables: [
+        { key: "owner_name", value: "Alex" },
+        { key: "callback_number", value: "", askPerCall: true },
+      ],
+    });
+    expect(create.mock.calls[0][0].variables).toEqual({ owner_name: "Alex", callback_number: "" });
+  });
+
+  it.each([
+    [[{ key: "Owner Name", value: "A" }], /can't be a variable name/],
+    [[{ key: "call_goal", value: "A" }], /built-in name/],
+    [[{ key: "telnyx_x", value: "A" }], /built-in name/],
+    [[{ key: "a", value: "1" }, { key: "a", value: "2" }], /two variables named/],
+    [[{ key: "owner_name", value: "" }], /Give “owner_name” a value/],
+    [Array.from({ length: 11 }, (_, i) => ({ key: `v${i}`, value: "x" })), /at most 10 variables/],
+  ])("rejects invalid variables %#", async (variables, error) => {
+    const u = await makeUser();
+    await expect(createAgent(u.id, { ...input, variables })).rejects.toThrow(error);
+  });
+
+  it("finds variables a script uses that nothing fills in", () => {
+    expect(
+      undefinedVariables(["Hi {{owner_name}}, it's {{ current_time }}", "{{call_goal}} {{telnyx_current_date}} {{ownr_name}}"], [{ key: "owner_name" }]),
+    ).toEqual(["ownr_name"]);
+  });
+});
+
+describe("templates", () => {
+  it.each(TEMPLATE_IDS)("%s only uses variables it defines or that are built in", (id) => {
+    const tpl = AGENT_TEMPLATES[id];
+    expect(undefinedVariables([tpl.greeting, tpl.instructions], tpl.variables)).toEqual([]);
+  });
+
+  it.each(TEMPLATE_IDS)("%s has a name and description", (id) => {
+    expect(MESSAGES.en.agentTemplates[id]).toEqual({ name: expect.any(String), description: expect.any(String) });
+  });
+
+  it("can be saved once its variables are filled in", async () => {
+    const u = await makeUser();
+    const tpl = AGENT_TEMPLATES.booking;
+    const variables = tpl.variables.map((v) => ({ ...v, value: v.askPerCall ? "" : "Alex" }));
+    const a = await createAgent(u.id, { ...input, greeting: tpl.greeting, instructions: tpl.instructions, behavior: tpl.behavior, variables });
+    expect(a.status).toBe("ready");
   });
 });
