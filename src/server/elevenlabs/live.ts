@@ -4,13 +4,26 @@ import { ElevenLabsError, type ElevenLabsClient } from "./types";
 /** ElevenLabs REST adapter. See docs/elevenlabs-notes.md. Auth is the user's key in `xi-api-key`. */
 
 const BASE = "https://api.elevenlabs.io";
+/**
+ * Key checks run inside the call.initiated webhook, which Telnyx gives 10 s: a slow ElevenLabs must
+ * fail fast there (the call then goes ahead). Cloning and speech get longer.
+ */
+const CHECK_TIMEOUT_MS = 3000;
+const REQUEST_TIMEOUT_MS = 30_000;
 
-async function request(apiKey: string, method: string, path: string, body?: FormData | object): Promise<Response> {
+async function request(
+  apiKey: string,
+  method: string,
+  path: string,
+  body?: FormData | object,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<Response> {
   const isForm = body instanceof FormData;
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: { "xi-api-key": apiKey, ...(body && !isForm ? { "Content-Type": "application/json" } : {}) },
     body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw await toError(res, path);
   return res;
@@ -43,8 +56,8 @@ export const liveElevenLabs: ElevenLabsClient = {
   maxCloneSampleBytes: 10 * 1024 * 1024,
 
   async getAccount(apiKey) {
-    const user = (await (await request(apiKey, "GET", "/v1/user")).json()) as { user_id: string };
-    const sub = (await (await request(apiKey, "GET", "/v1/user/subscription")).json()) as {
+    const user = (await (await request(apiKey, "GET", "/v1/user", undefined, CHECK_TIMEOUT_MS)).json()) as { user_id: string };
+    const sub = (await (await request(apiKey, "GET", "/v1/user/subscription", undefined, CHECK_TIMEOUT_MS)).json()) as {
       tier?: string;
       can_use_instant_voice_cloning?: boolean;
     };
@@ -52,7 +65,7 @@ export const liveElevenLabs: ElevenLabsClient = {
   },
 
   async checkKey(apiKey) {
-    await request(apiKey, "GET", "/v1/user");
+    await request(apiKey, "GET", "/v1/user", undefined, CHECK_TIMEOUT_MS);
   },
 
   async cloneVoice(apiKey, { name, language, gender, audio }) {

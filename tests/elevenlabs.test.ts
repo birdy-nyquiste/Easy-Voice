@@ -206,6 +206,16 @@ describe("disconnecting ElevenLabs", () => {
 });
 
 describe("ElevenLabs REST adapter", () => {
+  it("gives up on a slow key check quickly, so it can't hold up answering a call", async () => {
+    // A request that never answers until it is aborted.
+    vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal!.reason));
+    })));
+    const started = Date.now();
+    await expect(liveElevenLabs.checkKey("sk_1")).rejects.toThrow(/timeout/i);
+    expect(Date.now() - started).toBeLessThan(4000);
+  }, 8000);
+
   it("sends the key, reads the account and turns API errors into ElevenLabsError", async () => {
     const fetchMock = vi
       .fn()

@@ -482,6 +482,7 @@
     "outcomeUnreachable": "No se pudo comunicar con ese número.",
     "outcomeEndedEarly": "La llamada terminó antes de conectarse ({cause}).",
     "outcomeNotPlaced": "No se pudo hacer la llamada.",
+    "outcomeStatusLost": "Perdimos el estado de esta llamada, así que no se cobró.",
     "voiceSampleUnusable": "No se pudo usar la muestra. Prueba con una grabación más clara.",
     "voiceCloneFailed": "No se pudo clonar la voz. Prueba con una muestra más clara y más larga.",
     "voiceNeedsVerification": "ElevenLabs quiere verificar esta voz antes de que se pueda usar. Prueba con otra muestra.",

@@ -482,6 +482,7 @@
     "outcomeUnreachable": "无法接通该号码。",
     "outcomeEndedEarly": "通话在接通前结束（{cause}）。",
     "outcomeNotPlaced": "无法拨出该电话。",
+    "outcomeStatusLost": "未能获取这通电话的状态，因此未收费。",
     "voiceSampleUnusable": "该样本无法使用，请换一段更清晰的录音。",
     "voiceCloneFailed": "无法克隆该声音，请使用更清晰、更长的样本。",
     "voiceNeedsVerification": "ElevenLabs 要求先验证该声音才能使用，请换一段样本。",

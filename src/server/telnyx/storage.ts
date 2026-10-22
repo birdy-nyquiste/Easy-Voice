@@ -70,6 +70,7 @@ export function createStorageClient(apiKey: string) {
         ...(opts.contentType ? { "Content-Type": opts.contentType } : {}),
       },
       body: opts.body,
+      signal: AbortSignal.timeout(60_000),
     });
     if (!res.ok) {
       const text = await res.text();

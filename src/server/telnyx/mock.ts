@@ -117,6 +117,10 @@ export const mockProvider: VoiceProvider = {
     return { orderId, status: "success" };
   },
 
+  async findNumber() {
+    return null;
+  },
+
   async releaseNumber() {},
 
   async enableInboundMessaging() {},

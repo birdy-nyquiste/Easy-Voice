@@ -482,6 +482,7 @@
     "outcomeUnreachable": "That number couldn't be reached.",
     "outcomeEndedEarly": "Call ended before connecting ({cause}).",
     "outcomeNotPlaced": "The call could not be placed.",
+    "outcomeStatusLost": "We lost track of this call's status, so it wasn't charged.",
     "voiceSampleUnusable": "The sample couldn't be used. Try a clearer recording.",
     "voiceCloneFailed": "The voice could not be cloned. Try a clearer, longer sample.",
     "voiceNeedsVerification": "ElevenLabs wants this voice verified before it can be used. Try a different sample.",

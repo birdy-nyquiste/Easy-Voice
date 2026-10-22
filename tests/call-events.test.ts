@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
 import { agents, calls, ledgerEntries, users } from "@/db/schema";
 import { showStored } from "@/lib/stored-text";
+import { deleteCallRecord } from "@/server/calls";
 import { handleCallEvent } from "@/server/calls/events";
+import { fetchCallResults } from "@/server/calls/results";
+import { withWebhookDedupe } from "@/server/webhooks";
 import { mockProvider } from "@/server/telnyx/mock";
 import { event, makeLine, makeUser, resetDb } from "./helpers";
 
@@ -225,5 +228,109 @@ describe("outbound calls", () => {
     const vars = vi.mocked(mockProvider.startAssistant).mock.calls[0][1].variables;
     expect(vars).toMatchObject({ owner_name: "Alex", callback_number: "+12025550111", call_direction: "outbound" });
     expect(vars.current_time).toMatch(/GMT\+9/);
+  });
+});
+
+describe("out-of-order and lost events", () => {
+  const t0 = new Date("2026-10-07T10:00:00Z");
+  async function answeredCall() {
+    const line = await makeLine(1000);
+    await handleCallEvent(inbound(line.number.e164));
+    return { ...line, call: await callByCcid("cc-1") };
+  }
+  const answered = (callId: string) => event("call.answered", { callControlId: "cc-1", clientState: callId, occurredAt: t0 });
+  const hangup = (callId: string) =>
+    event("call.hangup", { callControlId: "cc-1", clientState: callId, hangupCause: "normal_clearing", occurredAt: new Date(t0.getTime() + 61_000) });
+  const balance = async (userId: string) => (await db.select().from(users).where(eq(users.id, userId)))[0].balanceCents;
+
+  it("bills a call whose answer is processed after its hangup, once", async () => {
+    const { user, call } = await answeredCall();
+    await handleCallEvent(hangup(call.id));
+    expect((await callByCcid("cc-1")).status).toBe("failed");
+
+    await handleCallEvent(answered(call.id));
+    await handleCallEvent(answered(call.id)); // redelivered with a new event id
+    expect(await callByCcid("cc-1")).toMatchObject({ status: "completed", durationSec: 61, billedCents: 30, outcome: null, resultsFetched: false });
+    expect(await balance(user.id)).toBe(970);
+  });
+
+  it("leaves an outbound call free when its answer is processed after its hangup (its assistant never started)", async () => {
+    const { user, agent, number } = await makeLine(1000);
+    const ccid = "cc-out";
+    const [call] = await db
+      .insert(calls)
+      .values({ userId: user.id, agentId: agent.id, phoneNumberId: number.id, direction: "outbound", fromNumber: number.e164, toNumber: "+12025550199", providerCallControlId: ccid })
+      .returning();
+    await handleCallEvent(event("call.hangup", { callControlId: ccid, clientState: call.id, hangupCause: "normal_clearing", occurredAt: new Date(t0.getTime() + 61_000) }));
+    await handleCallEvent(event("call.answered", { callControlId: ccid, clientState: call.id, occurredAt: t0 }));
+    const [row] = await db.select().from(calls).where(eq(calls.id, call.id));
+    expect(row).toMatchObject({ status: "failed", billedCents: 0 });
+    expect(mockProvider.startAssistant).not.toHaveBeenCalled();
+    expect(await balance(user.id)).toBe(1000);
+  });
+
+  it("settles an answer and a hangup processed at the same moment", async () => {
+    const { user, number, call } = await answeredCall();
+    await Promise.all([handleCallEvent(answered(call.id)), handleCallEvent(hangup(call.id))]);
+    expect(await callByCcid("cc-1")).toMatchObject({ status: "completed", billedCents: 30, endedAt: expect.any(Date) });
+    expect(await balance(user.id)).toBe(970);
+    // The next caller isn't turned away as busy.
+    await handleCallEvent(inbound(number.e164, "cc-2"));
+    expect((await callByCcid("cc-2")).status).toBe("initiated");
+  });
+
+  it("deletes a recording saved after the call record was deleted", async () => {
+    const { user, call } = await answeredCall();
+    await handleCallEvent(answered(call.id));
+    await handleCallEvent(hangup(call.id));
+    const purge = vi.spyOn(mockProvider, "purgeCallData");
+    await deleteCallRecord(user.id, call.id);
+    await handleCallEvent(event("call.recording.saved", { callSessionId: "sess-cc-1" }));
+    expect(purge).toHaveBeenCalledTimes(2);
+    expect((await callByCcid("cc-1")).hasRecording).toBe(false);
+  });
+
+  it("doesn't write results onto a call deleted while they were being fetched", async () => {
+    const { user, call } = await answeredCall();
+    await handleCallEvent(answered(call.id));
+    await handleCallEvent(hangup(call.id));
+    vi.mocked(mockProvider.getCallResults).mockImplementation(async () => {
+      await deleteCallRecord(user.id, call.id);
+      return { transcript: [{ role: "user", text: "secret" }], summary: "secret" };
+    });
+    await fetchCallResults(await callByCcid("cc-1"));
+    expect(await callByCcid("cc-1")).toMatchObject({ transcript: null, summary: null });
+  });
+});
+
+describe("webhook redelivery", () => {
+  it("processes a redelivery that arrives while the first attempt is still running, then skips later ones", async () => {
+    let runs = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const first = withWebhookDedupe("telnyx", "evt-x", "call.hangup", async () => {
+      runs++;
+      await gate;
+    });
+    await withWebhookDedupe("telnyx", "evt-x", "call.hangup", async () => {
+      runs++;
+    });
+    release();
+    await first;
+    await withWebhookDedupe("telnyx", "evt-x", "call.hangup", async () => {
+      runs++;
+    });
+    expect(runs).toBe(2);
+  });
+
+  it("retries an event whose processing failed", async () => {
+    await expect(withWebhookDedupe("stripe", "evt-y", "checkout.session.completed", async () => {
+      throw new Error("db down");
+    })).rejects.toThrow("db down");
+    let ran = false;
+    await withWebhookDedupe("stripe", "evt-y", "checkout.session.completed", async () => {
+      ran = true;
+    });
+    expect(ran).toBe(true);
   });
 });

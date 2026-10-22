@@ -8,6 +8,7 @@ import { isElevenLabsVoice, toStockVoices, type CatalogVoice } from "./stock-voi
 import { createStorageClient } from "./storage";
 import {
   FeatureNotPermittedError,
+  ProviderHttpError,
   type AssistantSpec,
   type CallRef,
   type EmbeddingStatus,
@@ -39,13 +40,25 @@ const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 
 type TelnyxConfig = typeof config.telnyx;
 
-export class TelnyxApiError extends Error {
+/** Long enough for uploads and speech; without one, a hung Telnyx request would hold a webhook open for minutes. */
+const REQUEST_TIMEOUT_MS = 30_000;
+
+export class TelnyxApiError extends ProviderHttpError {
   constructor(
-    public status: number,
+    status: number,
     public body: string,
     path: string,
   ) {
-    super(`Telnyx ${status} on ${path}: ${body.slice(0, 500)}`);
+    super(status, `Telnyx ${status} on ${path}: ${body.slice(0, 500)}`);
+  }
+}
+
+/** For deletes: an object that is already gone counts as deleted. */
+async function ignoreNotFound(p: Promise<unknown>): Promise<void> {
+  try {
+    await p;
+  } catch (err) {
+    if (!(err instanceof TelnyxApiError && err.status === 404)) throw err;
   }
 }
 
@@ -70,6 +83,7 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
         ...(body && !isForm ? { "Content-Type": "application/json" } : {}),
       },
       body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!res.ok) {
       const text = await res.text();
@@ -159,19 +173,22 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
     let numberId: string | undefined;
     const e164 = order.phone_numbers?.[0]?.phone_number;
     if (status === "success" && e164) {
-      // The order item id is not the phone-number resource id; look that up.
-      const list = await api<{ data: { id: string }[] }>(
-        "GET",
-        `/phone_numbers?filter[phone_number]=${encodeURIComponent(e164)}`,
-      );
-      numberId = list.data[0]?.id;
+      // The order item id is not the phone-number resource id; look that up. Until it shows up (or if
+      // the lookup fails) report the order as pending, so it is polled again rather than activated
+      // without an id we could later release.
+      numberId = (await findNumber(e164).catch((err) => console.error("number lookup failed", e164, err))) ?? undefined;
     }
     return {
       orderId: order.id,
-      status,
+      status: status === "success" && !numberId ? "pending" : status,
       numberId,
       failureReason: status === "failure" ? stored("numberOrderStatus", { status: order.status }) : undefined,
     };
+  }
+
+  async function findNumber(e164: string): Promise<string | null> {
+    const list = await api<{ data: { id: string }[] }>("GET", `/phone_numbers?filter[phone_number]=${encodeURIComponent(e164)}`);
+    return list.data[0]?.id ?? null;
   }
 
   function toClone(d: { id: string; status: string; provider_voice_id?: string; model_id?: string }): ClonedVoiceResult {
@@ -259,8 +276,10 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
       return toOrderResult(res.data);
     },
 
+    findNumber,
+
     async releaseNumber(numberId) {
-      await api("DELETE", `/phone_numbers/${encodeURIComponent(numberId)}`);
+      await ignoreNotFound(api("DELETE", `/phone_numbers/${encodeURIComponent(numberId)}`));
     },
 
     async enableInboundMessaging(e164) {
@@ -332,11 +351,7 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
     },
 
     async deleteIntegrationSecret(id) {
-      try {
-        await api("DELETE", `/integration_secrets/${encodeURIComponent(id)}`);
-      } catch (err) {
-        if (!(err instanceof TelnyxApiError && err.status === 404)) throw err;
-      }
+      await ignoreNotFound(api("DELETE", `/integration_secrets/${encodeURIComponent(id)}`));
     },
 
     async createAssistant(spec) {
@@ -380,11 +395,7 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
     },
 
     async deleteBucket(bucket) {
-      try {
-        await api("DELETE", `/ai/embeddings/buckets/${encodeURIComponent(bucket)}`);
-      } catch (err) {
-        if (!(err instanceof TelnyxApiError && err.status === 404)) throw err;
-      }
+      await ignoreNotFound(api("DELETE", `/ai/embeddings/buckets/${encodeURIComponent(bucket)}`));
       await storage.deleteBucket(bucket);
     },
 
@@ -470,9 +481,10 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
     },
 
     async purgeCallData(ref) {
-      for (const r of await listRecordings(ref)) await api("DELETE", `/recordings/${encodeURIComponent(r.id)}`);
+      // Already-deleted objects count as deleted, so a purge that half-succeeded (or ran twice) can finish.
+      for (const r of await listRecordings(ref)) await ignoreNotFound(api("DELETE", `/recordings/${encodeURIComponent(r.id)}`));
       const conversationId = await findConversationId(ref);
-      if (conversationId) await api("DELETE", `/ai/conversations/${encodeURIComponent(conversationId)}`);
+      if (conversationId) await ignoreNotFound(api("DELETE", `/ai/conversations/${encodeURIComponent(conversationId)}`));
     },
 
     async parseWebhook(rawBody, headers) {

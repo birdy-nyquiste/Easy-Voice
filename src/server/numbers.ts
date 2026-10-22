@@ -8,8 +8,15 @@ import { failureColumns, stored, type StoredText } from "@/lib/stored-text";
 import { applyLedger, chargePurchase, refundPurchase, type Purchase } from "./billing/ledger";
 import { enableInboundSms } from "./messages";
 import { voiceProvider } from "./telnyx";
+import { isDefiniteRejection, type NumberOrderResult } from "./telnyx/types";
 
 const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
+/**
+ * A pending number with no order id after this never got an answer from the provider (timeout, lost
+ * response, the server stopped mid-order). It is looked up at the provider: activated if the order
+ * went through, refunded if not.
+ */
+const STUCK_ORDER_MS = 60 * 60 * 1000;
 
 export async function listUserNumbers(userId: string): Promise<PhoneNumber[]> {
   return db
@@ -57,27 +64,40 @@ export async function purchaseNumber(user: User, e164: string): Promise<PhoneNum
     return inserted;
   });
 
+  let order: NumberOrderResult;
   try {
-    const order = await voiceProvider().orderNumber(e164);
-    const [updated] = await db
-      .update(phoneNumbers)
-      .set({ providerOrderId: order.orderId, providerNumberId: order.numberId, paidThrough: new Date(Date.now() + MONTH_MS) })
-      .where(eq(phoneNumbers.id, row.id))
-      .returning();
-    if (order.status === "failure") return failNumber(updated, order.failureReason ?? stored("numberOrderRejected"));
-    if (order.status === "success") return activateNumber(updated, order.numberId);
-    return updated;
+    order = await voiceProvider().orderNumber(e164);
   } catch (err) {
-    console.error("orderNumber failed", err);
-    await failNumber(row, stored("numberCouldNotOrder"));
-    throw new UserError("numberOrderFailed");
+    console.error("orderNumber failed", row.id, err);
+    if (isDefiniteRejection(err)) {
+      await failNumber(row, stored("numberCouldNotOrder"));
+      throw new UserError("numberOrderFailed");
+    }
+    // The order may have gone through anyway. Refunding now could leave the platform paying for a
+    // number nobody holds, so it stays pending until refreshPendingNumbers finds out.
+    return row;
   }
+  const [updated] = await db
+    .update(phoneNumbers)
+    .set({ providerOrderId: order.orderId, providerNumberId: order.numberId, paidThrough: new Date(Date.now() + MONTH_MS) })
+    .where(eq(phoneNumbers.id, row.id))
+    .returning();
+  if (order.status === "failure") return failNumber(updated, order.failureReason ?? stored("numberOrderRejected"));
+  if (order.status === "success") return activateNumber(updated, order.numberId);
+  return updated;
 }
 
 async function activateNumber(n: PhoneNumber, numberId?: string): Promise<PhoneNumber> {
   const [u] = await db
     .update(phoneNumbers)
-    .set({ status: "active", providerNumberId: numberId ?? n.providerNumberId, failureReason: null, failureMsg: null })
+    .set({
+      status: "active",
+      providerNumberId: numberId ?? n.providerNumberId,
+      // Set at order time, except for an order recovered by refreshPendingNumbers.
+      paidThrough: n.paidThrough ?? new Date(Date.now() + MONTH_MS),
+      failureReason: null,
+      failureMsg: null,
+    })
     .where(eq(phoneNumbers.id, n.id))
     .returning();
   // Receiving texts is a bonus; a failure here must not fail the purchase (the daily cron retries).
@@ -102,8 +122,14 @@ export async function refreshPendingNumbers(userId?: string): Promise<void> {
     .from(phoneNumbers)
     .where(userId ? and(eq(phoneNumbers.status, "pending"), eq(phoneNumbers.userId, userId)) : eq(phoneNumbers.status, "pending"));
   for (const n of pending) {
-    if (!n.providerOrderId) continue;
     try {
+      if (!n.providerOrderId) {
+        if (Date.now() - n.createdAt.getTime() < STUCK_ORDER_MS) continue; // may still be ordering
+        const numberId = await voiceProvider().findNumber(n.e164);
+        if (numberId) await activateNumber(n, numberId);
+        else await failNumber(n, stored("numberCouldNotOrder"));
+        continue;
+      }
       const order = await voiceProvider().getNumberOrder(n.providerOrderId);
       if (order.status === "success") await activateNumber(n, order.numberId);
       else if (order.status === "failure") await failNumber(n, order.failureReason ?? stored("numberOrderFailed"));
@@ -119,7 +145,11 @@ export async function releaseNumber(userId: string, numberId: string, reason: St
     .from(phoneNumbers)
     .where(and(eq(phoneNumbers.id, numberId), eq(phoneNumbers.userId, userId)));
   if (!n || n.status === "released") throw new UserError("numberNotFound");
-  if (n.providerNumberId && n.status === "active") await voiceProvider().releaseNumber(n.providerNumberId);
+  if (n.status === "active") {
+    // Older rows may lack the provider id; find the number so it isn't left on the account.
+    const providerId = n.providerNumberId ?? (await voiceProvider().findNumber(n.e164));
+    if (providerId) await voiceProvider().releaseNumber(providerId);
+  }
   await db
     .update(phoneNumbers)
     .set({

@@ -1,5 +1,5 @@
 import "server-only";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { calls, type Call } from "@/db/schema";
 import { voiceProvider } from "@/server/telnyx";
@@ -12,12 +12,13 @@ export async function fetchCallResults(call: Call): Promise<Call> {
   try {
     const res = await voiceProvider().getCallResults(ref);
     if (!res) return call;
+    // Not onto a call whose content was deleted while the results were being fetched.
     const [u] = await db
       .update(calls)
       .set({ transcript: res.transcript, summary: res.summary ?? null, resultsFetched: true })
-      .where(eq(calls.id, call.id))
+      .where(and(eq(calls.id, call.id), isNull(calls.purgedAt), isNull(calls.deletedAt)))
       .returning();
-    return u;
+    return u ?? call;
   } catch (err) {
     console.error("getCallResults failed", call.id, err);
     return call;

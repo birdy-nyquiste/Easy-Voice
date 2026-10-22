@@ -49,6 +49,24 @@ export interface PreviewAudio {
   contentType: string;
 }
 
+/** A provider answered an HTTP request with an error status. */
+export class ProviderHttpError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Whether a failed request certainly did nothing: the provider refused it (4xx). Timeouts, network
+ * errors, 5xx, 408 and 429 leave it unknown whether the request was applied.
+ */
+export function isDefiniteRejection(err: unknown): boolean {
+  return err instanceof ProviderHttpError && err.status >= 400 && err.status < 500 && err.status !== 408 && err.status !== 429;
+}
+
 /** The provider account isn't allowed to use a feature (e.g. cloned voices before verification). */
 export class FeatureNotPermittedError extends Error {
   name = "FeatureNotPermittedError";
@@ -193,6 +211,9 @@ export interface VoiceProvider {
   searchNumbers(q: { areaCode?: string; limit?: number }): Promise<AvailableNumber[]>;
   orderNumber(e164: string): Promise<NumberOrderResult>;
   getNumberOrder(orderId: string): Promise<NumberOrderResult>;
+  /** The provider's id for a number on our account, or null if we don't have it. */
+  findNumber(e164: string): Promise<string | null>;
+  /** Succeeds if the number is already gone. */
   releaseNumber(numberId: string): Promise<void>;
   /** Put a number on the platform messaging profile so it can receive texts. Idempotent. */
   enableInboundMessaging(e164: string): Promise<void>;

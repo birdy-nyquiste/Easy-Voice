@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, lt } from "drizzle-orm";
 import { db, withUserLock } from "@/db";
 import { agents, calls, phoneNumbers, type Agent, type Call, type User } from "@/db/schema";
 import { MAX_VARIABLE_VALUE_LENGTH, readVariables } from "@/lib/agent-settings";
@@ -11,7 +11,7 @@ import { MAX_CALL_GOAL_LENGTH } from "@/server/agents";
 import { elevenLabsKeyUsable } from "@/server/elevenlabs-keys";
 import { voiceProvider } from "@/server/telnyx";
 import { isElevenLabsVoice } from "@/server/telnyx/stock-voices";
-import { callRef, failedCallFields, hasOtherActiveCall } from "./state";
+import { callRef, failedCallFields, hasOtherActiveCall, isCallLive, STALE_CALL_MS } from "./state";
 import { fetchCallResults } from "./results";
 
 export async function listUserCalls(userId: string, limit = 50) {
@@ -135,9 +135,22 @@ export async function getRecordingUrl(userId: string, callId: string): Promise<s
 export async function deleteCallRecord(userId: string, callId: string): Promise<void> {
   const [c] = await db.select().from(calls).where(and(eq(calls.id, callId), eq(calls.userId, userId)));
   if (!c || c.deletedAt) throw new UserError("callNotFound");
-  if (!c.endedAt) throw new UserError("callStillLive");
+  if (isCallLive(c)) throw new UserError("callStillLive");
   if (!(await purgeCallContent(c))) throw new UserError("recordingDeleteFailed");
   await db.update(calls).set({ deletedAt: new Date() }).where(eq(calls.id, c.id));
+}
+
+/**
+ * End calls whose hangup never arrived (a lost webhook), so they stop counting as in progress and can be
+ * purged and deleted. How long such a call lasted is unknown, so it isn't charged.
+ */
+export async function finalizeStaleCalls(now = new Date()): Promise<number> {
+  const stale = await db
+    .update(calls)
+    .set({ ...failedCallFields(now), status: "failed", ...outcomeColumns(stored("outcomeStatusLost")) })
+    .where(and(isNull(calls.endedAt), lt(calls.createdAt, new Date(now.getTime() - STALE_CALL_MS))))
+    .returning({ id: calls.id });
+  return stale.length;
 }
 
 /** Delete recording, transcript and summary here and at the provider. Retries on the next run if the provider fails. */

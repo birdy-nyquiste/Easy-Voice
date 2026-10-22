@@ -7,6 +7,7 @@ import { formatCents, formatDateTime, formatDuration, formatPhone } from "@/lib/
 import { listUserAgents, MAX_CALL_GOAL_LENGTH } from "@/server/agents";
 import { requireUser } from "@/server/auth";
 import { listUserCalls } from "@/server/calls";
+import { isCallLive } from "@/server/calls/state";
 import { listUserNumbers } from "@/server/numbers";
 import { startCallAction } from "./actions";
 import { AutoRefresh } from "@/components/auto-refresh";
@@ -35,7 +36,7 @@ export default async function CallsPage() {
       {chunks}
     </Link>
   );
-  const inFlight = rows.some(({ call }) => call.status === "initiated" || call.status === "answered");
+  const inFlight = rows.some(({ call }) => isCallLive(call));
 
   return (
     <div className="space-y-6">

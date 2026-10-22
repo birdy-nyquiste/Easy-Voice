@@ -101,6 +101,55 @@ describe("number search", () => {
   });
 });
 
+describe("numbers and deletes", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** Answer each request by method and path. */
+  function route(handlers: Record<string, [number, unknown]>) {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = new URL(url).pathname.replace(/^\/v2/, "");
+      const [status, body] = handlers[`${init?.method ?? "GET"} ${path}`] ?? [500, { errors: [{ detail: "unexpected" }] }];
+      return new Response(JSON.stringify(body), { status });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("treats a number that is already gone as released", async () => {
+    route({ "DELETE /phone_numbers/num_1": [404, { errors: [{ code: "10005" }] }] });
+    await expect(provider.releaseNumber("num_1")).resolves.toBeUndefined();
+  });
+
+  it("finishes a purge whose recording or conversation is already gone", async () => {
+    route({
+      "GET /recordings": [200, { data: [{ id: "rec_1" }] }],
+      "DELETE /recordings/rec_1": [404, {}],
+      "DELETE /ai/conversations/conv_1": [404, {}],
+    });
+    await expect(provider.purgeCallData({ callControlId: "cc", callSessionId: "sess", conversationId: "conv_1" })).resolves.toBeUndefined();
+  });
+
+  it("reports a completed order as pending until the number's id can be looked up", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    route({
+      "POST /number_orders": [200, { data: { id: "ord_1", status: "success", phone_numbers: [{ phone_number: "+14155551234", status: "success" }] } }],
+      "GET /phone_numbers": [503, {}],
+    });
+    expect(await provider.orderNumber("+14155551234")).toMatchObject({ orderId: "ord_1", status: "pending", numberId: undefined });
+    route({
+      "POST /number_orders": [200, { data: { id: "ord_1", status: "success", phone_numbers: [{ phone_number: "+14155551234", status: "success" }] } }],
+      "GET /phone_numbers": [200, { data: [{ id: "num_9" }] }],
+    });
+    expect(await provider.orderNumber("+14155551234")).toMatchObject({ status: "success", numberId: "num_9" });
+  });
+
+  it("gives every request a timeout", async () => {
+    const fetchMock = route({ "DELETE /phone_numbers/num_1": [200, {}] });
+    await provider.releaseNumber("num_1");
+    expect((fetchMock.mock.calls[0][1] as RequestInit).signal).toBeInstanceOf(AbortSignal);
+  });
+});
+
 describe("call results", () => {
   afterEach(() => vi.unstubAllGlobals());
 

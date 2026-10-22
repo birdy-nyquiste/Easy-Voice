@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import Stripe from "stripe";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
-import { calls, payments, users } from "@/db/schema";
+import { calls, payments, phoneNumbers, users } from "@/db/schema";
 import { config } from "@/lib/config";
 import { handleStripeWebhook } from "@/server/billing/payments";
 import { runDailyJobs } from "@/server/cron";
@@ -49,6 +49,42 @@ describe("retention", () => {
     expect((await load(expired.id)).purgedAt).toBeNull();
     await runDailyJobs();
     expect((await load(expired.id)).purgedAt).toBeInstanceOf(Date);
+  });
+});
+
+describe("daily jobs", () => {
+  it("run the retention purge even when a number release fails, and report the failure", async () => {
+    const { user, number } = await makeLine(1000);
+    await db.update(users).set({ negativeSince: new Date(Date.now() - 60 * 86_400_000) }).where(eq(users.id, user.id));
+    vi.spyOn(mockProvider, "releaseNumber").mockRejectedValue(new Error("deletion locked"));
+    const createdAt = new Date(Date.now() - (config.policy.retentionDays + 1) * 86_400_000);
+    const [old] = await db
+      .insert(calls)
+      .values({
+        userId: user.id, phoneNumberId: number.id, direction: "inbound", fromNumber: "+12025550123", toNumber: number.e164,
+        providerCallControlId: "cc-old", status: "completed", endedAt: createdAt, createdAt, transcript: [{ role: "user", text: "hi" }],
+      })
+      .returning();
+    await expect(runDailyJobs()).rejects.toThrow(/negative-balance releases/);
+    expect((await db.select().from(calls).where(eq(calls.id, old.id)))[0].purgedAt).toBeInstanceOf(Date);
+    expect((await db.select().from(phoneNumbers).where(eq(phoneNumbers.id, number.id)))[0].status).toBe("active"); // retried tomorrow
+  });
+
+  it("end calls whose hangup never arrived, without charging", async () => {
+    const { user, number } = await makeLine(1000);
+    const createdAt = new Date(Date.now() - 5 * 3_600_000);
+    const [lost] = await db
+      .insert(calls)
+      .values({
+        userId: user.id, phoneNumberId: number.id, direction: "inbound", fromNumber: "+12025550123", toNumber: number.e164,
+        providerCallControlId: "cc-lost", status: "answered", answeredAt: createdAt, createdAt,
+      })
+      .returning();
+    await runDailyJobs();
+    const [row] = await db.select().from(calls).where(eq(calls.id, lost.id));
+    expect(row).toMatchObject({ status: "failed", billedCents: 0, outcome: "We lost track of this call's status, so it wasn't charged." });
+    expect(row.endedAt).toBeInstanceOf(Date);
+    expect((await db.select().from(users).where(eq(users.id, user.id)))[0].balanceCents).toBe(1000);
   });
 });
 

@@ -482,6 +482,7 @@
     "outcomeUnreachable": "その番号につながりませんでした。",
     "outcomeEndedEarly": "接続前に通話が終了しました（{cause}）。",
     "outcomeNotPlaced": "発信できませんでした。",
+    "outcomeStatusLost": "この通話の状態を確認できなかったため、料金はかかっていません。",
     "voiceSampleUnusable": "このサンプルは使用できません。より明瞭な録音をお試しください。",
     "voiceCloneFailed": "音声をクローンできませんでした。より明瞭で長いサンプルをお試しください。",
     "voiceNeedsVerification": "この音声を使用するには ElevenLabs での認証が必要です。別のサンプルをお試しください。",

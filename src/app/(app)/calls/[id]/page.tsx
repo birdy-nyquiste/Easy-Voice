@@ -7,6 +7,7 @@ import { showStored } from "@/lib/stored-text";
 import { getUserAgent } from "@/server/agents";
 import { requireUser } from "@/server/auth";
 import { getUserCall } from "@/server/calls";
+import { isCallLive } from "@/server/calls/state";
 import { deleteCallAction, hangupAction } from "../actions";
 import { AutoRefresh } from "@/components/auto-refresh";
 
@@ -16,7 +17,7 @@ export default async function CallPage({ params }: { params: Promise<{ id: strin
   const call = await getUserCall(user.id, id);
   if (!call) notFound();
   const agent = call.agentId ? await getUserAgent(user.id, call.agentId) : null;
-  const live = !call.endedAt;
+  const live = isCallLive(call);
   const awaitingResults = call.status === "completed" && !call.resultsFetched;
   const [t, tc, locale] = await Promise.all([getTranslations("calls"), getTranslations("common"), getLocale()]);
   const other = call.direction === "inbound" ? call.fromNumber : call.toNumber;

@@ -482,6 +482,7 @@
     "outcomeUnreachable": "Không thể liên lạc với số đó.",
     "outcomeEndedEarly": "Cuộc gọi kết thúc trước khi kết nối ({cause}).",
     "outcomeNotPlaced": "Không thể thực hiện cuộc gọi.",
+    "outcomeStatusLost": "Không theo dõi được trạng thái cuộc gọi này nên bạn không bị tính phí.",
     "voiceSampleUnusable": "Không thể dùng mẫu này. Hãy thử bản ghi rõ hơn.",
     "voiceCloneFailed": "Không thể nhân bản giọng. Hãy thử mẫu rõ hơn và dài hơn.",
     "voiceNeedsVerification": "ElevenLabs yêu cầu xác minh giọng này trước khi sử dụng. Hãy thử mẫu khác.",

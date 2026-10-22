@@ -5,8 +5,9 @@ import { ledgerEntries, payments, phoneNumbers, users } from "@/db/schema";
 import { showStored, stored } from "@/lib/stored-text";
 import { UserError } from "@/lib/errors";
 import { addDevCredit, completePayment, createTopup, failPayment } from "@/server/billing/payments";
-import { chargeNumberRenewals, purchaseNumber } from "@/server/numbers";
+import { chargeNumberRenewals, purchaseNumber, refreshPendingNumbers, releaseNumber } from "@/server/numbers";
 import { mockProvider } from "@/server/telnyx/mock";
+import { ProviderHttpError } from "@/server/telnyx/types";
 import { makeUser, resetDb } from "./helpers";
 
 beforeEach(resetDb);
@@ -38,6 +39,57 @@ describe("number purchase", () => {
     const n = await purchaseNumber(u, "+14155551234");
     expect(n).toMatchObject({ status: "failed", failureReason: "gone" });
     expect(await balance(u.id)).toBe(1000);
+  });
+
+  it("refunds at once when the provider refuses the order", async () => {
+    const u = await makeUser(1000);
+    vi.spyOn(mockProvider, "orderNumber").mockRejectedValue(new ProviderHttpError(422, "number unavailable"));
+    await expect(purchaseNumber(u, "+14155551234")).rejects.toThrow(UserError);
+    expect((await db.select().from(phoneNumbers))[0].status).toBe("failed");
+    expect(await balance(u.id)).toBe(1000);
+  });
+
+  describe("when the order's outcome is unknown", () => {
+    async function lostOrder() {
+      const u = await makeUser(1000);
+      vi.spyOn(mockProvider, "orderNumber").mockRejectedValue(new Error("The operation was aborted due to timeout"));
+      const n = await purchaseNumber(u, "+14155551234");
+      expect(n.status).toBe("pending");
+      expect(await balance(u.id)).toBe(700);
+      return { u, n };
+    }
+    const age = (id: string) => db.update(phoneNumbers).set({ createdAt: new Date(Date.now() - 2 * 3_600_000) }).where(eq(phoneNumbers.id, id));
+
+    it("keeps it pending, then activates it once the number turns up at the provider", async () => {
+      const { u, n } = await lostOrder();
+      const find = vi.spyOn(mockProvider, "findNumber").mockResolvedValue("num_found");
+      await refreshPendingNumbers();
+      expect(find).not.toHaveBeenCalled(); // too soon: the order may still be in flight
+      await age(n.id);
+      await refreshPendingNumbers();
+      const [row] = await db.select().from(phoneNumbers);
+      expect(row).toMatchObject({ status: "active", providerNumberId: "num_found", paidThrough: expect.any(Date) });
+      expect(await balance(u.id)).toBe(700);
+    });
+
+    it("refunds it if the number never turns up", async () => {
+      const { u, n } = await lostOrder();
+      vi.spyOn(mockProvider, "findNumber").mockResolvedValue(null);
+      await age(n.id);
+      await refreshPendingNumbers();
+      expect((await db.select().from(phoneNumbers))[0].status).toBe("failed");
+      expect(await balance(u.id)).toBe(1000);
+    });
+  });
+
+  it("finds a number's provider id by phone number to release it", async () => {
+    const u = await makeUser(1000);
+    const [n] = await db.insert(phoneNumbers).values({ userId: u.id, e164: "+14155551234", status: "active" }).returning();
+    vi.spyOn(mockProvider, "findNumber").mockResolvedValue("num_old");
+    const release = vi.spyOn(mockProvider, "releaseNumber");
+    await releaseNumber(u.id, n.id);
+    expect(release).toHaveBeenCalledWith("num_old");
+    expect((await db.select().from(phoneNumbers))[0].status).toBe("released");
   });
 
   it("enforces one number per user", async () => {
