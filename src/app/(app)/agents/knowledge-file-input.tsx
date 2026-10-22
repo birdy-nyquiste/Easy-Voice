@@ -1,14 +1,23 @@
 "use client";
 
-import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 /**
  * The knowledge file picker. Files over the limits are refused here: the server never sees an upload
  * over the request size limit, so it couldn't say why (the user would get a generic network error).
+ * The messages come rendered from the server, so their numbers are formatted like the server's.
  */
-export function KnowledgeFileInput({ maxPdfBytes, maxPdfMegabytes, maxChars }: { maxPdfBytes: number; maxPdfMegabytes: number; maxChars: number }) {
-  const t = useTranslations("errors");
+export function KnowledgeFileInput({
+  maxPdfBytes,
+  maxChars,
+  tooLarge,
+  tooLong,
+}: {
+  maxPdfBytes: number;
+  maxChars: number;
+  tooLarge: string;
+  tooLong: string;
+}) {
   const [error, setError] = useState<string | null>(null);
   return (
     <>
@@ -22,12 +31,8 @@ export function KnowledgeFileInput({ maxPdfBytes, maxPdfMegabytes, maxChars }: {
           const file = e.target.files?.[0];
           const isPdf = Boolean(file && (file.type === "application/pdf" || /\.pdf$/i.test(file.name)));
           // Text can't take more than 4 bytes per character, so a larger file is certainly too long.
-          const problem = !file
-            ? null
-            : isPdf
-              ? file.size > maxPdfBytes && t("knowledgeFileTooLarge", { size: maxPdfMegabytes })
-              : file.size > maxChars * 4 && t("knowledgeFileTooLong", { max: maxChars });
-          setError(problem || null);
+          const problem = !file ? null : isPdf ? (file.size > maxPdfBytes ? tooLarge : null) : file.size > maxChars * 4 ? tooLong : null;
+          setError(problem);
           if (problem) e.target.value = "";
         }}
       />

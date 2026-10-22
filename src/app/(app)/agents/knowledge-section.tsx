@@ -3,7 +3,8 @@ import { ActionForm, SubmitButton } from "@/components/forms";
 import { Badge, Card, CardTitle, Field, Notice, StatusBadge, inputClass } from "@/components/ui";
 import type { Agent } from "@/db/schema";
 import { config } from "@/lib/config";
-import { formatCents, formatMegabytes, toMegabytes } from "@/lib/format";
+import { errorText } from "@/lib/errors";
+import { formatCents, formatMegabytes, formatNumber, toMegabytes } from "@/lib/format";
 import { showStored } from "@/lib/stored-text";
 import { countUserSources, getAgentKnowledge } from "@/server/knowledge";
 import { AutoRefresh } from "@/components/auto-refresh";
@@ -98,7 +99,7 @@ export async function KnowledgeSection({ agent }: { agent: Agent }) {
                 <Field label={t("titleLabel")}>
                   <input name="title" required maxLength={80} className={inputClass} />
                 </Field>
-                <Field label={t("textLabel")} hint={t("textHint", { max: config.limits.knowledgeTextChars })}>
+                <Field label={t("textLabel")} hint={t("textHint", { max: formatNumber(config.limits.knowledgeTextChars, locale) })}>
                   <textarea name="text" required rows={6} maxLength={config.limits.knowledgeTextChars} className={inputClass} />
                 </Field>
                 <SubmitButton>{t("addFor", { price })}</SubmitButton>
@@ -110,12 +111,16 @@ export async function KnowledgeSection({ agent }: { agent: Agent }) {
                 <input type="hidden" name="agentId" value={agent.id} />
                 <Field
                   label={t("addFile")}
-                  hint={t("fileHint", { chars: config.limits.knowledgeFileChars, size: toMegabytes(config.limits.knowledgePdfBytes) })}
+                  hint={t("fileHint", {
+                    chars: formatNumber(config.limits.knowledgeFileChars, locale),
+                    size: formatNumber(toMegabytes(config.limits.knowledgePdfBytes), locale),
+                  })}
                 >
                   <KnowledgeFileInput
                     maxPdfBytes={config.limits.knowledgePdfBytes}
-                    maxPdfMegabytes={toMegabytes(config.limits.knowledgePdfBytes)}
                     maxChars={config.limits.knowledgeFileChars}
+                    tooLarge={errorText(locale, "knowledgeFileTooLarge", { size: toMegabytes(config.limits.knowledgePdfBytes) })}
+                    tooLong={errorText(locale, "knowledgeFileTooLong", { max: config.limits.knowledgeFileChars })}
                   />
                 </Field>
                 <SubmitButton>{t("addFor", { price })}</SubmitButton>
@@ -126,7 +131,7 @@ export async function KnowledgeSection({ agent }: { agent: Agent }) {
                 <summary className="cursor-pointer text-sm font-medium text-stone-700">{t("addUrl")}</summary>
                 <ActionForm action={addKnowledgeUrlAction} className="mt-3 space-y-3">
                   <input type="hidden" name="agentId" value={agent.id} />
-                  <Field label={t("urlLabel")} hint={t("urlHint", { size: toMegabytes(config.limits.knowledgeCrawlBytes) })}>
+                  <Field label={t("urlLabel")} hint={t("urlHint", { size: formatNumber(toMegabytes(config.limits.knowledgeCrawlBytes), locale) })}>
                     <input name="url" type="url" required placeholder="https://" className={inputClass} />
                   </Field>
                   <SubmitButton>{t("addFor", { price })}</SubmitButton>

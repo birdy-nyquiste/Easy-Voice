@@ -1,15 +1,17 @@
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 import { Badge, Card, CardTitle, StatusBadge } from "@/components/ui";
-import { formatCents, formatDateTime, formatDuration, formatPhone } from "@/lib/format";
+import { formatCallerNumber, formatCents, formatDateTime, formatDuration, formatPhone } from "@/lib/format";
 import { listUserAgents } from "@/server/agents";
 import { requireUser } from "@/server/auth";
 import { listUserCalls } from "@/server/calls";
 import { listUserNumbers } from "@/server/numbers";
+import { viewerTimeZone } from "@/server/time-zone";
 
 export default async function DashboardPage() {
   const user = await requireUser();
   const [t, tc, locale] = await Promise.all([getTranslations("dashboard"), getTranslations("common"), getLocale()]);
+  const tz = await viewerTimeZone();
   const [numbers, agents, recent] = await Promise.all([
     listUserNumbers(user.id),
     listUserAgents(user.id),
@@ -83,13 +85,13 @@ export default async function DashboardPage() {
                 <Link href={`/calls/${call.id}`} className="flex items-center justify-between gap-3 py-2.5 text-sm hover:bg-stone-50">
                   <span className="flex items-center gap-2">
                     <Badge>{call.direction === "inbound" ? tc("inbound") : tc("outbound")}</Badge>
-                    {formatPhone(call.direction === "inbound" ? call.fromNumber : call.toNumber)}
+                    {formatCallerNumber(call.direction === "inbound" ? call.fromNumber : call.toNumber, tc("unknownNumber"))}
                     <span className="text-stone-400">· {agentName ?? "—"}</span>
                   </span>
                   <span className="flex items-center gap-3 text-stone-500">
                     {formatDuration(call.durationSec)}
                     <StatusBadge status={call.status} />
-                    <span className="hidden sm:inline">{formatDateTime(call.createdAt, locale)}</span>
+                    <span className="hidden sm:inline">{formatDateTime(call.createdAt, locale, tz)}</span>
                   </span>
                 </Link>
               </li>

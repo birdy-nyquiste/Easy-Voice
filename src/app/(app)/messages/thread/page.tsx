@@ -10,6 +10,7 @@ import { AutoRefresh } from "@/components/auto-refresh";
 import { deleteConversationAction, saveContactNameAction } from "../actions";
 import { attachmentNote } from "../format";
 import { MarkRead } from "./mark-read";
+import { viewerTimeZone } from "@/server/time-zone";
 
 export default async function ThreadPage({ searchParams }: { searchParams: Promise<{ from?: string }> }) {
   const user = await requireUser();
@@ -19,6 +20,7 @@ export default async function ThreadPage({ searchParams }: { searchParams: Promi
   if (texts.length === 0) notFound();
   const billed = texts.reduce((sum, m) => sum + m.billedCents, 0);
   const [t, tc, locale] = await Promise.all([getTranslations("messages"), getTranslations("common"), getLocale()]);
+  const tz = await viewerTimeZone();
   const who = name ?? formatPhone(from);
 
   return (
@@ -68,7 +70,7 @@ export default async function ThreadPage({ searchParams }: { searchParams: Promi
                 )}
                 {m.body != null && attachmentNote(m, t) && <span className="mt-1 block text-xs text-stone-500">{attachmentNote(m, t)}</span>}
               </div>
-              <div className="mt-1 text-xs text-stone-400">{formatDateTime(m.receivedAt, locale)}</div>
+              <div className="mt-1 text-xs text-stone-400">{formatDateTime(m.receivedAt, locale, tz)}</div>
             </li>
           ))}
         </ul>

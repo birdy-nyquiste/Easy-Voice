@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getLocale, getTranslations } from "next-intl/server";
 import { attempt, type ActionState } from "@/lib/action";
-import { UserError } from "@/lib/errors";
+import { UserError, type ErrorKey } from "@/lib/errors";
 import { showStored } from "@/lib/stored-text";
 import { toLanguage } from "@/lib/language";
 import { requireUser } from "@/server/auth";
@@ -24,6 +24,10 @@ export async function cloneVoiceAction(_: ActionState, form: FormData): Promise<
     });
     revalidatePath("/", "layout");
     if (v.status === "failed") {
+      // ElevenLabs reasons are already whole sentences ("ElevenLabs couldn't clone this sample: …");
+      // wrapping them in "Cloning failed:" would stack two failure messages.
+      const own = v.provider === "elevenlabs" && v.failureMsg?.key.startsWith("errors.") ? v.failureMsg : null;
+      if (own) throw new UserError(own.key.slice("errors.".length) as ErrorKey, own.values);
       throw new UserError(v.provider === "elevenlabs" ? "cloneFailed" : "cloneFailedRefunded", {
         reason: showStored(await getLocale(), v.failureReason ?? "", v.failureMsg),
       });

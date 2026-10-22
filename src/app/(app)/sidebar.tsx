@@ -137,8 +137,8 @@ export function Sidebar({ account, unread, initialCollapsed }: { account: Accoun
                 {showUnread && (
                   // Hidden from view in the rail (the dot shows instead) but still read out.
                   <span className={`rounded-full bg-sky-600 px-1.5 py-0.5 text-xs font-medium text-white ${collapsed ? "md:sr-only" : ""}`}>
-                    {unread}
-                    <span className="sr-only">{t("unreadSr")}</span>
+                    <span aria-hidden>{unread}</span>
+                    <span className="sr-only">{t("unreadSr", { count: unread })}</span>
                   </span>
                 )}
               </span>

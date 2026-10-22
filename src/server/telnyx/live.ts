@@ -182,8 +182,14 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
       orderId: order.id,
       status: status === "success" && !numberId ? "pending" : status,
       numberId,
-      failureReason: status === "failure" ? stored("numberOrderStatus", { status: order.status }) : undefined,
+      failureReason: status === "failure" ? orderFailureReason(order.status) : undefined,
     };
+  }
+
+  /** Telnyx's status is an English enum ("failure", "cancelled", "deleted"): say what it means instead. */
+  function orderFailureReason(status: string) {
+    console.warn("number order ended as", status);
+    return status === "failure" ? stored("numberOrderRejected") : stored("numberOrderCancelled");
   }
 
   async function findNumber(e164: string): Promise<string | null> {

@@ -7,6 +7,7 @@ import { showStored } from "@/lib/stored-text";
 import { requireUser } from "@/server/auth";
 import { listLedger, listPayments } from "@/server/billing/payments";
 import { devCreditAction, topupAction } from "./actions";
+import { viewerTimeZone } from "@/server/time-zone";
 
 const AMOUNTS = [10, 25, 50, 100];
 
@@ -16,6 +17,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
   const [ledger, payments] = await Promise.all([listLedger(user.id), listPayments(user.id)]);
   const p = config.pricing;
   const [t, locale] = await Promise.all([getTranslations("billing"), getLocale()]);
+  const tz = await viewerTimeZone();
 
   return (
     <div className="space-y-6">
@@ -87,7 +89,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
             <tbody className="divide-y divide-stone-100">
               {ledger.map((e) => (
                 <tr key={e.id}>
-                  <td className="px-5 py-2.5 text-stone-500">{formatDateTime(e.createdAt, locale)}</td>
+                  <td className="px-5 py-2.5 text-stone-500">{formatDateTime(e.createdAt, locale, tz)}</td>
                   <td className="px-3 py-2.5">{showStored(locale, e.description, e.descriptionMsg)}</td>
                   <td className={`px-3 py-2.5 text-right tabular-nums ${e.amountCents > 0 ? "text-emerald-700" : ""}`}>
                     {formatCents(e.amountCents, locale, { signed: true })}
@@ -106,7 +108,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
           <ul className="divide-y divide-stone-100 text-sm">
             {payments.map((x) => (
               <li key={x.id} className="flex items-center justify-between py-2">
-                <span>{formatDateTime(x.createdAt, locale)} · {formatCents(x.amountCents, locale)}</span>
+                <span>{formatDateTime(x.createdAt, locale, tz)} · {formatCents(x.amountCents, locale)}</span>
                 <span className="flex items-center gap-2">
                   {x.failureReason && <span className="text-stone-500">{showStored(locale, x.failureReason, x.failureMsg)}</span>}
                   <StatusBadge status={x.status} />

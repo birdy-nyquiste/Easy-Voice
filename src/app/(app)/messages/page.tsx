@@ -8,12 +8,14 @@ import { listConversations } from "@/server/messages";
 import { listUserNumbers } from "@/server/numbers";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { messagePreview, threadHref } from "./format";
+import { viewerTimeZone } from "@/server/time-zone";
 
 export default async function MessagesPage() {
   const user = await requireUser();
   const [conversations, numbers] = await Promise.all([listConversations(user.id), listUserNumbers(user.id)]);
   const active = numbers.find((n) => n.status === "active");
   const [t, locale] = await Promise.all([getTranslations("messages"), getLocale()]);
+  const tz = await viewerTimeZone();
 
   return (
     <div className="space-y-6">
@@ -56,7 +58,7 @@ export default async function MessagesPage() {
                     </div>
                     <p className={`mt-0.5 truncate text-sm ${c.unread ? "text-stone-800" : "text-stone-500"}`}>{messagePreview(c.last, t)}</p>
                   </div>
-                  <span className="shrink-0 whitespace-nowrap text-xs text-stone-500 sm:text-sm">{formatDateTime(c.last.receivedAt, locale)}</span>
+                  <span className="shrink-0 whitespace-nowrap text-xs text-stone-500 sm:text-sm">{formatDateTime(c.last.receivedAt, locale, tz)}</span>
                 </Link>
               </li>
             ))}

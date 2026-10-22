@@ -21,6 +21,15 @@ export function formatCents(cents: number, locale: Locale, { whole = false, sign
   }).format(cents / 100);
 }
 
+/**
+ * 500000 → "500,000" in the interface language. For numbers in page messages: next-intl formats
+ * `{n, number}` with the bare locale code, which for Spanish means Spain ("500.000") rather than
+ * the Latin American Spanish used everywhere else.
+ */
+export function formatNumber(n: number, locale: Locale): string {
+  return numberFormat(locale, { maximumFractionDigits: 2 }).format(n);
+}
+
 /** 4613734 → "4.4 MB", with the interface language's decimal separator */
 export function formatMegabytes(bytes: number, locale: Locale): string {
   return `${numberFormat(locale, { maximumFractionDigits: 1 }).format(bytes / 1024 / 1024)} MB`;
@@ -43,14 +52,49 @@ export function formatDuration(sec: number | null | undefined): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-export function formatDateTime(d: Date | string | null | undefined, locale: Locale): string {
+/** The zone name if it is a valid IANA time zone, else null. */
+export function validTimeZone(tz: string | null | undefined): string | null {
+  if (!tz) return null;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return tz;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A moment in the viewer's time zone: "Oct 21, 3:05 PM", with the year when it isn't this year.
+ * Without the viewer's zone (their browser hasn't reported it yet) it is shown in UTC and labelled,
+ * so it is never silently off. Pass `time: false` for things that are really dates (renewals).
+ */
+export function formatDateTime(
+  d: Date | string | null | undefined,
+  locale: Locale,
+  timeZone: string | null,
+  { time = true } = {},
+): string {
   if (!d) return "—";
-  return new Date(d).toLocaleString(BCP47[locale], {
+  const date = new Date(d);
+  const zone = timeZone ?? "UTC";
+  const year = (x: Date) => x.toLocaleString("en-US", { year: "numeric", timeZone: zone });
+  return date.toLocaleString(BCP47[locale], {
     month: "short",
     day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
+    ...(year(date) !== year(new Date()) && { year: "numeric" }),
+    ...(time && { hour: "numeric", minute: "2-digit", ...(!timeZone && { timeZoneName: "short" }) }),
+    timeZone: zone,
   });
+}
+
+/** A date without the time of day, in the viewer's time zone. */
+export function formatDate(d: Date | string | null | undefined, locale: Locale, timeZone: string | null): string {
+  return formatDateTime(d, locale, timeZone, { time: false });
+}
+
+/** A call's other party: their number, or `unknown` for callers without caller ID (stored as "unknown", "anonymous"…). */
+export function formatCallerNumber(n: string, unknown: string): string {
+  return /^\+\d/.test(n) ? formatPhone(n) : unknown;
 }
 
 /** Normalize a US number typed by a user to E.164, or null if invalid. */

@@ -3,7 +3,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { Badge, Card, CardTitle, Empty, Field, Notice, PageHeader, StatusBadge, inputClass } from "@/components/ui";
 import { config } from "@/lib/config";
-import { formatCents, formatDateTime, formatDuration, formatPhone } from "@/lib/format";
+import { formatCallerNumber, formatCents, formatDateTime, formatDuration, formatPhone } from "@/lib/format";
 import { listUserAgents, MAX_CALL_GOAL_LENGTH } from "@/server/agents";
 import { requireUser } from "@/server/auth";
 import { listUserCalls } from "@/server/calls";
@@ -14,6 +14,7 @@ import { AutoRefresh } from "@/components/auto-refresh";
 import { readVariables } from "@/lib/agent-settings";
 import type { Agent } from "@/db/schema";
 import { AgentFields, type CallAgent } from "./agent-fields";
+import { viewerTimeZone } from "@/server/time-zone";
 
 function callAgent(a: Agent): CallAgent {
   const ask = readVariables(a.variables).filter((v) => v.askPerCall);
@@ -26,6 +27,7 @@ export default async function CallsPage() {
   const readyAgents = agents.filter((a) => a.status === "ready");
   const activeNumber = numbers.find((n) => n.status === "active");
   const [t, tc, locale] = await Promise.all([getTranslations("calls"), getTranslations("common"), getLocale()]);
+  const tz = await viewerTimeZone();
   const numberLink = (chunks: React.ReactNode) => (
     <Link href="/numbers" className="underline">
       {chunks}
@@ -100,16 +102,16 @@ export default async function CallsPage() {
                   <td className="px-5 py-3">
                     <Link href={`/calls/${call.id}`} className="flex items-center gap-2 whitespace-nowrap font-medium">
                       <Badge>{call.direction === "inbound" ? tc("inbound") : tc("outbound")}</Badge>
-                      {formatPhone(call.direction === "inbound" ? call.fromNumber : call.toNumber)}
+                      {formatCallerNumber(call.direction === "inbound" ? call.fromNumber : call.toNumber, tc("unknownNumber"))}
                     </Link>
                     {/* On phones the time goes here instead of in its own column. */}
-                    <div className="mt-0.5 text-xs text-stone-500 sm:hidden">{formatDateTime(call.createdAt, locale)}</div>
+                    <div className="mt-0.5 text-xs text-stone-500 sm:hidden">{formatDateTime(call.createdAt, locale, tz)}</div>
                   </td>
                   <td className="hidden px-3 py-3 text-stone-600 sm:table-cell">{agentName ?? "—"}</td>
                   <td className="px-3 py-3"><StatusBadge status={call.status} /></td>
                   <td className="hidden px-3 py-3 text-right tabular-nums sm:table-cell">{formatDuration(call.durationSec)}</td>
                   <td className="hidden px-3 py-3 text-right tabular-nums sm:table-cell">{call.billedCents != null ? formatCents(call.billedCents, locale) : "—"}</td>
-                  <td className="hidden whitespace-nowrap px-5 py-3 text-right text-stone-500 sm:table-cell">{formatDateTime(call.createdAt, locale)}</td>
+                  <td className="hidden whitespace-nowrap px-5 py-3 text-right text-stone-500 sm:table-cell">{formatDateTime(call.createdAt, locale, tz)}</td>
                 </tr>
               ))}
             </tbody>

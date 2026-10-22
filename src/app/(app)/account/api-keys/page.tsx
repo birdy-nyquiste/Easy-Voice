@@ -7,6 +7,7 @@ import { requireUser } from "@/server/auth";
 import { getElevenLabsKey } from "@/server/elevenlabs-keys";
 import { formatDateTime } from "@/lib/format";
 import { connectElevenLabsAction, disconnectElevenLabsAction } from "./actions";
+import { viewerTimeZone } from "@/server/time-zone";
 
 /** Third-party accounts the user brings (docs/elevenlabs-notes.md §5). */
 export default async function ApiKeysPage() {
@@ -36,7 +37,7 @@ export default async function ApiKeysPage() {
           <div className="space-y-4">
             {elKey.keyInvalidAt && (
               <Notice tone="red">
-                {t("rejectedNotice", { date: formatDateTime(elKey.keyInvalidAt, locale) })}
+                {t("rejectedNotice", { date: formatDateTime(elKey.keyInvalidAt, locale, await viewerTimeZone()) })}
               </Notice>
             )}
             <p className="text-sm text-stone-700">

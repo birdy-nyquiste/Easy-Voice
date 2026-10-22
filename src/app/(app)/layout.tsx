@@ -5,15 +5,18 @@ import { formatCents } from "@/lib/format";
 import { config } from "@/lib/config";
 import { countUnreadMessages } from "@/server/messages";
 import { SIDEBAR_COOKIE } from "@/lib/ui-prefs";
+import { viewerTimeZone } from "@/server/time-zone";
+import { TimeZoneSync } from "@/components/time-zone-sync";
 import { Sidebar } from "./sidebar";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
   const unread = await countUnreadMessages(user.id);
   const collapsed = (await cookies()).get(SIDEBAR_COOKIE)?.value === "collapsed";
-  const [t, locale] = await Promise.all([getTranslations("mock"), getLocale()]);
+  const [t, locale, timeZone] = await Promise.all([getTranslations("mock"), getLocale(), viewerTimeZone()]);
   return (
     <div className="min-h-screen md:flex">
+      <TimeZoneSync current={timeZone} />
       <Sidebar
         account={{ email: user.email, balance: formatCents(user.balanceCents, locale), lowBalance: user.balanceCents <= 0 }}
         unread={unread}

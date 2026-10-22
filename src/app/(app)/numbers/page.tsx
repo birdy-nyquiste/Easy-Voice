@@ -4,17 +4,19 @@ import { ActionForm, SubmitButton } from "@/components/forms";
 import { Badge, Card, CardTitle, Empty, Notice, PageHeader, StatusBadge, buttonClass, inputClass } from "@/components/ui";
 import { config } from "@/lib/config";
 import { UserError, userMessage } from "@/lib/errors";
-import { formatCents, formatDateTime, formatPhone } from "@/lib/format";
+import { formatCents, formatDate, formatPhone } from "@/lib/format";
 import { showStored } from "@/lib/stored-text";
 import { listUserAgents } from "@/server/agents";
 import { requireUser } from "@/server/auth";
 import { listRecentNegativeBalanceReleases, listUserNumbers, refreshPendingNumbers, searchAvailableNumbers } from "@/server/numbers";
 import { assignAgentAction, buyNumberAction, releaseNumberAction, simulateInboundAction, simulateTextAction } from "./actions";
+import { viewerTimeZone } from "@/server/time-zone";
 
 export default async function NumbersPage({ searchParams }: { searchParams: Promise<{ area?: string }> }) {
   const user = await requireUser();
   const { area } = await searchParams;
   const [t, tc, ts, locale] = await Promise.all([getTranslations("numbers"), getTranslations("common"), getTranslations("status"), getLocale()]);
+  const tz = await viewerTimeZone();
   await refreshPendingNumbers(user.id);
   const [numbers, agents, releasedForBalance] = await Promise.all([
     listUserNumbers(user.id),
@@ -46,7 +48,7 @@ export default async function NumbersPage({ searchParams }: { searchParams: Prom
         <Notice key={n.id} tone="red">
           {t.rich("releasedNegative", {
             number: formatPhone(n.e164),
-            date: formatDateTime(n.releasedAt, locale),
+            date: formatDate(n.releasedAt, locale, tz),
             link: (chunks) => (
               <Link href="/account/billing" className="font-medium underline">
                 {chunks}
@@ -69,7 +71,7 @@ export default async function NumbersPage({ searchParams }: { searchParams: Prom
                     <StatusBadge status={n.status} />
                   </div>
                   {n.status === "active" && n.paidThrough && (
-                    <p className="mt-1 text-xs text-stone-500">{t("renews", { date: formatDateTime(n.paidThrough, locale) })}</p>
+                    <p className="mt-1 text-xs text-stone-500">{t("renews", { date: formatDate(n.paidThrough, locale, tz) })}</p>
                   )}
                   {n.status === "active" && config.features.inboundSms && (
                     <p className="mt-1 text-xs text-stone-500">

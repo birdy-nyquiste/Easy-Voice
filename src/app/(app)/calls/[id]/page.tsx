@@ -10,6 +10,7 @@ import { getUserCall } from "@/server/calls";
 import { isCallLive } from "@/server/calls/state";
 import { deleteCallAction, hangupAction } from "../actions";
 import { AutoRefresh } from "@/components/auto-refresh";
+import { viewerTimeZone } from "@/server/time-zone";
 
 export default async function CallPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
@@ -20,6 +21,7 @@ export default async function CallPage({ params }: { params: Promise<{ id: strin
   const live = isCallLive(call);
   const awaitingResults = call.status === "completed" && !call.resultsFetched;
   const [t, tc, locale] = await Promise.all([getTranslations("calls"), getTranslations("common"), getLocale()]);
+  const tz = await viewerTimeZone();
   const other = call.direction === "inbound" ? call.fromNumber : call.toNumber;
 
   return (
@@ -27,8 +29,8 @@ export default async function CallPage({ params }: { params: Promise<{ id: strin
       {(live || awaitingResults) && <AutoRefresh everyMs={live ? 1500 : 4000} />}
       <PageHeader
         back={{ href: "/calls", label: t("all") }}
-        title={t(call.direction === "inbound" ? "from" : "toTitle", { number: formatPhone(other) })}
-        description={formatDateTime(call.createdAt, locale)}
+        title={/^\+\d/.test(other) ? t(call.direction === "inbound" ? "from" : "toTitle", { number: formatPhone(other) }) : t("fromUnknown")}
+        description={formatDateTime(call.createdAt, locale, tz)}
         action={<StatusBadge status={call.status} />}
       />
 
@@ -81,7 +83,7 @@ export default async function CallPage({ params }: { params: Promise<{ id: strin
                 {call.transcript.map((m, i) => (
                   <li key={i} className={`flex ${m.role === "assistant" ? "" : "justify-end"}`}>
                     <div className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm ${m.role === "assistant" ? "bg-stone-100" : "bg-stone-900 text-white"}`}>
-                      <div className="mb-0.5 text-xs opacity-60">{m.role === "assistant" ? agent?.name ?? tc("agent") : t("caller")}</div>
+                      <div className={`mb-0.5 text-xs ${m.role === "assistant" ? "text-stone-600" : "text-stone-300"}`}>{m.role === "assistant" ? agent?.name ?? tc("agent") : t("caller")}</div>
                       {m.text}
                     </div>
                   </li>
