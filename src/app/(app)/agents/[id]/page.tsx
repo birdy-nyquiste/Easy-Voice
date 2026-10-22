@@ -39,13 +39,12 @@ export default async function AgentPage({
     listModels().catch(() => []),
     getElevenLabsKey(user.id),
   ]);
-  const [t, tc, locale] = await Promise.all([getTranslations("agents"), getTranslations("common"), getLocale()]);
+  const [t, locale] = await Promise.all([getTranslations("agents"), getLocale()]);
   const keyRejected = isElevenLabsVoice(agent.voiceRef) && Boolean(elKey?.keyInvalidAt);
   return (
     <div className="space-y-6">
       <PageHeader back={{ href: "/agents", label: t("all") }} title={agent.name} action={<StatusBadge status={agent.status} />} />
       {agent.status === "failed" && <Notice tone="red">{showStored(locale, agent.failureReason, agent.failureMsg)}</Notice>}
-      {saved && agent.status === "ready" && <Notice tone="green">{tc("saved")}</Notice>}
       {keyRejected && (
         <Notice tone="red">
           {t.rich("keyRejectedNotice", {
@@ -59,7 +58,7 @@ export default async function AgentPage({
       )}
       {/* Keyed on updatedAt: React resets a form to its initial defaults after an action, so
           without a remount the fields would show pre-save values (and a second save would revert). */}
-      <AgentForm key={agent.updatedAt.toISOString()} agent={agent} stock={stock} clones={clones} models={models} />
+      <AgentForm key={agent.updatedAt.toISOString()} agent={agent} saved={Boolean(saved) && agent.status === "ready"} stock={stock} clones={clones} models={models} />
       {config.features.knowledgeBase && <KnowledgeSection agent={agent} />}
       <Card>
         <CardTitle>{t("dangerZone")}</CardTitle>

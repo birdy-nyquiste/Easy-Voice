@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 import { ActionForm, SubmitButton } from "@/components/forms";
-import { Badge, Card, CardTitle, Empty, PageHeader, StatusBadge, buttonClass, inputClass } from "@/components/ui";
+import { Badge, Card, CardTitle, Empty, Notice, PageHeader, StatusBadge, buttonClass, inputClass } from "@/components/ui";
 import { config } from "@/lib/config";
 import { UserError, userMessage } from "@/lib/errors";
 import { formatCents, formatDateTime, formatPhone } from "@/lib/format";
 import { showStored } from "@/lib/stored-text";
 import { listUserAgents } from "@/server/agents";
 import { requireUser } from "@/server/auth";
-import { listUserNumbers, refreshPendingNumbers, searchAvailableNumbers } from "@/server/numbers";
+import { listRecentNegativeBalanceReleases, listUserNumbers, refreshPendingNumbers, searchAvailableNumbers } from "@/server/numbers";
 import { assignAgentAction, buyNumberAction, releaseNumberAction, simulateInboundAction, simulateTextAction } from "./actions";
 
 export default async function NumbersPage({ searchParams }: { searchParams: Promise<{ area?: string }> }) {
@@ -16,7 +16,11 @@ export default async function NumbersPage({ searchParams }: { searchParams: Prom
   const { area } = await searchParams;
   const [t, tc, ts, locale] = await Promise.all([getTranslations("numbers"), getTranslations("common"), getTranslations("status"), getLocale()]);
   await refreshPendingNumbers(user.id);
-  const [numbers, agents] = await Promise.all([listUserNumbers(user.id), listUserAgents(user.id)]);
+  const [numbers, agents, releasedForBalance] = await Promise.all([
+    listUserNumbers(user.id),
+    listUserAgents(user.id),
+    listRecentNegativeBalanceReleases(user.id),
+  ]);
   const owned = numbers.filter((n) => n.status !== "failed");
   const canBuy = owned.length < config.limits.numbersPerUser;
 
@@ -37,6 +41,20 @@ export default async function NumbersPage({ searchParams }: { searchParams: Prom
         title={t("title")}
         description={t("description", { price: formatCents(config.pricing.numberMonthlyCents, locale) })}
       />
+
+      {releasedForBalance.map((n) => (
+        <Notice key={n.id} tone="red">
+          {t.rich("releasedNegative", {
+            number: formatPhone(n.e164),
+            date: formatDateTime(n.releasedAt, locale),
+            link: (chunks) => (
+              <Link href="/account/billing" className="font-medium underline">
+                {chunks}
+              </Link>
+            ),
+          })}
+        </Notice>
+      ))}
 
       {numbers.length === 0 ? (
         <Empty>{t("empty")}</Empty>

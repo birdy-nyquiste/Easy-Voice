@@ -1,6 +1,6 @@
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
-import { ActionForm, SubmitButton } from "@/components/forms";
+import { ActionForm, FormMessage, SubmitButton } from "@/components/forms";
 import { Card, CardTitle, Field, inputClass } from "@/components/ui";
 import { MAX_CALL_MINUTES, MAX_KEY_TERMS_LENGTH, readBehavior, readVariables, SILENCE_HANGUP_SECS } from "@/lib/agent-settings";
 import type { AgentTemplate } from "@/lib/agent-templates";
@@ -26,8 +26,11 @@ export function AgentForm({
   stock,
   clones,
   models,
+  saved = false,
 }: {
   agent?: Agent;
+  /** Just saved: show "Saved." next to the button until the next save. */
+  saved?: boolean;
   /** For a new agent: what the form starts with. */
   template?: AgentTemplate;
   templateName?: string;
@@ -65,14 +68,19 @@ export function AgentForm({
     ...stock.map((v) => [`stock:${v.ref}`, ttsModelName(v.ref)]),
     ...readyClones.map((v) => [`clone:${v.id}`, ttsModelName(v.voiceRef ?? "")]),
   ]);
+  // A voice that left the catalog (or a clone that's no longer usable) can't be saved again, and a
+  // select whose value has no option silently submits the first one. Start empty instead, and say why.
+  const voiceGone = Boolean(agent) && !(currentVoice in ttsByVoice);
   const initial = agent ?? template;
   const behavior = readBehavior(agent ? agent.behavior : template?.behavior);
   const variables = agent ? readVariables(agent.variables) : (template?.variables ?? []);
   return (
-    <ActionForm action={saveAgentAction} className="space-y-6">
+    <ActionForm action={saveAgentAction} className="space-y-6" message="custom">
       {agent && <input type="hidden" name="id" value={agent.id} />}
 
-      <div className="flex justify-end">
+      {/* The result goes next to the button: below the last card it would be far out of view. */}
+      <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+        <FormMessage initialOk={saved ? tc("saved") : undefined} />
         <SubmitButton pendingText={tc("saving")}>{agent ? t("saveChanges") : t("create")}</SubmitButton>
       </div>
 
@@ -89,7 +97,8 @@ export function AgentForm({
           </Field>
         </div>
         <VoiceFields
-          defaultVoice={currentVoice}
+          defaultVoice={voiceGone ? "" : currentVoice}
+          voiceGone={voiceGone}
           ttsByVoice={ttsByVoice}
           behavior={behavior}
           voiceOptions={

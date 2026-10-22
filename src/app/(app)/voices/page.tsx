@@ -134,7 +134,7 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
           {providers.length === 0 && !canAddService ? (
             <p className="text-sm text-stone-500">{noProviderReason}</p>
           ) : (
-            <ActionForm action={cloneVoiceAction} className="space-y-4">
+            <ActionForm action={cloneVoiceAction} className="space-y-4" resetOnSuccess>
               <Field label={t("cloneWith")}>
                 <div className="grid gap-2 sm:grid-cols-3">
                   {providers.map((p, i) => (

@@ -38,15 +38,24 @@ export function LoginForm() {
           />
         </>
       )}
-      {state.error && <p className="text-sm text-red-600">{state.error}</p>}
+      {state.error && (
+        <p role="alert" className="text-sm text-red-600">
+          {state.error}
+        </p>
+      )}
       <div className="flex flex-col gap-2">
         <SubmitButton pendingText={state.step === "email" ? t("sending") : t("verifying")}>
           {state.step === "email" ? t("sendCode") : t("signIn")}
         </SubmitButton>
         {state.step === "code" && (
-          <button name="intent" value="send" className="text-sm text-stone-500 hover:text-stone-800" formNoValidate>
-            {t("resend")}
-          </button>
+          <div className="flex justify-center gap-4">
+            <button name="intent" value="send" className="text-sm text-stone-500 hover:text-stone-800" formNoValidate>
+              {t("resend")}
+            </button>
+            <button name="intent" value="change" className="text-sm text-stone-500 hover:text-stone-800" formNoValidate>
+              {t("changeEmail")}
+            </button>
+          </div>
         )}
       </div>
     </form>

@@ -82,7 +82,7 @@ export default async function CallsPage() {
       {rows.length === 0 ? (
         <Empty>{t("empty")}</Empty>
       ) : (
-        <Card className="p-0">
+        <Card className="overflow-x-auto p-0">
           <table className="w-full text-sm">
             <thead className="border-b border-stone-100 text-left text-xs font-medium text-stone-500">
               <tr>
@@ -91,7 +91,7 @@ export default async function CallsPage() {
                 <th className="px-3 py-3 font-medium">{t("colStatus")}</th>
                 <th className="hidden px-3 py-3 text-right font-medium sm:table-cell">{t("colDuration")}</th>
                 <th className="hidden px-3 py-3 text-right font-medium sm:table-cell">{t("colCost")}</th>
-                <th className="px-5 py-3 text-right font-medium">{t("colWhen")}</th>
+                <th className="hidden px-5 py-3 text-right font-medium sm:table-cell">{t("colWhen")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-100">
@@ -102,12 +102,14 @@ export default async function CallsPage() {
                       <Badge>{call.direction === "inbound" ? tc("inbound") : tc("outbound")}</Badge>
                       {formatPhone(call.direction === "inbound" ? call.fromNumber : call.toNumber)}
                     </Link>
+                    {/* On phones the time goes here instead of in its own column. */}
+                    <div className="mt-0.5 text-xs text-stone-500 sm:hidden">{formatDateTime(call.createdAt, locale)}</div>
                   </td>
                   <td className="hidden px-3 py-3 text-stone-600 sm:table-cell">{agentName ?? "—"}</td>
                   <td className="px-3 py-3"><StatusBadge status={call.status} /></td>
                   <td className="hidden px-3 py-3 text-right tabular-nums sm:table-cell">{formatDuration(call.durationSec)}</td>
                   <td className="hidden px-3 py-3 text-right tabular-nums sm:table-cell">{call.billedCents != null ? formatCents(call.billedCents, locale) : "—"}</td>
-                  <td className="whitespace-nowrap px-5 py-3 text-right text-stone-500">{formatDateTime(call.createdAt, locale)}</td>
+                  <td className="hidden whitespace-nowrap px-5 py-3 text-right text-stone-500 sm:table-cell">{formatDateTime(call.createdAt, locale)}</td>
                 </tr>
               ))}
             </tbody>

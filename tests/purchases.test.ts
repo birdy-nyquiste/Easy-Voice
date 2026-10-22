@@ -5,7 +5,13 @@ import { ledgerEntries, payments, phoneNumbers, users } from "@/db/schema";
 import { showStored, stored } from "@/lib/stored-text";
 import { UserError } from "@/lib/errors";
 import { addDevCredit, completePayment, createTopup, failPayment } from "@/server/billing/payments";
-import { chargeNumberRenewals, purchaseNumber, refreshPendingNumbers, releaseNumber } from "@/server/numbers";
+import {
+  chargeNumberRenewals,
+  listRecentNegativeBalanceReleases,
+  purchaseNumber,
+  refreshPendingNumbers,
+  releaseNumber,
+} from "@/server/numbers";
 import { mockProvider } from "@/server/telnyx/mock";
 import { ProviderHttpError } from "@/server/telnyx/types";
 import { makeUser, resetDb } from "./helpers";
@@ -90,6 +96,20 @@ describe("number purchase", () => {
     await releaseNumber(u.id, n.id);
     expect(release).toHaveBeenCalledWith("num_old");
     expect((await db.select().from(phoneNumbers))[0].status).toBe("released");
+  });
+
+  it("lists numbers we released for a negative balance, but not ones the user released", async () => {
+    const u = await makeUser(1000);
+    const [ours, theirs] = await db
+      .insert(phoneNumbers)
+      .values([
+        { userId: u.id, e164: "+14155551234", status: "active", providerNumberId: "num_1" },
+        { userId: u.id, e164: "+14155551235", status: "active", providerNumberId: "num_2" },
+      ])
+      .returning();
+    await releaseNumber(u.id, ours.id, stored("numberReleasedNegative"));
+    await releaseNumber(u.id, theirs.id);
+    expect((await listRecentNegativeBalanceReleases(u.id)).map((n) => n.e164)).toEqual(["+14155551234"]);
   });
 
   it("enforces one number per user", async () => {

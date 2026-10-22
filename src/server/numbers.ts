@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, gt, inArray, ne } from "drizzle-orm";
 import { db, withUserLock } from "@/db";
 import { agents, phoneNumbers, type PhoneNumber, type User } from "@/db/schema";
 import { config } from "@/lib/config";
@@ -23,6 +23,18 @@ export async function listUserNumbers(userId: string): Promise<PhoneNumber[]> {
     .select()
     .from(phoneNumbers)
     .where(and(eq(phoneNumbers.userId, userId), ne(phoneNumbers.status, "released")));
+}
+
+/**
+ * Numbers we released in the last 30 days because the balance stayed negative, so the numbers page
+ * can say what happened (the user didn't release them).
+ */
+export async function listRecentNegativeBalanceReleases(userId: string): Promise<PhoneNumber[]> {
+  const released = await db
+    .select()
+    .from(phoneNumbers)
+    .where(and(eq(phoneNumbers.userId, userId), eq(phoneNumbers.status, "released"), gt(phoneNumbers.releasedAt, new Date(Date.now() - MONTH_MS))));
+  return released.filter((n) => n.failureMsg?.key === "stored.numberReleasedNegative");
 }
 
 export async function searchAvailableNumbers(areaCode: string) {

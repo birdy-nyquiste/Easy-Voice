@@ -10,11 +10,14 @@ import { ModelRow } from "./model-row";
 /** The agent's voice picker (with preview), its speech model, and how it sounds on calls. */
 export function VoiceFields({
   defaultVoice,
+  voiceGone = false,
   voiceOptions,
   ttsByVoice,
   behavior,
 }: {
   defaultVoice: string;
+  /** The agent's saved voice is no longer offered; one must be picked before saving. */
+  voiceGone?: boolean;
   voiceOptions: ReactNode;
   /** Voice picker value → display name of its speech model. */
   ttsByVoice: Record<string, string>;
@@ -32,6 +35,7 @@ export function VoiceFields({
           </select>
           <PreviewButton voice={voice} />
         </div>
+        {voiceGone && !voice && <p className="mt-1 text-sm text-red-600">{t("voiceGone")}</p>}
       </Field>
       <ModelRow label={t("tts")}>
         <span className="font-medium">{ttsByVoice[voice] ?? "—"}</span>

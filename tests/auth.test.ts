@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
 import { emailOtps, sessions } from "@/db/schema";
+import { loginAction } from "@/app/login/actions";
 import { requestEmailOtp, verifyEmailOtp } from "@/server/auth";
 import { resetDb } from "./helpers";
 
@@ -11,6 +12,7 @@ vi.mock("@/server/email", () => ({
     sent.push(msg.text);
   },
 }));
+vi.mock("next-intl/server", () => ({ getLocale: async () => "en" }));
 // Signing in sets the session cookie; outside a request there is no cookie store.
 vi.mock("next/headers", () => ({
   cookies: async () => ({ get: () => undefined, set: () => {}, delete: () => {} }),
@@ -91,5 +93,24 @@ describe("sign-in codes", () => {
     expect(results.filter((r) => r.ok)).toHaveLength(5);
     expect(results.filter((r) => !r.ok && r.error === "tooManyCodes")).toHaveLength(7);
     expect(await db.select().from(emailOtps).where(eq(emailOtps.email, email))).toHaveLength(5);
+  });
+});
+
+describe("login form steps", () => {
+  const form = (fields: Record<string, string>) => {
+    const f = new FormData();
+    for (const [k, v] of Object.entries(fields)) f.set(k, v);
+    return f;
+  };
+
+  it("keeps the code field when a resend hits the hourly limit, so an earlier code can still be entered", async () => {
+    for (let i = 0; i < 5; i++) await requestEmailOtp(email, "en");
+    const state = await loginAction({ step: "code", email }, form({ email, intent: "send" }));
+    expect(state).toEqual({ step: "code", email, error: "Too many codes requested. Try again later." });
+  });
+
+  it("goes back to the email step to use a different address", async () => {
+    expect(await loginAction({ step: "code", email }, form({ email, intent: "change" }))).toEqual({ step: "email", email });
+    expect(sent).toHaveLength(0);
   });
 });

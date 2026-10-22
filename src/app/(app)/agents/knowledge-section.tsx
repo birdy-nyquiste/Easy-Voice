@@ -14,6 +14,7 @@ import {
   deleteKnowledgeSourceAction,
   setKnowledgeModeAction,
 } from "./knowledge-actions";
+import { KnowledgeFileInput } from "./knowledge-file-input";
 
 /** The agent's knowledge base: how it's used, its sources, and forms to add more (SPEC §18). */
 export async function KnowledgeSection({ agent }: { agent: Agent }) {
@@ -111,7 +112,11 @@ export async function KnowledgeSection({ agent }: { agent: Agent }) {
                   label={t("addFile")}
                   hint={t("fileHint", { chars: config.limits.knowledgeFileChars, size: toMegabytes(config.limits.knowledgePdfBytes) })}
                 >
-                  <input type="file" name="file" required accept=".txt,.md,.pdf,text/plain,text/markdown,application/pdf" className="block text-sm" />
+                  <KnowledgeFileInput
+                    maxPdfBytes={config.limits.knowledgePdfBytes}
+                    maxPdfMegabytes={toMegabytes(config.limits.knowledgePdfBytes)}
+                    maxChars={config.limits.knowledgeFileChars}
+                  />
                 </Field>
                 <SubmitButton>{t("addFor", { price })}</SubmitButton>
               </ActionForm>

@@ -10,9 +10,12 @@ export type LoginState = { step: "email" | "code"; email?: string; error?: strin
 export async function loginAction(prev: LoginState, form: FormData): Promise<LoginState> {
   const email = String(form.get("email") ?? "");
   const locale = await getLocale();
+  if (form.get("intent") === "change") return { step: "email", email };
   if (form.get("intent") === "send" || prev.step === "email") {
     const r = await requestEmailOtp(email, locale);
-    return r.ok ? { step: "code", email } : { step: "email", email, error: errorText(locale, r.error) };
+    if (r.ok) return { step: "code", email };
+    // A failed resend keeps the code field: a code sent earlier still works.
+    return { step: prev.step, email, error: errorText(locale, r.error) };
   }
   const r = await verifyEmailOtp(email, String(form.get("code") ?? ""));
   if (!r.ok) return { step: "code", email, error: errorText(locale, r.error) };

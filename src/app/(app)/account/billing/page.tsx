@@ -78,7 +78,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
         </Card>
       </div>
 
-      <Card className="p-0">
+      <Card className="overflow-x-auto p-0">
         <div className="px-5 pt-5"><CardTitle>{t("activity")}</CardTitle></div>
         {ledger.length === 0 ? (
           <p className="px-5 pb-5 text-sm text-stone-500">{t("noActivity")}</p>

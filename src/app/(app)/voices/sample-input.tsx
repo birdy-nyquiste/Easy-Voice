@@ -12,6 +12,8 @@ export function SampleInput({ maxBytes }: { maxBytes: number }) {
   const locale = useLocale();
   const fileRef = useRef<HTMLInputElement>(null);
   const recRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const mounted = useRef(true);
   const [recording, setRecording] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -19,6 +21,29 @@ export function SampleInput({ maxBytes }: { maxBytes: number }) {
   useEffect(() => () => {
     if (preview) URL.revokeObjectURL(preview);
   }, [preview]);
+
+  // Leaving the page mid-recording must turn the microphone off.
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (recRef.current?.state === "recording") recRef.current.stop();
+      releaseMic();
+    };
+  }, []);
+
+  // A successful clone resets the form; drop the recorded sample and its preview with it.
+  useEffect(() => {
+    const form = fileRef.current?.form;
+    const clear = () => setPreview(null);
+    form?.addEventListener("reset", clear);
+    return () => form?.removeEventListener("reset", clear);
+  }, []);
+
+  function releaseMic() {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  }
 
   /** Put a file into the input (or clear it), validating its size. */
   function setSample(file: File | null) {
@@ -37,11 +62,14 @@ export function SampleInput({ maxBytes }: { maxBytes: number }) {
     setError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      if (!mounted.current) return releaseMic(); // left the page while the permission prompt was open
       const rec = new MediaRecorder(stream);
       const chunks: Blob[] = [];
       rec.ondataavailable = (e) => chunks.push(e.data);
       rec.onstop = () => {
-        stream.getTracks().forEach((t) => t.stop());
+        releaseMic();
+        if (!mounted.current) return;
         const type = rec.mimeType || "audio/webm";
         const ext = type.includes("mp4") ? "m4a" : "webm";
         setSample(new File(chunks, `recording.${ext}`, { type }));
@@ -50,6 +78,7 @@ export function SampleInput({ maxBytes }: { maxBytes: number }) {
       recRef.current = rec;
       setRecording(true);
     } catch {
+      releaseMic();
       setError(t("micDenied"));
     }
   }
