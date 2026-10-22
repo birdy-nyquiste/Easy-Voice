@@ -1,10 +1,10 @@
 import "server-only";
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
-import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
-import { db } from "@/db";
+import { db, withLock } from "@/db";
 import { emailOtps, sessions, users, type User } from "@/db/schema";
 import type { Locale } from "@/i18n/locales";
 import { translator } from "@/i18n/messages";
@@ -17,6 +17,13 @@ const OTP_TTL_MS = 10 * 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
 const OTP_MAX_PER_HOUR = 5;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+/** The longest address SMTP allows. */
+const MAX_EMAIL_LENGTH = 254;
+/**
+ * local@label.label…: domain labels can't contain dots, so there is only one way to split the
+ * domain and the match runs in linear time (an overlapping pattern backtracked quadratically).
+ */
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/;
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 const hashOtp = (email: string, code: string) => sha256(`${config.authSecret}:${email}:${code}`);
@@ -29,20 +36,25 @@ type AuthResult = { ok: true } | { ok: false; error: ErrorKey };
 
 export async function requestEmailOtp(rawEmail: string, locale: Locale): Promise<AuthResult> {
   const email = normalizeEmail(rawEmail);
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: "invalidEmail" };
-
-  const [{ count }] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(emailOtps)
-    .where(and(eq(emailOtps.email, email), gt(emailOtps.createdAt, new Date(Date.now() - 3600_000))));
-  if (count >= OTP_MAX_PER_HOUR) return { ok: false, error: "tooManyCodes" };
+  // Length first: the login form is public, so the pattern must never see huge input.
+  if (email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) return { ok: false, error: "invalidEmail" };
 
   const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
-  await db.insert(emailOtps).values({
-    email,
-    codeHash: hashOtp(email, code),
-    expiresAt: new Date(Date.now() + OTP_TTL_MS),
+  // Count and insert under a per-email lock, so parallel requests can't each pass the hourly limit.
+  const allowed = await withLock(`otp:${email}`, async (tx) => {
+    const [{ count }] = await tx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(emailOtps)
+      .where(and(eq(emailOtps.email, email), gt(emailOtps.createdAt, new Date(Date.now() - 3600_000))));
+    if (count >= OTP_MAX_PER_HOUR) return false;
+    await tx.insert(emailOtps).values({
+      email,
+      codeHash: hashOtp(email, code),
+      expiresAt: new Date(Date.now() + OTP_TTL_MS),
+    });
+    return true;
   });
+  if (!allowed) return { ok: false, error: "tooManyCodes" };
   const t = translator(locale, "email");
   await sendEmail({ to: email, subject: t("otpSubject", { code }), text: t("otpBody", { code }) });
   return { ok: true };
@@ -56,15 +68,29 @@ export async function verifyEmailOtp(rawEmail: string, code: string): Promise<Au
     .where(and(eq(emailOtps.email, email), isNull(emailOtps.consumedAt), gt(emailOtps.expiresAt, new Date())))
     .orderBy(desc(emailOtps.createdAt))
     .limit(1);
-  if (!otp || otp.attempts >= OTP_MAX_ATTEMPTS) return { ok: false, error: "codeExpired" };
+  if (!otp) return { ok: false, error: "codeExpired" };
+
+  // Spend the attempt in the database before comparing, so parallel guesses can't all read the same
+  // count: at most OTP_MAX_ATTEMPTS comparisons per code, however the requests are timed.
+  const [spent] = await db
+    .update(emailOtps)
+    .set({ attempts: sql`${emailOtps.attempts} + 1` })
+    .where(and(eq(emailOtps.id, otp.id), isNull(emailOtps.consumedAt), lt(emailOtps.attempts, OTP_MAX_ATTEMPTS)))
+    .returning({ id: emailOtps.id });
+  if (!spent) return { ok: false, error: "codeExpired" };
 
   const expected = Buffer.from(otp.codeHash);
   const actual = Buffer.from(hashOtp(email, code.trim()));
   if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
-    await db.update(emailOtps).set({ attempts: otp.attempts + 1 }).where(eq(emailOtps.id, otp.id));
     return { ok: false, error: "codeIncorrect" };
   }
-  await db.update(emailOtps).set({ consumedAt: new Date() }).where(eq(emailOtps.id, otp.id));
+  // Only one request can consume a code.
+  const [consumed] = await db
+    .update(emailOtps)
+    .set({ consumedAt: new Date() })
+    .where(and(eq(emailOtps.id, otp.id), isNull(emailOtps.consumedAt)))
+    .returning({ id: emailOtps.id });
+  if (!consumed) return { ok: false, error: "codeExpired" };
 
   const user = await upsertUser({ email });
   await createSession(user);
