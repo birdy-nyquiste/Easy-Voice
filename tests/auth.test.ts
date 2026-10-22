@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
 import { emailOtps, sessions } from "@/db/schema";
 import { loginAction } from "@/app/login/actions";
-import { requestEmailOtp, verifyEmailOtp } from "@/server/auth";
+import { createSession, getCurrentUser, logout, requestEmailOtp, upsertUser, verifyEmailOtp } from "@/server/auth";
 import { resetDb } from "./helpers";
 
 const sent: string[] = [];
@@ -13,9 +13,14 @@ vi.mock("@/server/email", () => ({
   },
 }));
 vi.mock("next-intl/server", () => ({ getLocale: async () => "en" }));
-// Signing in sets the session cookie; outside a request there is no cookie store.
+// Signing in sets the session cookie; outside a request there is no cookie store, so keep one here.
+const jar = new Map<string, string>();
 vi.mock("next/headers", () => ({
-  cookies: async () => ({ get: () => undefined, set: () => {}, delete: () => {} }),
+  cookies: async () => ({
+    get: (name: string) => (jar.has(name) ? { name, value: jar.get(name)! } : undefined),
+    set: (name: string, value: string) => void jar.set(name, value),
+    delete: (name: string) => void jar.delete(name),
+  }),
 }));
 
 const email = "someone@example.com";
@@ -31,6 +36,7 @@ const wrong = (code: string) => String((Number(code) + 1) % 1_000_000).padStart(
 beforeEach(async () => {
   await resetDb();
   sent.length = 0;
+  jar.clear();
 });
 
 describe("email address check", () => {
@@ -112,5 +118,32 @@ describe("login form steps", () => {
   it("goes back to the email step to use a different address", async () => {
     expect(await loginAction({ step: "code", email }, form({ email, intent: "change" }))).toEqual({ step: "email", email });
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe("accounts and sessions", () => {
+  it("links Google sign-in to the account with the same email, then finds it by Google id", async () => {
+    const byEmail = await upsertUser({ email: "Someone@Example.com " });
+    const linked = await upsertUser({ email: email, googleSub: "g-1", name: "Sam" });
+    expect(linked).toMatchObject({ id: byEmail.id, googleSub: "g-1", name: "Sam" });
+    // Google's id wins even if the email on the Google account changes.
+    expect((await upsertUser({ email: "renamed@example.com", googleSub: "g-1" })).id).toBe(byEmail.id);
+  });
+
+  it("signs in with a session cookie, which stops working once it expires or after signing out", async () => {
+    const user = await upsertUser({ email });
+    await createSession(user);
+    expect((await getCurrentUser())?.id).toBe(user.id);
+    // Only a hash of the token is stored.
+    const [row] = await db.select().from(sessions);
+    expect(row.id).not.toBe(jar.get("ev_session"));
+
+    await db.update(sessions).set({ expiresAt: new Date(Date.now() - 1000) });
+    expect(await getCurrentUser()).toBeNull();
+
+    await createSession(user);
+    await logout();
+    expect(await getCurrentUser()).toBeNull();
+    expect(await db.select().from(sessions).where(eq(sessions.userId, user.id))).toHaveLength(1); // only the expired one
   });
 });

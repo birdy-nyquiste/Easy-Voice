@@ -54,9 +54,19 @@ describe("per-user isolation", () => {
     await expect(assignAgentToNumber(a.user.id, a.number.id, b.agent.id)).rejects.toThrow(/Agent not found/);
     await expect(deleteVoice(b.user.id, voice.id)).rejects.toThrow(/not found/);
     await expect(deleteCallRecord(b.user.id, call.id)).rejects.toThrow(/not found/);
-    const hangup = vi.spyOn(mockProvider, "hangup");
-    await hangupCall(b.user.id, call.id);
+  });
+
+  it("can't hang up another user's live call", async () => {
+    const { a, b } = await twoUsers();
+    const [live] = await db
+      .insert(calls)
+      .values({ userId: a.user.id, agentId: a.agent.id, phoneNumberId: a.number.id, direction: "inbound", fromNumber: "+12025550123", toNumber: a.number.e164, providerCallControlId: "cc-live", status: "answered", answeredAt: new Date() })
+      .returning();
+    const hangup = vi.spyOn(mockProvider, "hangup").mockResolvedValue();
+    await hangupCall(b.user.id, live.id);
     expect(hangup).not.toHaveBeenCalled();
+    await hangupCall(a.user.id, live.id); // the owner can
+    expect(hangup).toHaveBeenCalledWith("cc-live");
   });
 
   it("can't place calls with another user's agent", async () => {

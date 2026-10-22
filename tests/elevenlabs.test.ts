@@ -143,6 +143,41 @@ describe("cloning with ElevenLabs", () => {
   });
 });
 
+describe("ElevenLabs previews and clones that need care", () => {
+  it("never previews another user's clone (it would spend their credits), even once it's cached", async () => {
+    const owner = await makeUser();
+    const other = await makeUser();
+    await connectElevenLabs(owner.id, KEY);
+    await connectElevenLabs(other.id, "sk_acct_bob_2222"); // with a key of their own, only the owner check stops it
+    const v = await elevenLabsClone(owner.id);
+    const speak = vi.spyOn(mockElevenLabs, "synthesize");
+    expect(await voicePreview(other.id, `clone:${v.id}`)).toBeNull();
+    expect(await voicePreview(owner.id, `clone:${v.id}`)).not.toBeNull(); // now cached
+    expect(await voicePreview(other.id, `clone:${v.id}`)).toBeNull();
+    expect(speak).toHaveBeenCalledTimes(1);
+  });
+
+  it("deletes a clone ElevenLabs wants verified, and says why it failed", async () => {
+    const u = await makeUser();
+    await connectElevenLabs(u.id, KEY);
+    vi.spyOn(mockElevenLabs, "cloneVoice").mockResolvedValue({ voiceId: "el_unverified", requiresVerification: true });
+    const del = vi.spyOn(mockElevenLabs, "deleteVoice");
+    const v = await elevenLabsClone(u.id);
+    expect(del).toHaveBeenCalledWith(KEY, "el_unverified");
+    expect(v).toMatchObject({ status: "failed", failureMsg: { key: "stored.voiceNeedsVerification" } });
+  });
+
+  it("flags the key when ElevenLabs rejects it during a preview", async () => {
+    const u = await makeUser();
+    await connectElevenLabs(u.id, KEY);
+    const v = await elevenLabsClone(u.id);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(mockElevenLabs, "synthesize").mockRejectedValue(new ElevenLabsError(401, "invalid_api_key", "Invalid API key"));
+    await expect(voicePreview(u.id, `clone:${v.id}`)).rejects.toBeInstanceOf(ElevenLabsError);
+    expect((await db.select().from(elevenLabsKeys))[0].keyInvalidAt).not.toBeNull();
+  });
+});
+
 describe("agents with ElevenLabs voices", () => {
   it("send the voice with the user's key reference", async () => {
     const u = await makeUser();

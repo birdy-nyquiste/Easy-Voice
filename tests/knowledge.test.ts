@@ -92,6 +92,17 @@ describe("adding sources", () => {
     );
   });
 
+  it("counts the source limit across all of a user's agents, not per agent", async () => {
+    const { user, agent } = await makeLine(5000);
+    const [second] = await db
+      .insert(agents)
+      .values({ userId: user.id, name: "Second", instructions: "x", greeting: "Hi", language: "en", voiceRef: "Telnyx.KokoroTTS.af_heart", providerAssistantId: "assistant-2", status: "ready" })
+      .returning();
+    const max = config.limits.knowledgeSources;
+    for (let i = 0; i < max; i++) await addTextSource(user.id, i % 2 ? second.id : agent.id, text(`T${i}`));
+    await expect(addTextSource(user.id, second.id, text())).rejects.toThrow(errorText("en", "knowledgeLimit", { max }));
+  });
+
   it("refuses when the balance can't pay, writing nothing", async () => {
     const { user, agent } = await makeLine(config.pricing.knowledgeSourceCents - 1);
     await expect(addTextSource(user.id, agent.id, text())).rejects.toThrow(/Insufficient balance/);
@@ -256,6 +267,22 @@ describe("website sources", () => {
     expect((await mockProvider.listObjects(knowledgeBucketName(b.agent.id))).length).toBe(3);
   });
 
+  it("fails and refunds a website whose crawl was never submitted", async () => {
+    const { user, agent } = await makeLine(1000);
+    vi.spyOn(mockProvider, "crawlUrl").mockImplementationOnce(() => new Promise(() => {})); // the server stops mid-submit
+    void addUrlSource(user.id, agent.id, "https://example.com");
+    await vi.waitFor(async () => expect(await db.select().from(knowledgeSources)).toHaveLength(1));
+    const [s] = await db.select().from(knowledgeSources);
+    expect(s.crawlTaskId).toBeNull();
+    await refreshKnowledge();
+    expect((await db.select().from(knowledgeSources))[0].status).toBe("processing"); // may still be submitting
+
+    await db.update(knowledgeSources).set({ createdAt: new Date(Date.now() - 2 * 3_600_000) }).where(eq(knowledgeSources.id, s.id));
+    await refreshKnowledge();
+    expect((await db.select().from(knowledgeSources))[0]).toMatchObject({ status: "failed", failureMsg: { key: "stored.knowledgeUploadFailed" } });
+    expect(await balance(user.id)).toBe(1000);
+  });
+
   it("rejects addresses that aren't web pages", async () => {
     const { user, agent } = await makeLine(1000);
     await expect(addUrlSource(user.id, agent.id, "file:///etc/passwd")).rejects.toThrow(errorText("en", "knowledgeUrlInvalid"));
@@ -310,6 +337,23 @@ describe("deleting", () => {
     await expect(deleteSource(user.id, s.id)).rejects.toThrow(errorText("en", "notAvailable"));
     await runKnowledgeJobs();
     expect(await db.select().from(agentKnowledge)).toEqual([]);
+  });
+
+  it("keeps a deleted agent's knowledge base until its website crawl goes quiet, then removes it", async () => {
+    const { user, agent } = await makeLine(1000);
+    crawlQuietMs(60_000);
+    await addUrlSource(user.id, agent.id, "https://example.com");
+    await deleteAgent(user.id, agent.id);
+    await cleanUpKnowledge();
+    // The crawl may still write pages: deleting the bucket now would let it recreate them.
+    expect((await mockProvider.listObjects(knowledgeBucketName(agent.id))).length).toBeGreaterThan(0);
+    expect(await db.select().from(agentKnowledge)).toHaveLength(1);
+
+    crawlQuietMs(0);
+    await cleanUpKnowledge();
+    expect(await db.select().from(agentKnowledge)).toEqual([]);
+    expect(await db.select().from(knowledgeSources)).toEqual([]);
+    await expect(mockProvider.enableEmbedding(knowledgeBucketName(agent.id))).rejects.toThrow(/no bucket/);
   });
 
   it("removes the whole knowledge base with the agent", async () => {

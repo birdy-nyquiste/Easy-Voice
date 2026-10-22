@@ -96,6 +96,19 @@ describe("voice languages", () => {
     await createAgent(u.id, { ...input, voice: hua, language: "zh", name: "B" });
     expect(create.mock.calls.map((c) => c[0].instructions)).toEqual(["Be helpful", "Be helpful"]);
   });
+
+  it("starts every inbound greeting with the recording notice, once, in the agent's language", async () => {
+    const u = await makeUser();
+    const create = vi.spyOn(mockProvider, "createAssistant");
+    await createAgent(u.id, input);
+    await createAgent(u.id, { ...input, voice: hua, language: "zh", greeting: "你好", name: "B" });
+    await createAgent(u.id, { ...input, greeting: "This call may be recorded. Hi there", name: "C" });
+    expect(create.mock.calls.map((c) => c[0].greeting)).toEqual([
+      "This call may be recorded. Hi",
+      "本次通话可能会被录音。 你好",
+      "This call may be recorded. Hi there", // already says it: not doubled
+    ]);
+  });
 });
 
 describe("agent model", () => {

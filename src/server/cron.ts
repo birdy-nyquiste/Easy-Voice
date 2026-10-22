@@ -34,10 +34,8 @@ export async function runDailyJobs(now = new Date()) {
   await stage("knowledge", runKnowledgeJobs, undefined);
   const resynced = await stage("resync agents", resyncStaleAgents, 0);
   await stage("pending numbers", refreshPendingNumbers, undefined);
-  const renewed = await stage("renewals", () => chargeNumberRenewals(now), 0);
-  const smsEnabled = await stage("texting setup", enablePendingInboundSms, 0);
-
-  // Release numbers of users whose balance has been negative past the grace period.
+  // Release numbers of users whose balance has been negative past the grace period. Before renewals,
+  // so a number that is being released isn't charged another month first.
   const released = await stage(
     "negative-balance releases",
     async () => {
@@ -62,6 +60,8 @@ export async function runDailyJobs(now = new Date()) {
     },
     0,
   );
+  const renewed = await stage("renewals", () => chargeNumberRenewals(now), 0);
+  const smsEnabled = await stage("texting setup", enablePendingInboundSms, 0);
 
   // Calls whose hangup never arrived: end them, so they can be purged below.
   const callsFinalized = await stage("stale calls", () => finalizeStaleCalls(now), 0);

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
 import { agents, calls, ledgerEntries, users } from "@/db/schema";
 import { showStored } from "@/lib/stored-text";
-import { deleteCallRecord } from "@/server/calls";
+import { deleteCallRecord, startOutboundCall } from "@/server/calls";
 import { handleCallEvent } from "@/server/calls/events";
 import { fetchCallResults } from "@/server/calls/results";
 import { withWebhookDedupe } from "@/server/webhooks";
@@ -92,6 +92,12 @@ describe("inbound calls", () => {
     await handleCallEvent(inbound(number.e164, "cc-1"));
     await handleCallEvent(inbound(number.e164, "cc-2"));
     expect(mockProvider.reject).toHaveBeenCalledWith("cc-2", "USER_BUSY");
+  });
+
+  it("leaves contact_number empty for callers without caller ID", async () => {
+    const { number } = await makeLine(1000);
+    await handleCallEvent(event("call.initiated", { callControlId: "cc-anon", callSessionId: "sess-anon", direction: "inbound", to: number.e164 }));
+    expect(vi.mocked(mockProvider.answer).mock.calls[0][2].variables.contact_number).toBe("");
   });
 
   it("rejects calls to numbers we don't own without creating a record", async () => {
@@ -202,12 +208,6 @@ describe("outbound calls", () => {
     expect(await callByCcid("cc-out")).toMatchObject({ status: "answered", providerConversationId: "conv-1" });
   });
 
-  it("leaves contact_number empty for callers without caller ID", async () => {
-    const { number } = await makeLine(1000);
-    await handleCallEvent(event("call.initiated", { callControlId: "cc-anon", callSessionId: "sess-anon", direction: "inbound", to: number.e164 }));
-    expect(vi.mocked(mockProvider.answer).mock.calls[0][2].variables.contact_number).toBe("");
-  });
-
   it("fills in the agent's variables, with this call's values taking precedence, and the time in its zone", async () => {
     const { user, agent, number } = await makeLine(1000);
     await db
@@ -228,6 +228,58 @@ describe("outbound calls", () => {
     const vars = vi.mocked(mockProvider.startAssistant).mock.calls[0][1].variables;
     expect(vars).toMatchObject({ owner_name: "Alex", callback_number: "+12025550111", call_direction: "outbound" });
     expect(vars.current_time).toMatch(/GMT\+9/);
+  });
+});
+
+describe("outbound calls that go wrong", () => {
+  const balance = async (userId: string) => (await db.select().from(users).where(eq(users.id, userId)))[0].balanceCents;
+  async function outboundRow(line: Awaited<ReturnType<typeof makeLine>>) {
+    const [c] = await db
+      .insert(calls)
+      .values({ userId: line.user.id, agentId: line.agent.id, phoneNumberId: line.number.id, direction: "outbound", fromNumber: line.number.e164, toNumber: "+14155550100", providerCallControlId: "cc-out" })
+      .returning();
+    return c;
+  }
+
+  it("ends a call that couldn't be placed, so it doesn't block the next one", async () => {
+    const { user, agent } = await makeLine(1000);
+    vi.spyOn(mockProvider, "dial").mockRejectedValueOnce(new Error("telnyx 503"));
+    const failed = await startOutboundCall(user, { agentId: agent.id, to: "+14155550100" });
+    expect(failed).toMatchObject({ status: "failed", outcome: "The call could not be placed.", endedAt: expect.any(Date), billedCents: 0 });
+    vi.spyOn(mockProvider, "dial").mockResolvedValueOnce({ callControlId: "cc-next", callSessionId: "sess-next" });
+    expect((await startOutboundCall(user, { agentId: agent.id, to: "+14155550100" })).providerCallControlId).toBe("cc-next");
+  });
+
+  it("hangs up without charging when the assistant can't start on an answered outbound call", async () => {
+    const line = await makeLine(1000);
+    const c = await outboundRow(line);
+    vi.mocked(mockProvider.startAssistant).mockRejectedValueOnce(new Error("telnyx 500"));
+    await handleCallEvent(event("call.answered", { callControlId: "cc-out", clientState: c.id }));
+    expect(mockProvider.hangup).toHaveBeenCalledWith("cc-out");
+    await handleCallEvent(event("call.hangup", { callControlId: "cc-out", clientState: c.id, hangupCause: "normal_clearing", occurredAt: new Date(Date.now() + 90_000) }));
+    expect(await callByCcid("cc-out")).toMatchObject({ status: "failed", chargeWaived: true, billedCents: 0 });
+    expect(await balance(line.user.id)).toBe(1000);
+  });
+
+  it("hangs up without charging when the agent was deleted before the call was answered", async () => {
+    const line = await makeLine(1000);
+    const c = await outboundRow(line);
+    await db.update(agents).set({ providerAssistantId: null, deletedAt: new Date() }).where(eq(agents.id, line.agent.id));
+    await handleCallEvent(event("call.answered", { callControlId: "cc-out", clientState: c.id }));
+    expect(mockProvider.startAssistant).not.toHaveBeenCalled();
+    expect(mockProvider.hangup).toHaveBeenCalledWith("cc-out");
+    expect(await callByCcid("cc-out")).toMatchObject({ chargeWaived: true, outcomeMsg: { key: "stored.outcomeAgentUnavailable" } });
+  });
+
+  it("keeps a call record whose recording couldn't be deleted, and says so", async () => {
+    const line = await makeLine(1000);
+    const [c] = await db
+      .insert(calls)
+      .values({ userId: line.user.id, phoneNumberId: line.number.id, direction: "inbound", fromNumber: "+12025550123", toNumber: line.number.e164, providerCallControlId: "cc-del", status: "completed", endedAt: new Date(), hasRecording: true })
+      .returning();
+    vi.spyOn(mockProvider, "purgeCallData").mockRejectedValueOnce(new Error("telnyx 500"));
+    await expect(deleteCallRecord(line.user.id, c.id)).rejects.toThrow(/delete the recording/);
+    expect(await callByCcid("cc-del")).toMatchObject({ deletedAt: null, purgedAt: null, hasRecording: true });
   });
 });
 
