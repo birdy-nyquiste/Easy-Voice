@@ -6,7 +6,7 @@ import { deleteAgent, getUserAgent, listUserAgents, updateAgent } from "@/server
 import { deleteCallRecord, getRecordingUrl, getUserCall, hangupCall, listUserCalls, startOutboundCall } from "@/server/calls";
 import { assignAgentToNumber, listUserNumbers, releaseNumber } from "@/server/numbers";
 import { mockProvider } from "@/server/telnyx/mock";
-import { deleteVoice, listUserVoices } from "@/server/voices";
+import { deleteVoice, listUserVoices, voicePreview } from "@/server/voices";
 import { makeLine, resetDb } from "./helpers";
 
 beforeEach(resetDb);
@@ -78,6 +78,22 @@ describe("per-user isolation", () => {
     const { b, voice } = await twoUsers();
     const input = { name: "x", instructions: "x", greeting: "x", language: "en", voice: `clone:${voice.id}` };
     await expect(updateAgent(b.user.id, b.agent.id, input)).rejects.toThrow(/Unknown voice/);
+  });
+});
+
+describe("malformed ids", () => {
+  it("treats an id that isn't a UUID as not found instead of failing", async () => {
+    const { user, agent } = await makeLine(1000);
+    const bad = "not-a-uuid";
+    expect(await getUserCall(user.id, bad)).toBeNull();
+    expect(await getRecordingUrl(user.id, bad)).toBeNull();
+    await expect(deleteCallRecord(user.id, bad)).rejects.toThrow(/not found/);
+    await expect(hangupCall(user.id, bad)).resolves.toBeUndefined();
+    expect(await getUserAgent(user.id, bad)).toBeNull();
+    await expect(startOutboundCall(user, { agentId: bad, to: "4155550100" })).rejects.toThrow(/Agent not found/);
+    const input = { name: "x", instructions: "x", greeting: "x", language: "en", voice: `clone:${bad}` };
+    await expect(updateAgent(user.id, agent.id, input)).rejects.toThrow(/Unknown voice/);
+    expect(await voicePreview(user.id, `clone:${bad}`)).toBeNull();
   });
 });
 

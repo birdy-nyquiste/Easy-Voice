@@ -8,7 +8,7 @@ import { FeatureNotPermittedError } from "@/server/telnyx/types";
 const { publicKey, privateKey } = generateKeyPairSync("ed25519");
 const rawPub = publicKey.export({ format: "der", type: "spki" }).subarray(-32).toString("base64");
 
-const provider = createTelnyxProvider({
+const telnyxConfig: Parameters<typeof createTelnyxProvider>[0] = {
   mode: "live",
   apiKey: "test",
   publicKey: rawPub,
@@ -19,14 +19,16 @@ const provider = createTelnyxProvider({
   cloneModel: "Qwen3TTS",
   insightGroupId: "",
   messagingProfileId: "mp-1",
-});
+};
+const provider = createTelnyxProvider(telnyxConfig);
 
+const callId = "7d1f3c2a-9b4e-4f6a-8c1d-2e3f4a5b6c7d";
 const body = JSON.stringify({
   data: {
     id: "evt-1",
     event_type: "call.initiated",
     occurred_at: "2026-10-07T10:00:00Z",
-    payload: { call_control_id: "cc", direction: "incoming", from: "+1202", to: "+1415", client_state: Buffer.from("abc").toString("base64") },
+    payload: { call_control_id: "cc", direction: "incoming", from: "+1202", to: "+1415", client_state: Buffer.from(callId).toString("base64") },
   },
 });
 
@@ -40,7 +42,12 @@ describe("Telnyx webhook verification", () => {
 
   it("accepts a valid signature and normalizes the event", async () => {
     const e = await provider.parseWebhook(body, headers(now));
-    expect(e).toMatchObject({ id: "evt-1", type: "call.initiated", direction: "inbound", clientState: "abc", callControlId: "cc" });
+    expect(e).toMatchObject({ id: "evt-1", type: "call.initiated", direction: "inbound", clientState: callId, callControlId: "cc" });
+  });
+
+  it("drops a client_state that isn't one of our call ids", async () => {
+    const foreign = body.replace(Buffer.from(callId).toString("base64"), Buffer.from("abc").toString("base64"));
+    expect(await provider.parseWebhook(foreign, headers(now, foreign))).toMatchObject({ callControlId: "cc", clientState: undefined });
   });
 
   it("rejects a tampered body", async () => {
@@ -165,6 +172,22 @@ describe("call results", () => {
     expect(res?.transcript.map((m) => m.text)).toEqual(["m1", "m2", "m3"]);
     for (const [url] of fetchMock.mock.calls) expect(new URL(url).searchParams.get("page[size]")).toBe("100");
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns the transcript while the summary is still being generated", async () => {
+    const withInsights = createTelnyxProvider({ ...telnyxConfig, insightGroupId: "ig-1" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const data = url.includes("conversations-insights") ? [{ status: "in_progress" }] : [{ role: "user", text: "Hi" }];
+        return new Response(JSON.stringify({ data }), { status: 200 });
+      }),
+    );
+    expect(await withInsights.getCallResults({ callControlId: "cc", conversationId: "conv-1" })).toEqual({
+      transcript: [{ role: "user", text: "Hi" }],
+      summary: undefined,
+      summaryPending: true,
+    });
   });
 });
 

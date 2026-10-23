@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, isNotNull, isNull, lt } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, lt } from "drizzle-orm";
 import { db } from "@/db";
 import { calls, phoneNumbers, users } from "@/db/schema";
 import { config } from "@/lib/config";
@@ -83,7 +83,9 @@ export async function runDailyJobs(now = new Date()) {
   );
   const messagesPurged = await stage("message retention", () => purgeExpiredMessages(retentionCutoff), 0);
 
-  // Results the post-hangup fetch missed (e.g. on serverless).
+  // Results the post-hangup fetch missed (e.g. on serverless). Past RESULTS_WAIT_MS a fetch settles for
+  // what there is, so only calls whose fetch keeps failing stay behind; newest first, so those can't
+  // crowd out new ones.
   const resultsFetched = await stage(
     "call results",
     async () => {
@@ -91,6 +93,7 @@ export async function runDailyJobs(now = new Date()) {
         .select()
         .from(calls)
         .where(and(eq(calls.status, "completed"), eq(calls.resultsFetched, false), isNull(calls.purgedAt)))
+        .orderBy(desc(calls.endedAt))
         .limit(200);
       for (const c of missing) await fetchCallResults(c);
       return missing.length;

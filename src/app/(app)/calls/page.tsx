@@ -56,7 +56,8 @@ export default async function CallsPage() {
           </Notice>
         ) : (
           <ActionForm action={startCallAction} className="space-y-3">
-            <AgentFields agents={readyAgents.map(callAgent)} defaultAgentId={activeNumber.agentId ?? readyAgents[0].id}>
+            {/* The number's agent only if it's ready: an id not in the list would hide the shown agent's per-call fields. */}
+            <AgentFields agents={readyAgents.map(callAgent)} defaultAgentId={readyAgents.find((a) => a.id === activeNumber.agentId)?.id ?? readyAgents[0].id}>
               <Field label={t("to")}>
                 <input name="to" required inputMode="tel" placeholder="(415) 555-0100" className={inputClass} />
               </Field>

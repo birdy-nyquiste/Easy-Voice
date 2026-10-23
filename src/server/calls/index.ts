@@ -6,10 +6,11 @@ import { MAX_VARIABLE_VALUE_LENGTH, readVariables } from "@/lib/agent-settings";
 import { UserError } from "@/lib/errors";
 import { outcomeColumns, stored } from "@/lib/stored-text";
 import { toE164US } from "@/lib/format";
+import { isUuid } from "@/lib/uuid";
 import { hasSpendableBalance } from "@/server/billing/ledger";
-import { MAX_CALL_GOAL_LENGTH } from "@/server/agents";
+import { getUserAgent, MAX_CALL_GOAL_LENGTH } from "@/server/agents";
 import { elevenLabsKeyUsable } from "@/server/elevenlabs-keys";
-import { voiceProvider } from "@/server/telnyx";
+import { voiceProvider, type DialResult } from "@/server/telnyx";
 import { isElevenLabsVoice } from "@/server/telnyx/stock-voices";
 import { callRef, failedCallFields, hasOtherActiveCall, isCallLive, STALE_CALL_MS } from "./state";
 import { fetchCallResults } from "./results";
@@ -25,12 +26,23 @@ export async function listUserCalls(userId: string, limit = 50) {
 }
 
 export async function getUserCall(userId: string, callId: string): Promise<Call | null> {
+  if (!isUuid(callId)) return null;
   const [c] = await db
     .select()
     .from(calls)
     .where(and(eq(calls.id, callId), eq(calls.userId, userId), isNull(calls.deletedAt)));
   if (!c) return null;
   return fetchCallResults(c);
+}
+
+/** The name of the call's agent, also once the agent is deleted (as the call list shows it). */
+export async function callAgentName(call: Call): Promise<string | null> {
+  if (!call.agentId) return null;
+  const [a] = await db
+    .select({ name: agents.name })
+    .from(agents)
+    .where(and(eq(agents.id, call.agentId), eq(agents.userId, call.userId)));
+  return a?.name ?? null;
 }
 
 export async function startOutboundCall(
@@ -45,10 +57,7 @@ export async function startOutboundCall(
   }
   if (!hasSpendableBalance(user.balanceCents)) throw new UserError("balanceEmptyCall");
 
-  const [agent] = await db
-    .select()
-    .from(agents)
-    .where(and(eq(agents.id, input.agentId), eq(agents.userId, user.id), isNull(agents.deletedAt)));
+  const agent = await getUserAgent(user.id, input.agentId);
   if (!agent) throw new UserError("agentNotFound");
   if (agent.status !== "ready") throw new UserError("agentNotReady");
   const variables = perCallVariables(agent, input.variables ?? {});
@@ -84,23 +93,28 @@ export async function startOutboundCall(
     return inserted;
   });
 
+  let placed: DialResult;
   try {
-    const res = await voiceProvider().dial({ from: from.e164, to, clientState: call.id });
-    const [u] = await db
-      .update(calls)
-      .set({ providerCallControlId: res.callControlId, providerCallSessionId: res.callSessionId })
-      .where(eq(calls.id, call.id))
-      .returning();
-    return u;
+    placed = await voiceProvider().dial({ from: from.e164, to, clientState: call.id });
   } catch (err) {
     console.error("dial failed", call.id, err);
-    const [u] = await db
+    // End it so it doesn't block the next call, unless a webhook already showed it was placed (only the
+    // response was lost). If it was placed after all, its later webhooks hang it up (see events.ts).
+    const [failed] = await db
       .update(calls)
       .set({ ...failedCallFields(new Date()), status: "failed", ...outcomeColumns(stored("outcomeNotPlaced")) })
-      .where(eq(calls.id, call.id))
+      .where(and(eq(calls.id, call.id), isNull(calls.providerCallControlId)))
       .returning();
-    return u;
+    return failed ?? (await db.select().from(calls).where(eq(calls.id, call.id)))[0];
   }
+  // Outside the try: the call is placed, so a failure here mustn't mark it failed. If this write is
+  // lost, its webhooks fill in these ids.
+  const [u] = await db
+    .update(calls)
+    .set({ providerCallControlId: placed.callControlId, providerCallSessionId: placed.callSessionId })
+    .where(eq(calls.id, call.id))
+    .returning();
+  return u;
 }
 
 /** Values given for the agent's ask-on-each-call variables; blank ones fall back to the default. */
@@ -122,6 +136,7 @@ export async function hangupCall(userId: string, callId: string): Promise<void> 
 }
 
 export async function getRecordingUrl(userId: string, callId: string): Promise<string | null> {
+  if (!isUuid(callId)) return null;
   const [c] = await db
     .select()
     .from(calls)
@@ -133,7 +148,7 @@ export async function getRecordingUrl(userId: string, callId: string): Promise<s
 
 /** User-initiated delete: removes recording at the provider and blanks content; billing rows stay. */
 export async function deleteCallRecord(userId: string, callId: string): Promise<void> {
-  const [c] = await db.select().from(calls).where(and(eq(calls.id, callId), eq(calls.userId, userId)));
+  const [c] = isUuid(callId) ? await db.select().from(calls).where(and(eq(calls.id, callId), eq(calls.userId, userId))) : [];
   if (!c || c.deletedAt) throw new UserError("callNotFound");
   if (isCallLive(c)) throw new UserError("callStillLive");
   if (!(await purgeCallContent(c))) throw new UserError("recordingDeleteFailed");

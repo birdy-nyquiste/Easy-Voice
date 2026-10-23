@@ -14,6 +14,17 @@ export function isCallLive(call: Pick<Call, "endedAt" | "createdAt">, now = Date
   return !call.endedAt && now - call.createdAt.getTime() < STALE_CALL_MS;
 }
 
+/**
+ * How long after a call ends its transcript and summary are waited for. Whatever is still missing by
+ * then isn't coming: the next fetch settles for what there is, and the call page stops waiting.
+ */
+export const RESULTS_WAIT_MS = 30 * 60 * 1000;
+
+/** Whether a completed call's transcript or summary may still arrive. */
+export function isAwaitingResults(call: Pick<Call, "status" | "resultsFetched" | "endedAt">, now = Date.now()): boolean {
+  return call.status === "completed" && !call.resultsFetched && !!call.endedAt && now - call.endedAt.getTime() < RESULTS_WAIT_MS;
+}
+
 /** Columns for a call that ended without a billable conversation. */
 export function failedCallFields(endedAt: Date) {
   return { endedAt, durationSec: 0, billedCents: 0, resultsFetched: true } satisfies Partial<Call>;

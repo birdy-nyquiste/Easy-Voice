@@ -121,6 +121,8 @@ export interface DialResult {
 export interface CallResults {
   transcript: { role: string; text: string }[];
   summary?: string;
+  /** The summary is still being generated; the transcript is complete. */
+  summaryPending?: boolean;
 }
 
 export type CallEventType =

@@ -469,16 +469,18 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
         .map((m) => ({ role: m.role, text: m.text! }));
 
       let summary: string | undefined;
+      let summaryPending = false;
       if (cfg.insightGroupId) {
         const ins = await api<{ data: { status: string; conversation_insights?: { result: string }[] }[] }>(
           "GET",
           `/ai/conversations/${encodeURIComponent(conversationId)}/conversations-insights`,
         );
         const done = ins.data.find((i) => i.status === "completed");
-        if (!done && ins.data.some((i) => i.status === "pending" || i.status === "in_progress")) return null; // retry later
+        // Still being generated: the transcript is returned anyway, and the summary is fetched again later.
+        summaryPending = !done && ins.data.some((i) => i.status === "pending" || i.status === "in_progress");
         summary = done?.conversation_insights?.[0]?.result;
       }
-      return { transcript, summary };
+      return { transcript, summary, summaryPending };
     },
 
     async getRecordingUrl(ref) {

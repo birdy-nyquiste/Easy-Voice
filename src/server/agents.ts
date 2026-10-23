@@ -18,6 +18,7 @@ import { config } from "@/lib/config";
 import { UserError, type ErrorKey } from "@/lib/errors";
 import { failureColumns, stored, storedFromError } from "@/lib/stored-text";
 import { LANGUAGES, type Language } from "@/lib/language";
+import { isUuid } from "@/lib/uuid";
 import { FeatureNotPermittedError, voiceProvider, type AssistantSpec } from "./telnyx";
 import { isElevenLabsVoice, voiceSpeaks } from "./telnyx/stock-voices";
 import { ASSISTANT_BODY_VERSION } from "./telnyx/version";
@@ -72,6 +73,7 @@ export async function listUserAgents(userId: string): Promise<Agent[]> {
 }
 
 export async function getUserAgent(userId: string, agentId: string): Promise<Agent | null> {
+  if (!isUuid(agentId)) return null;
   const [a] = await db
     .select()
     .from(agents)
@@ -95,10 +97,9 @@ async function resolveVoice(
     return { voiceRef: value, voiceId: null };
   }
   if (kind === "clone") {
-    const [v] = await db
-      .select()
-      .from(voices)
-      .where(and(eq(voices.id, value), eq(voices.userId, userId), isNull(voices.deletedAt)));
+    const [v] = isUuid(value)
+      ? await db.select().from(voices).where(and(eq(voices.id, value), eq(voices.userId, userId), isNull(voices.deletedAt)))
+      : [];
     if (!v) throw new UserError("unknownVoice");
     if (!cloningAvailable(v.provider)) throw new UserError("cloningUnavailablePickBuiltIn");
     if (v.status !== "ready" || !v.voiceRef) throw new UserError("cloneNotReady");

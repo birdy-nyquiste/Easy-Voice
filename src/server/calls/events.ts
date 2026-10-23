@@ -79,12 +79,34 @@ type InboundDecision =
   | { action: "answer"; call: Call; agent: Agent }
   | { action: "reject"; call: Call; cause: "CALL_REJECTED" | "USER_BUSY" };
 
+/** Provider ids an outbound call doesn't have yet (its dial response was lost or not stored), from one of its events. */
+function missingIds(call: Call, e: CallEvent): Partial<Call> {
+  const ids: Partial<Call> = {};
+  if (!call.providerCallControlId && e.callControlId) ids.providerCallControlId = e.callControlId;
+  if (!call.providerCallSessionId && e.callSessionId) ids.providerCallSessionId = e.callSessionId;
+  return ids;
+}
+
+/**
+ * An outbound call we ended ourselves (its dial seemed to fail) that the provider placed after all:
+ * hang it up, or the callee is left in silence. Only a processed hangup sets hangupCause, so without
+ * one the provider never told us the call ended.
+ */
+async function hangUpIfEndedHere(call: Call, e: CallEvent): Promise<boolean> {
+  if (call.direction !== "outbound" || !call.endedAt || call.hangupCause || !e.callControlId) return false;
+  // Not retried by failing the webhook: a call that is already gone would fail every retry.
+  await voiceProvider().hangup(e.callControlId).catch((err) => console.error("hangup of a call ended here failed", call.id, err));
+  return true;
+}
+
 async function onInitiated(e: CallEvent) {
   if (e.direction !== "inbound") {
     const call = await findCall(e);
-    if (call && !call.providerCallSessionId) {
-      await db.update(calls).set({ providerCallSessionId: e.callSessionId }).where(eq(calls.id, call.id));
-    }
+    if (!call) return;
+    // Stored even on a call we ended, so its recording (if any) is found and purged.
+    const ids = missingIds(call, e);
+    if (Object.keys(ids).length) await db.update(calls).set(ids).where(eq(calls.id, call.id));
+    await hangUpIfEndedHere(call, e);
     return;
   }
   const callControlId = e.callControlId;
@@ -177,11 +199,13 @@ async function checkInbound(
 
 async function onAnswered(e: CallEvent) {
   const found = await findCall(e);
-  if (!found || !found.providerCallControlId) return;
+  if (!found || (await hangUpIfEndedHere(found, e))) return;
+  const callControlId = found.providerCallControlId ?? e.callControlId;
+  if (!callControlId) return;
   // Conditional, so a duplicate or a hangup processed at the same moment can't be overwritten.
   const [call] = await db
     .update(calls)
-    .set({ status: "answered", answeredAt: e.occurredAt })
+    .set({ status: "answered", answeredAt: e.occurredAt, ...missingIds(found, e) })
     .where(and(eq(calls.id, found.id), eq(calls.status, "initiated"), isNull(calls.endedAt)))
     .returning();
   if (!call) {
@@ -197,7 +221,7 @@ async function onAnswered(e: CallEvent) {
     return;
   }
   try {
-    const { conversationId } = await voiceProvider().startAssistant(found.providerCallControlId, assistantStart(agent, call));
+    const { conversationId } = await voiceProvider().startAssistant(callControlId, assistantStart(agent, call));
     if (conversationId) {
       await db.update(calls).set({ providerConversationId: conversationId }).where(eq(calls.id, call.id));
     }
@@ -227,6 +251,7 @@ async function endWithoutCharge(call: Call, outcome: StoredMessage) {
   if (call.providerCallControlId) await voiceProvider().hangup(call.providerCallControlId);
 }
 
+/** Why a call that never connected ended, by hangup cause. The cause itself is kept only in hangupCause. */
 const HANGUP_OUTCOMES: Record<string, StoredMessage> = {
   timeout: stored("outcomeNoAnswer"),
   no_answer: stored("outcomeNoAnswer"),
@@ -235,6 +260,14 @@ const HANGUP_OUTCOMES: Record<string, StoredMessage> = {
   originator_cancel: stored("outcomeCallerHungUp"),
   not_found: stored("outcomeUnreachable"),
 };
+
+function hangupOutcome(call: Call, cause: string): StoredMessage {
+  // On an outbound call our side is the originator: it ending before an answer is the user hanging up.
+  if (call.direction === "outbound" && (cause === "originator_cancel" || cause === "normal_clearing")) {
+    return stored("outcomeCancelled");
+  }
+  return HANGUP_OUTCOMES[cause] ?? stored("outcomeEndedEarly");
+}
 
 const secondsBetween = (from: Date, to: Date) => Math.max(0, Math.round((to.getTime() - from.getTime()) / 1000));
 
@@ -292,7 +325,7 @@ async function onHangup(e: CallEvent) {
         ...failedCallFields(endedAt),
         status: call.status === "rejected" ? "rejected" : "failed",
         // An outcome set earlier (a rejection, a failed start) explains the call better than the hangup cause.
-        ...(call.outcome ? {} : outcomeColumns(HANGUP_OUTCOMES[cause] ?? stored("outcomeEndedEarly", { cause }))),
+        ...(call.outcome ? {} : outcomeColumns(hangupOutcome(call, cause))),
         hangupCause: cause,
       })
       .where(eq(calls.id, call.id));

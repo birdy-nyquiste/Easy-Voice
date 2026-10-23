@@ -6,6 +6,7 @@ import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
 import { failureColumns, stored, storedFromError, type StoredText } from "@/lib/stored-text";
 import { toMegabytes } from "@/lib/format";
+import { isUuid } from "@/lib/uuid";
 import { chargePurchase, refundPurchase, type Purchase } from "./billing/ledger";
 import { elevenLabs } from "./elevenlabs";
 import {
@@ -46,7 +47,7 @@ export async function voicePreview(userId: string, voice: string): Promise<Previ
     if (!match) return null;
     key = voice;
     load = () => voiceProvider().synthesizePreview(match.ref, match.speaks.includes("zh") ? PREVIEW_TEXT.bilingual : PREVIEW_TEXT.en);
-  } else if (kind === "clone") {
+  } else if (kind === "clone" && isUuid(value)) {
     const [v] = await db
       .select()
       .from(voices)

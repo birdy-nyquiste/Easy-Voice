@@ -208,9 +208,11 @@ describe("pre-i18n backfill (drizzle/0013)", () => {
       checked.push(key);
     }
     // Knowledge-base lines and these outcomes came after i18n, so no rows predate their messages.
-    const addedLater = ["outcomeStatusLost"];
+    const addedLater = ["outcomeStatusLost", "outcomeCancelled"];
+    // Reworded after the backfill (the raw hangup cause is no longer shown); the rows it backfilled show the new text.
+    const rewordedLater = ["outcomeEndedEarly"];
     const backfilled = Object.keys(MESSAGES.en.stored).filter(
-      (k) => /^(ledger|outcome)/.test(k) && !k.startsWith("ledgerKnowledge") && !addedLater.includes(k),
+      (k) => /^(ledger|outcome)/.test(k) && !k.startsWith("ledgerKnowledge") && !addedLater.includes(k) && !rewordedLater.includes(k),
     );
     expect(new Set(checked)).toEqual(new Set(backfilled));
   });
