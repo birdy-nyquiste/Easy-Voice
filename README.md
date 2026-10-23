@@ -32,7 +32,7 @@ CI (`.github/workflows/ci.yml`) runs typecheck, lint, the tests against a Postgr
 
 ## Going live with Telnyx
 
-1. In the Telnyx portal, create an **Outbound Voice Profile** and a **Call Control Application**. Set the app's webhook URL to `https://<host>/api/webhooks/telnyx` and **webhook API version to "2"**. Link the outbound profile to the app, and enable **"call cost in webhooks"** (`call_cost_in_webhooks`) so each call's Telnyx cost is recorded for reconciliation.
+1. In the Telnyx portal, create an **Outbound Voice Profile** and a **Call Control Application**. Set the app's webhook URL to `https://<host>/api/webhooks/telnyx` and **webhook API version to "2"**. Link the outbound profile to the app, and enable **"call cost in webhooks"** (`call_cost_in_webhooks`) so each call's Telnyx cost is recorded for reconciliation. Allow only US destinations on the outbound profile (`whitelisted_destinations: ["US"]`): users pay one flat per-minute price, so a call elsewhere could cost the platform more than it charges. The app also refuses Canadian, Caribbean, toll-free and premium-rate numbers, but the profile is the safeguard that covers everything.
 2. Copy the API key, the app id (`TELNYX_CONNECTION_ID`) and the webhook **public key** (`TELNYX_PUBLIC_KEY`) into `.env.local`, and set `TELNYX_MODE=live`.
 3. Optional, to receive texts: create a **Messaging Profile** with webhook URL `https://<host>/api/webhooks/telnyx` and API version 2, and set `TELNYX_MESSAGING_PROFILE_ID`. Texting is **receive only** (SPEC §17). We never send, so no 10DLC registration is needed. Numbers are put on the profile when they activate. Numbers bought earlier are added by the daily cron. Never enable `messaging` on the assistants: they would start replying to texts.
 4. Optional: create an Insight Group with a summary insight, and set `TELNYX_INSIGHT_GROUP_ID` so call summaries appear.
@@ -59,7 +59,7 @@ or the feature stays off. Details and open questions are in [docs/elevenlabs-not
 
 ## Stripe
 
-Stripe only processes one-time top-up payments; there are no subscriptions. Number rental and usage are deducted from the balance. Set `STRIPE_SECRET_KEY`. Point a webhook at `/api/webhooks/stripe` for the `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed` and `checkout.session.expired` events, then set `STRIPE_WEBHOOK_SECRET`. Locally: `stripe listen --forward-to localhost:3000/api/webhooks/stripe`.
+Stripe only processes one-time top-up payments; there are no subscriptions. Number rental and usage are deducted from the balance. A top-up is between `MIN_TOPUP_CENTS` (default 1000) and `MAX_TOPUP_CENTS` (default 50000); the billing page offers the $10, $25, $50 and $100 presets that fall within them. Set `STRIPE_SECRET_KEY`. Point a webhook at `/api/webhooks/stripe` for the `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed` and `checkout.session.expired` events, then set `STRIPE_WEBHOOK_SECRET`. Locally: `stripe listen --forward-to localhost:3000/api/webhooks/stripe`.
 
 ## Deploying to Vercel
 
@@ -71,7 +71,7 @@ Stripe only processes one-time top-up payments; there are no subscriptions. Numb
 
 ## Daily jobs
 
-`GET /api/cron/daily` with `Authorization: Bearer $CRON_SECRET` charges monthly number renewals, releases numbers after the negative-balance grace period, purges recordings, transcripts, the Telnyx AI conversation and text message content older than `RETENTION_DAYS`, fetches any transcripts the post-call fetch missed, finishes number orders still in progress, and puts active numbers on the messaging profile if they aren't yet. On Vercel, `vercel.json` schedules it daily.
+`GET /api/cron/daily` with `Authorization: Bearer $CRON_SECRET` charges monthly number renewals, releases numbers after the negative-balance grace period, purges recordings, transcripts, the Telnyx AI conversation and text message content older than `RETENTION_DAYS`, deletes expired sessions and sign-in codes, fetches any transcripts the post-call fetch missed, finishes number orders still in progress, and puts active numbers on the messaging profile if they aren't yet. On Vercel, `vercel.json` schedules it daily.
 
 ## Layout
 

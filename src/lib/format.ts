@@ -97,10 +97,40 @@ export function formatCallerNumber(n: string, unknown: string): string {
   return /^\+\d/.test(n) ? formatPhone(n) : unknown;
 }
 
-/** Normalize a US number typed by a user to E.164, or null if invalid. */
+/**
+ * +1 area codes outside the 50 states and DC: Canada, the Caribbean and Atlantic countries, and the US
+ * territories (which Telnyx treats as countries of their own). Calls there cost more than the flat price.
+ */
+const NON_US_AREA_CODES = new Set([
+  // Canada
+  "204", "226", "236", "249", "250", "257", "263", "289", "306", "343", "354", "365", "367", "368", "382", "387",
+  "403", "416", "418", "428", "431", "437", "438", "450", "468", "474", "506", "514", "519", "548", "579", "581",
+  "584", "587", "604", "613", "639", "647", "672", "683", "705", "709", "742", "753", "778", "780", "782", "807",
+  "819", "825", "867", "873", "879", "902", "905", "942",
+  // Caribbean and Atlantic countries
+  "242", "246", "264", "268", "284", "345", "441", "473", "649", "658", "664", "721", "758", "767", "784", "809",
+  "829", "849", "868", "869", "876",
+  // US territories
+  "340", "670", "671", "684", "787", "939",
+]);
+
+/**
+ * Whether an E.164 number is an ordinary US number: a real area code and exchange, not toll-free,
+ * premium-rate, a service code or another country in the +1 plan.
+ */
+export function isUsNumber(e164: string): boolean {
+  const m = /^\+1([2-9]\d\d)([2-9]\d\d)\d{4}$/.exec(e164);
+  if (!m) return false;
+  const [, area, exchange] = m;
+  // Special-use area codes repeat their last two digits (800, 888, 900, 911…); X9X and 88X are reserved.
+  if (area[1] === area[2] || area[1] === "9" || area.startsWith("88") || NON_US_AREA_CODES.has(area)) return false;
+  // N11 service codes and 976 premium lines.
+  return !exchange.endsWith("11") && exchange !== "976";
+}
+
+/** Normalize a US number typed by a user to E.164, or null if it isn't one (see isUsNumber). */
 export function toE164US(input: string): string | null {
   const digits = input.replace(/\D/g, "");
-  if (digits.length === 10) return `+1${digits}`;
-  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
-  return null;
+  const e164 = digits.length === 10 ? `+1${digits}` : digits.length === 11 && digits.startsWith("1") ? `+${digits}` : null;
+  return e164 && isUsNumber(e164) ? e164 : null;
 }

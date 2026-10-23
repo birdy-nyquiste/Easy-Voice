@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { agents, calls, voices } from "@/db/schema";
 import { deleteAgent, getUserAgent, listUserAgents, updateAgent } from "@/server/agents";
 import { deleteCallRecord, getRecordingUrl, getUserCall, hangupCall, listUserCalls, startOutboundCall } from "@/server/calls";
-import { assignAgentToNumber, listUserNumbers, releaseNumber } from "@/server/numbers";
+import { assignAgentToNumber, getActiveUserNumber, listUserNumbers, releaseNumber } from "@/server/numbers";
 import { mockProvider } from "@/server/telnyx/mock";
 import { deleteVoice, listUserVoices, voicePreview } from "@/server/voices";
 import { makeLine, resetDb } from "./helpers";
@@ -54,6 +54,13 @@ describe("per-user isolation", () => {
     await expect(assignAgentToNumber(a.user.id, a.number.id, b.agent.id)).rejects.toThrow(/Agent not found/);
     await expect(deleteVoice(b.user.id, voice.id)).rejects.toThrow(/not found/);
     await expect(deleteCallRecord(b.user.id, call.id)).rejects.toThrow(/not found/);
+  });
+
+  it("can't simulate calls or texts to another user's number (mock mode)", async () => {
+    const { a, b } = await twoUsers();
+    // The simulate actions resolve the posted number id through this before running the webhook handlers.
+    await expect(getActiveUserNumber(b.user.id, a.number.id)).rejects.toThrow(/not found/);
+    expect((await getActiveUserNumber(a.user.id, a.number.id)).e164).toBe(a.number.e164);
   });
 
   it("can't hang up another user's live call", async () => {

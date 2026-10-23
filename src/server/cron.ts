@@ -5,6 +5,7 @@ import { calls, phoneNumbers, users } from "@/db/schema";
 import { config } from "@/lib/config";
 import { stored } from "@/lib/stored-text";
 import { resyncStaleAgents } from "./agents";
+import { purgeExpiredSignIns } from "./auth";
 import { finalizeStaleCalls, purgeCallContent } from "./calls";
 import { fetchCallResults } from "./calls/results";
 import { runKnowledgeJobs } from "./knowledge";
@@ -14,7 +15,8 @@ import { chargeNumberRenewals, refreshPendingNumbers, releaseNumber } from "./nu
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Daily maintenance: renewals, grace-period releases, retention purge, stuck orders, texting setup.
+ * Daily maintenance: renewals, grace-period releases, retention purge, expired sign-ins, stuck orders,
+ * texting setup.
  * Each stage runs even if an earlier one fails (a provider error must not hold up the retention
  * purge); failures are logged and reported by throwing once everything has run.
  */
@@ -82,6 +84,7 @@ export async function runDailyJobs(now = new Date()) {
     0,
   );
   const messagesPurged = await stage("message retention", () => purgeExpiredMessages(retentionCutoff), 0);
+  const signInsPurged = await stage("expired sign-ins", () => purgeExpiredSignIns(now), 0);
 
   // Results the post-hangup fetch missed (e.g. on serverless). Past RESULTS_WAIT_MS a fetch settles for
   // what there is, so only calls whose fetch keeps failing stay behind; newest first, so those can't
@@ -101,7 +104,7 @@ export async function runDailyJobs(now = new Date()) {
     0,
   );
 
-  const summary = { renewed, released, callsFinalized, purged, messagesPurged, resultsFetched, resynced, smsEnabled };
+  const summary = { renewed, released, callsFinalized, purged, messagesPurged, signInsPurged, resultsFetched, resynced, smsEnabled };
   if (failed.length) throw new Error(`Daily jobs failed: ${failed.join(", ")} (others ran: ${JSON.stringify(summary)})`);
   return summary;
 }

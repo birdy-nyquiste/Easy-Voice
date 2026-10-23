@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import Stripe from "stripe";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
-import { calls, ledgerEntries, payments, phoneNumbers, users } from "@/db/schema";
+import { calls, emailOtps, ledgerEntries, payments, phoneNumbers, sessions, users } from "@/db/schema";
 import { config } from "@/lib/config";
 import { applyLedger } from "@/server/billing/ledger";
 import { handleStripeWebhook } from "@/server/billing/payments";
@@ -106,6 +106,22 @@ describe("daily jobs", () => {
     await expect(runDailyJobs()).rejects.toThrow(/negative-balance releases/);
     expect((await db.select().from(calls).where(eq(calls.id, old.id)))[0].purgedAt).toBeInstanceOf(Date);
     expect((await db.select().from(phoneNumbers).where(eq(phoneNumbers.id, number.id)))[0].status).toBe("active"); // retried tomorrow
+  });
+
+  it("delete expired sessions, and sign-in codes once the hourly limit no longer counts them", async () => {
+    const u = await makeUser(0);
+    const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000);
+    await db.insert(sessions).values([
+      { id: "expired", userId: u.id, expiresAt: minutesAgo(1) },
+      { id: "live", userId: u.id, expiresAt: new Date(Date.now() + 86_400_000) },
+    ]);
+    await db.insert(emailOtps).values([
+      { email: "old@test.dev", codeHash: "x", expiresAt: minutesAgo(61), createdAt: minutesAgo(71) },
+      { email: "recent@test.dev", codeHash: "x", expiresAt: minutesAgo(5), createdAt: minutesAgo(15) },
+    ]);
+    expect(await runDailyJobs()).toMatchObject({ signInsPurged: 2 });
+    expect((await db.select().from(sessions)).map((s) => s.id)).toEqual(["live"]);
+    expect((await db.select().from(emailOtps)).map((o) => o.email)).toEqual(["recent@test.dev"]);
   });
 
   it("end calls whose hangup never arrived, without charging", async () => {

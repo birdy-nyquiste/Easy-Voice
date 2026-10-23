@@ -2,9 +2,12 @@ import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
 import { ledgerEntries, payments, phoneNumbers, users } from "@/db/schema";
+import { config } from "@/lib/config";
+import { isUsNumber, toE164US } from "@/lib/format";
 import { showStored, stored } from "@/lib/stored-text";
 import { UserError } from "@/lib/errors";
-import { addDevCredit, completePayment, createTopup, failPayment } from "@/server/billing/payments";
+import { refundPurchase } from "@/server/billing/ledger";
+import { addDevCredit, completePayment, createTopup, failPayment, listPayments } from "@/server/billing/payments";
 import {
   chargeNumberRenewals,
   listRecentNegativeBalanceReleases,
@@ -45,6 +48,46 @@ describe("number purchase", () => {
     const n = await purchaseNumber(u, "+14155551234");
     expect(n).toMatchObject({ status: "failed", failureReason: "gone" });
     expect(await balance(u.id)).toBe(1000);
+  });
+
+  it("refunds what was charged, even if the price has changed since", async () => {
+    const u = await makeUser(1000);
+    const n = await purchaseNumber(u, "+14155551234"); // pending; charged $3.00
+    const price = config.pricing.numberMonthlyCents;
+    config.pricing.numberMonthlyCents = 500;
+    try {
+      vi.spyOn(mockProvider, "getNumberOrder").mockResolvedValue({ orderId: n.providerOrderId!, status: "failure" });
+      await refreshPendingNumbers();
+    } finally {
+      config.pricing.numberMonthlyCents = price;
+    }
+    expect((await db.select().from(phoneNumbers))[0].status).toBe("failed");
+    expect(await balance(u.id)).toBe(1000);
+  });
+
+  it("refunds nothing for a purchase that was never charged", async () => {
+    const u = await makeUser(1000);
+    const p = { userId: u.id, priceCents: 300, kind: "number_monthly" as const, key: "number:never:0", description: "x", refType: "phone_number", refId: "never" };
+    await refundPurchase(p, "refund");
+    expect(await balance(u.id)).toBe(1000);
+  });
+
+  it("refuses numbers that aren't ordinary US numbers, without charging", async () => {
+    const u = await makeUser(1000);
+    // Toll-free, Toronto, Jamaica, premium-rate.
+    for (const e164 of ["+18005551234", "+14165551234", "+18765551234", "+19005551234"]) {
+      await expect(purchaseNumber(u, e164)).rejects.toThrow(/Invalid US number/);
+    }
+    expect(await db.select().from(phoneNumbers)).toHaveLength(0);
+    expect(await balance(u.id)).toBe(1000);
+  });
+
+  it("refuses a number another user holds", async () => {
+    const a = await makeUser(1000);
+    const b = await makeUser(1000);
+    await purchaseNumber(a, "+14155551234");
+    await expect(purchaseNumber(b, "+14155551234")).rejects.toThrow(/isn't available/);
+    expect(await balance(b.id)).toBe(1000);
   });
 
   it("refunds at once when the provider refuses the order", async () => {
@@ -98,6 +141,15 @@ describe("number purchase", () => {
     expect((await db.select().from(phoneNumbers))[0].status).toBe("released");
   });
 
+  it("won't release a number that is still being ordered", async () => {
+    const u = await makeUser(1000);
+    const n = await purchaseNumber(u, "+14155551234");
+    const release = vi.spyOn(mockProvider, "releaseNumber");
+    await expect(releaseNumber(u.id, n.id)).rejects.toThrow(/not found/);
+    expect(release).not.toHaveBeenCalled();
+    expect((await db.select().from(phoneNumbers))[0].status).toBe("pending"); // still polled, so it activates
+  });
+
   it("lists numbers we released for a negative balance, but not ones the user released", async () => {
     const u = await makeUser(1000);
     const [ours, theirs] = await db
@@ -133,6 +185,42 @@ describe("number purchase", () => {
     expect(await chargeNumberRenewals()).toBe(1);
     expect(await chargeNumberRenewals()).toBe(0);
     expect(await balance(u.id)).toBe(400);
+  });
+});
+
+describe("US numbers", () => {
+  it("accepts ordinary US numbers", () => {
+    for (const n of ["+14155551234", "+12025550123", "+15125550100", "+18015550100", "+18565550100"]) expect(isUsNumber(n), n).toBe(true);
+    expect(toE164US("(415) 555-0100")).toBe("+14155550100");
+    expect(toE164US("1 202 555 0123")).toBe("+12025550123");
+  });
+
+  it("refuses toll-free, premium, service and reserved codes, and other +1 countries", () => {
+    const refused = [
+      "8005550100", "8885550100", "8335550100", "8805550100", // toll-free, incl. reserved 88X
+      "9005550100", "4115550100", "2005550100", "3955550100", // premium, N11, N00, X9X
+      "4154110100", "4159760100", "4151230100", // N11 exchange, 976 premium exchange, exchange starting 1
+      "0415550100", "1415550100", // area code starting 0 or 1
+      "6045550100", "4165550100", "5145550100", // Canada
+      "8765550100", "8095550100", "2425550100", "4415550100", // Jamaica, Dominican Republic, Bahamas, Bermuda
+      "7875550100", "6715550100", // Puerto Rico, Guam
+    ];
+    for (const n of refused) expect(toE164US(n), n).toBeNull();
+    expect(toE164US("415555010")).toBeNull();
+  });
+});
+
+describe("top-up limits", () => {
+  it("come from config", async () => {
+    const u = await makeUser(0);
+    const max = config.pricing.maxTopupCents;
+    config.pricing.maxTopupCents = 2000;
+    try {
+      await expect(createTopup(u, 2500, "en")).rejects.toThrow(/Maximum top-up is \$20\.00/);
+      await expect(addDevCredit(u, 2500)).rejects.toThrow(/Invalid amount/);
+    } finally {
+      config.pricing.maxTopupCents = max;
+    }
   });
 });
 
@@ -180,5 +268,17 @@ describe("failed payments", () => {
     const [p] = await db.select().from(payments).where(eq(payments.providerRef, "cs_expired"));
     expect(p).toMatchObject({ status: "failed", failureReason: "Checkout expired" });
     expect(showStored("zh", p.failureReason!, p.failureMsg)).toBe("付款已过期");
+  });
+
+  it("aren't listed when the checkout was just left unpaid, but are when the payment failed", async () => {
+    const u = await makeUser(0);
+    await db.insert(payments).values([
+      { userId: u.id, provider: "stripe", providerRef: "cs_abandoned", amountCents: 2500 },
+      { userId: u.id, provider: "stripe", providerRef: "cs_declined", amountCents: 2500 },
+      { userId: u.id, provider: "stripe", providerRef: "cs_open", amountCents: 2500 },
+    ]);
+    await failPayment("cs_abandoned", stored("checkoutExpired"));
+    await failPayment("cs_declined", stored("paymentFailed"));
+    expect((await listPayments(u.id)).map((p) => p.providerRef).sort()).toEqual(["cs_declined", "cs_open"]);
   });
 });

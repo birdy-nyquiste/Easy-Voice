@@ -11,11 +11,13 @@ export function SubmitButton({
   pendingText,
   variant = "primary",
   confirm,
+  disabled = false,
 }: {
   children: ReactNode;
   pendingText?: string;
   variant?: "primary" | "secondary" | "danger";
   confirm?: string;
+  disabled?: boolean;
 }) {
   const t = useTranslations("common");
   const formStatus = useFormStatus();
@@ -24,7 +26,7 @@ export function SubmitButton({
   return (
     <button
       type="submit"
-      disabled={pending}
+      disabled={pending || disabled}
       className={buttonClass(variant)}
       onClick={(e) => {
         if (confirm && !window.confirm(confirm)) e.preventDefault();

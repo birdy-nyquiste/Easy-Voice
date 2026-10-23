@@ -95,6 +95,7 @@ export const config = {
     /** One-time charge per knowledge-base source, any type (SPEC §18.2). Embedding a typical source costs Telnyx cents. */
     knowledgeSourceCents: int("PRICE_KNOWLEDGE_SOURCE_CENTS", 100),
     minTopupCents: int("MIN_TOPUP_CENTS", 1000),
+    maxTopupCents: int("MAX_TOPUP_CENTS", 50_000),
   },
 
   policy: {

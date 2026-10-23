@@ -103,25 +103,44 @@ export async function chargePurchase(p: Purchase, insufficient: UserError, tx?: 
   }
 }
 
-/** Refund a purchase exactly once. */
+/**
+ * Refund a purchase exactly once, for the amount actually charged: the configured price may have
+ * changed since. Nothing is refunded if it was never charged.
+ */
 export async function refundPurchase(p: Purchase, description: StoredText, tx?: Tx): Promise<void> {
-  await applyLedger(
-    {
-      userId: p.userId,
-      amountCents: p.priceCents,
-      kind: "refund",
-      idempotencyKey: `${p.key}:refund`,
-      description,
-      refType: p.refType,
-      refId: p.refId,
-    },
-    tx,
-  );
+  const run = async (t: Tx) => {
+    const [charge] = await t
+      .select({ amountCents: ledgerEntries.amountCents })
+      .from(ledgerEntries)
+      .where(eq(ledgerEntries.idempotencyKey, p.key));
+    if (!charge) return;
+    await applyLedger(
+      {
+        userId: p.userId,
+        amountCents: -charge.amountCents,
+        kind: "refund",
+        idempotencyKey: `${p.key}:refund`,
+        description,
+        refType: p.refType,
+        refId: p.refId,
+      },
+      t,
+    );
+  };
+  return tx ? run(tx) : db.transaction(run);
 }
 
 /** Whether a user may start billable activity (calls, purchases). */
 export function hasSpendableBalance(balanceCents: number): boolean {
   return balanceCents > 0;
+}
+
+/**
+ * When the grace period of a balance that went negative at `negativeSince` ends: unless it is topped
+ * up, the daily job's first run after this releases the user's numbers.
+ */
+export function negativeBalanceReleaseDate(negativeSince: Date): Date {
+  return new Date(negativeSince.getTime() + config.policy.negativeBalanceReleaseDays * 24 * 60 * 60 * 1000);
 }
 
 /** Billable minutes are rounded up; unanswered calls cost nothing. */

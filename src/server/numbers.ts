@@ -4,6 +4,7 @@ import { db, withUserLock } from "@/db";
 import { agents, phoneNumbers, type PhoneNumber, type User } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
+import { isUsNumber } from "@/lib/format";
 import { failureColumns, stored, type StoredText } from "@/lib/stored-text";
 import { applyLedger, chargePurchase, refundPurchase, type Purchase } from "./billing/ledger";
 import { enableInboundSms } from "./messages";
@@ -23,6 +24,16 @@ export async function listUserNumbers(userId: string): Promise<PhoneNumber[]> {
     .select()
     .from(phoneNumbers)
     .where(and(eq(phoneNumbers.userId, userId), ne(phoneNumbers.status, "released")));
+}
+
+/** One of the user's active numbers, or numberNotFound. */
+export async function getActiveUserNumber(userId: string, numberId: string): Promise<PhoneNumber> {
+  const [n] = await db
+    .select()
+    .from(phoneNumbers)
+    .where(and(eq(phoneNumbers.id, numberId), eq(phoneNumbers.userId, userId), eq(phoneNumbers.status, "active")));
+  if (!n) throw new UserError("numberNotFound");
+  return n;
 }
 
 /**
@@ -56,7 +67,8 @@ function numberPurchase(n: Pick<PhoneNumber, "id" | "userId" | "e164">): Purchas
 
 /** Buy a number: charges the first month up front, refunds if the order fails. */
 export async function purchaseNumber(user: User, e164: string): Promise<PhoneNumber> {
-  if (!/^\+1\d{10}$/.test(e164)) throw new UserError("invalidUsNumber");
+  // The number is posted by the browser, so it may not be one the US-local search offered.
+  if (!isUsNumber(e164)) throw new UserError("invalidUsNumber");
 
   // Limit check, row insert and charge commit together under the user's lock.
   const row = await withUserLock(user.id, async (tx) => {
@@ -67,6 +79,13 @@ export async function purchaseNumber(user: User, e164: string): Promise<PhoneNum
     if (existing.length >= config.limits.numbersPerUser) {
       throw new UserError("numberLimit", { max: config.limits.numbersPerUser });
     }
+    // Calls and texts are routed by number, so it must not be live on another account. (In live mode
+    // the provider also refuses to sell a number twice; the mock doesn't.)
+    const [taken] = await tx
+      .select({ id: phoneNumbers.id })
+      .from(phoneNumbers)
+      .where(and(eq(phoneNumbers.e164, e164), inArray(phoneNumbers.status, ["pending", "active"])));
+    if (taken) throw new UserError("numberUnavailable");
     const [inserted] = await tx.insert(phoneNumbers).values({ userId: user.id, e164, status: "pending" }).returning();
     await chargePurchase(
       numberPurchase(inserted),
@@ -156,7 +175,9 @@ export async function releaseNumber(userId: string, numberId: string, reason: St
     .select()
     .from(phoneNumbers)
     .where(and(eq(phoneNumbers.id, numberId), eq(phoneNumbers.userId, userId)));
-  if (!n || n.status === "released") throw new UserError("numberNotFound");
+  // A pending order can't be released (the page never offers it): it would complete at the provider
+  // afterwards with nobody holding the number.
+  if (!n || n.status === "released" || n.status === "pending") throw new UserError("numberNotFound");
   if (n.status === "active") {
     // Older rows may lack the provider id; find the number so it isn't left on the account.
     const providerId = n.providerNumberId ?? (await voiceProvider().findNumber(n.e164));

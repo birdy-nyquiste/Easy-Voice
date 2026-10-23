@@ -161,6 +161,20 @@ export async function requireUser(): Promise<User> {
   return user;
 }
 
+/**
+ * Delete expired sessions and sign-in codes (daily). Codes hold the address of anyone who typed one
+ * into the login form, users or not, so they aren't kept; they stay for an hour past expiry because
+ * the hourly code limit counts them.
+ */
+export async function purgeExpiredSignIns(now = new Date()): Promise<number> {
+  const s = await db.delete(sessions).where(lt(sessions.expiresAt, now)).returning({ id: sessions.id });
+  const o = await db
+    .delete(emailOtps)
+    .where(lt(emailOtps.expiresAt, new Date(now.getTime() - 3600_000)))
+    .returning({ id: emailOtps.id });
+  return s.length + o.length;
+}
+
 export async function logout(): Promise<void> {
   const jar = await cookies();
   const token = jar.get(SESSION_COOKIE)?.value;

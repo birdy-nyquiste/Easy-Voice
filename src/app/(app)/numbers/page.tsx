@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { Badge, Card, CardTitle, Empty, Notice, PageHeader, StatusBadge, buttonClass, inputClass } from "@/components/ui";
 import { config } from "@/lib/config";
@@ -9,6 +10,7 @@ import { showStored } from "@/lib/stored-text";
 import { listUserAgents } from "@/server/agents";
 import { requireUser } from "@/server/auth";
 import { listRecentNegativeBalanceReleases, listUserNumbers, refreshPendingNumbers, searchAvailableNumbers } from "@/server/numbers";
+import { NegativeBalanceNotice } from "../negative-balance-notice";
 import { assignAgentAction, buyNumberAction, releaseNumberAction, simulateInboundAction, simulateTextAction } from "./actions";
 import { viewerTimeZone } from "@/server/time-zone";
 
@@ -25,6 +27,11 @@ export default async function NumbersPage({ searchParams }: { searchParams: Prom
   ]);
   const owned = numbers.filter((n) => n.status !== "failed");
   const canBuy = owned.length < config.limits.numbersPerUser;
+  // The first month is charged up front, so say so before the user searches and picks one.
+  const canAfford = user.balanceCents >= config.pricing.numberMonthlyCents;
+  // Each render asks the provider about pending orders. A row without an order id is a lost order,
+  // looked up only once it is an hour old, so polling wouldn't settle it any sooner.
+  const activating = numbers.some((n) => n.status === "pending" && n.providerOrderId);
 
   let results: Awaited<ReturnType<typeof searchAvailableNumbers>> = [];
   let searchError: string | undefined;
@@ -39,10 +46,15 @@ export default async function NumbersPage({ searchParams }: { searchParams: Prom
 
   return (
     <div className="space-y-6">
+      {activating && <AutoRefresh everyMs={5000} />}
       <PageHeader
         title={t("title")}
         description={t("description", { price: formatCents(config.pricing.numberMonthlyCents, locale) })}
       />
+
+      {user.balanceCents < 0 && numbers.some((n) => n.status === "active") && (
+        <NegativeBalanceNotice user={user} hasNumber linkToBilling />
+      )}
 
       {releasedForBalance.map((n) => (
         <Notice key={n.id} tone="red">
@@ -96,7 +108,7 @@ export default async function NumbersPage({ searchParams }: { searchParams: Prom
                   <div className="flex flex-wrap items-start gap-3">
                     <ActionForm action={assignAgentAction} className="flex items-center gap-2">
                       <input type="hidden" name="numberId" value={n.id} />
-                      <select name="agentId" defaultValue={n.agentId ?? ""} className={`${inputClass} w-48`}>
+                      <select name="agentId" aria-label={t("agentLabel")} defaultValue={n.agentId ?? ""} className={`${inputClass} w-48`}>
                         <option value="">{t("noAgentOption")}</option>
                         {agents.map((a) => (
                           <option key={a.id} value={a.id} disabled={a.status !== "ready"}>
@@ -124,12 +136,12 @@ export default async function NumbersPage({ searchParams }: { searchParams: Prom
               {config.telnyx.mode === "mock" && n.status === "active" && (
                 <div className="mt-4 flex flex-wrap gap-2 border-t border-stone-100 pt-3">
                   <ActionForm action={simulateInboundAction}>
-                    <input type="hidden" name="e164" value={n.e164} />
+                    <input type="hidden" name="numberId" value={n.id} />
                     <SubmitButton variant="secondary">{t("simulateCall")}</SubmitButton>
                   </ActionForm>
                   {n.smsEnabledAt && (
                     <ActionForm action={simulateTextAction}>
-                      <input type="hidden" name="e164" value={n.e164} />
+                      <input type="hidden" name="numberId" value={n.id} />
                       <SubmitButton variant="secondary">{t("simulateText")}</SubmitButton>
                     </ActionForm>
                   )}
@@ -143,8 +155,30 @@ export default async function NumbersPage({ searchParams }: { searchParams: Prom
       {canBuy && (
         <Card>
           <CardTitle>{t("get")}</CardTitle>
+          {!canAfford && (
+            <div className="mb-4">
+              <Notice>
+                {t.rich("needCredit", {
+                  price: formatCents(config.pricing.numberMonthlyCents, locale),
+                  link: (chunks) => (
+                    <Link href="/account/billing" className="font-medium underline">
+                      {chunks}
+                    </Link>
+                  ),
+                })}
+              </Notice>
+            </div>
+          )}
           <form className="flex gap-2" action="/numbers">
-            <input name="area" defaultValue={area} placeholder={t("areaPlaceholder")} inputMode="numeric" maxLength={3} className={`${inputClass} max-w-48`} />
+            <input
+              name="area"
+              aria-label={t("areaCode")}
+              defaultValue={area}
+              placeholder={t("areaPlaceholder")}
+              inputMode="numeric"
+              maxLength={3}
+              className={`${inputClass} max-w-48`}
+            />
             <button className={buttonClass("secondary")}>{t("search")}</button>
           </form>
           {searchError && <p className="mt-3 text-sm text-red-600">{searchError}</p>}
@@ -166,6 +200,7 @@ export default async function NumbersPage({ searchParams }: { searchParams: Prom
                   <ActionForm action={buyNumberAction} className="text-right">
                     <input type="hidden" name="e164" value={r.e164} />
                     <SubmitButton
+                      disabled={!canAfford}
                       pendingText={t("ordering")}
                       confirm={t("buyConfirm", { number: formatPhone(r.e164), price: formatCents(config.pricing.numberMonthlyCents, locale) })}
                     >
