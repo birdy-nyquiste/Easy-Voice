@@ -1,14 +1,20 @@
 import { eq } from "drizzle-orm";
+import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
 import { emailOtps, sessions } from "@/db/schema";
+import { GET as googleCallback } from "@/app/api/auth/google/callback/route";
 import { loginAction } from "@/app/login/actions";
+import { oauthErrorKey } from "@/app/login/oauth-error";
 import { createSession, getCurrentUser, logout, requestEmailOtp, upsertUser, verifyEmailOtp } from "@/server/auth";
 import { resetDb } from "./helpers";
 
 const sent: string[] = [];
+/** Set to make the next emails fail, as Resend does in an outage or for a rejected address. */
+let sendFails = false;
 vi.mock("@/server/email", () => ({
   sendEmail: async (msg: { text: string }) => {
+    if (sendFails) throw new Error("Resend 422");
     sent.push(msg.text);
   },
 }));
@@ -36,6 +42,7 @@ const wrong = (code: string) => String((Number(code) + 1) % 1_000_000).padStart(
 beforeEach(async () => {
   await resetDb();
   sent.length = 0;
+  sendFails = false;
   jar.clear();
 });
 
@@ -72,10 +79,12 @@ describe("sign-in codes", () => {
     expect(await verifyEmailOtp(email, code)).toEqual({ ok: false, error: "codeExpired" });
   });
 
-  it("allows five guesses per code", async () => {
+  it("allows five guesses per code, then says the tries ran out", async () => {
     const code = await requestCode();
     for (let i = 0; i < 5; i++) expect(await verifyEmailOtp(email, wrong(code))).toEqual({ ok: false, error: "codeIncorrect" });
-    expect(await verifyEmailOtp(email, code)).toEqual({ ok: false, error: "codeExpired" });
+    expect(await verifyEmailOtp(email, code)).toEqual({ ok: false, error: "tooManyAttempts" });
+    // A new code gets its own tries.
+    expect(await verifyEmailOtp(email, await requestCode())).toEqual({ ok: true });
   });
 
   it("allows five guesses per code even when they arrive at once", async () => {
@@ -84,7 +93,7 @@ describe("sign-in codes", () => {
     expect(results.filter((r) => !r.ok && r.error === "codeIncorrect")).toHaveLength(5);
     const [row] = await db.select().from(emailOtps).where(eq(emailOtps.email, email));
     expect(row.attempts).toBe(5);
-    expect(await verifyEmailOtp(email, code)).toEqual({ ok: false, error: "codeExpired" });
+    expect(await verifyEmailOtp(email, code)).toEqual({ ok: false, error: "tooManyAttempts" });
   });
 
   it("lets only one of several simultaneous correct entries sign in", async () => {
@@ -99,6 +108,14 @@ describe("sign-in codes", () => {
     expect(results.filter((r) => r.ok)).toHaveLength(5);
     expect(results.filter((r) => !r.ok && r.error === "tooManyCodes")).toHaveLength(7);
     expect(await db.select().from(emailOtps).where(eq(emailOtps.email, email))).toHaveLength(5);
+  });
+
+  it("doesn't count a code whose email failed to send toward the hourly limit", async () => {
+    sendFails = true;
+    for (let i = 0; i < 5; i++) expect(await requestEmailOtp(email, "en")).toEqual({ ok: false, error: "emailSendFailed" });
+    expect(await db.select().from(emailOtps)).toHaveLength(0);
+    sendFails = false;
+    expect(await verifyEmailOtp(email, await requestCode())).toEqual({ ok: true });
   });
 });
 
@@ -118,6 +135,49 @@ describe("login form steps", () => {
   it("goes back to the email step to use a different address", async () => {
     expect(await loginAction({ step: "code", email }, form({ email, intent: "change" }))).toEqual({ step: "email", email });
     expect(sent).toHaveLength(0);
+  });
+
+  it("keeps the typed address when the code email can't be sent", async () => {
+    sendFails = true;
+    expect(await loginAction({ step: "email" }, form({ email }))).toEqual({
+      step: "email",
+      email,
+      error: "We couldn't send the code. Check the address and try again.",
+    });
+  });
+
+  it("says when a resend went out, and keeps saying only the newest code works after a wrong one", async () => {
+    expect(await loginAction({ step: "email" }, form({ email }))).toEqual({ step: "code", email });
+    const first = sent.at(-1)!.match(/\d{6}/)![0];
+    const resent = await loginAction({ step: "code", email }, form({ email, intent: "send" }));
+    expect(resent).toEqual({ step: "code", email, resent: true });
+    const newest = sent.at(-1)!.match(/\d{6}/)![0];
+    // The first email's code no longer works (in the rare case the two match, any other code will do).
+    const old = first === newest ? wrong(newest) : first;
+    expect(await loginAction(resent, form({ email, code: old }))).toEqual({ step: "code", email, resent: true, error: "Incorrect code." });
+  });
+});
+
+describe("Google sign-in", () => {
+  /** Where the callback sends the browser, without the app's origin. */
+  async function callback(query: string): Promise<string> {
+    jar.set("g_state", "s1");
+    jar.set("g_verifier", "v1");
+    const res = await googleCallback(new NextRequest(`http://localhost:3000/api/auth/google/callback?${query}`));
+    const to = new URL(res.headers.get("location")!);
+    return to.pathname + to.search;
+  }
+
+  it("goes back to sign-in without an error when the user cancels at Google", async () => {
+    expect(await callback("error=access_denied&state=s1")).toBe("/login");
+    expect(await callback("error=server_error&state=s1")).toBe("/login?error=google_failed");
+    expect(await callback("code=c1&state=forged")).toBe("/login?error=google_state");
+    expect(jar.size).toBe(0);
+  });
+
+  it("shows a known error message only for the codes the callback sends", () => {
+    expect(oauthErrorKey("google_state")).toBe("googleState");
+    for (const odd of ["constructor", "toString", "__proto__", "hasOwnProperty", "nope"]) expect(oauthErrorKey(odd)).toBe("failed");
   });
 });
 

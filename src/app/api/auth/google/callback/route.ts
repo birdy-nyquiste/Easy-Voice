@@ -14,6 +14,11 @@ export async function GET(req: NextRequest) {
   const verifier = jar.get("g_verifier")?.value;
   jar.delete("g_state");
   jar.delete("g_verifier");
+  // Google sends ?error= without a code when the user cancels (access_denied) or something fails on
+  // its side; a cancel is the user's choice, not an expired sign-in.
+  const googleError = req.nextUrl.searchParams.get("error");
+  if (googleError === "access_denied") return NextResponse.redirect(new URL("/login", config.appUrl));
+  if (googleError) return fail("google_failed");
   if (!code || !state || !verifier || state !== expectedState) return fail("google_state");
 
   try {

@@ -51,10 +51,11 @@ export default async function MessagesPage() {
                 <Link href={threadHref(c.from)} className="flex items-start justify-between gap-4 px-5 py-3 hover:bg-stone-50">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <span className={`whitespace-nowrap ${c.unread ? "font-semibold" : "font-medium"}`}>{c.name ?? formatPhone(c.from)}</span>
+                      {/* Names run up to 60 characters, so they truncate instead of pushing past the card on phones. */}
+                      <span className={`min-w-0 max-w-full truncate ${c.unread ? "font-semibold" : "font-medium"}`}>{c.name ?? formatPhone(c.from)}</span>
                       {c.name && <span className="whitespace-nowrap text-xs text-stone-500">{formatPhone(c.from)}</span>}
                       {c.unread > 0 && <span className="whitespace-nowrap"><Badge tone="blue">{t("newCount", { count: c.unread })}</Badge></span>}
-                      {c.count > 1 && <span className="whitespace-nowrap text-xs text-stone-400">{t("textCount", { count: c.count })}</span>}
+                      {c.count > 1 && <span className="whitespace-nowrap text-xs text-stone-500">{t("textCount", { count: c.count })}</span>}
                     </div>
                     <p className={`mt-0.5 truncate text-sm ${c.unread ? "text-stone-800" : "text-stone-500"}`}>{messagePreview(c.last, t)}</p>
                   </div>

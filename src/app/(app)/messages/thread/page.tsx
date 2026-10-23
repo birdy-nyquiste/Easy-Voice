@@ -8,7 +8,7 @@ import { requireUser } from "@/server/auth";
 import { getContactName, getConversation, MAX_CONTACT_NAME_LENGTH } from "@/server/messages";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { deleteConversationAction, saveContactNameAction } from "../actions";
-import { attachmentNote } from "../format";
+import { messageBody } from "../format";
 import { MarkRead } from "./mark-read";
 import { viewerTimeZone } from "@/server/time-zone";
 
@@ -60,19 +60,18 @@ export default async function ThreadPage({ searchParams }: { searchParams: Promi
 
       <Card>
         <ul className="space-y-4">
-          {texts.map((m) => (
-            <li key={m.id} className="max-w-prose">
-              <div className="inline-block whitespace-pre-wrap break-words rounded-2xl rounded-tl-sm bg-stone-100 px-4 py-2 text-sm text-stone-900">
-                {m.body == null ? (
-                  <span className="italic text-stone-500">{t("deletedAfter", { days: config.policy.retentionDays })}</span>
-                ) : (
-                  m.body || <span className="italic text-stone-500">{t("noText")}</span>
-                )}
-                {m.body != null && attachmentNote(m, t) && <span className="mt-1 block text-xs text-stone-500">{attachmentNote(m, t)}</span>}
-              </div>
-              <div className="mt-1 text-xs text-stone-400">{formatDateTime(m.receivedAt, locale, tz)}</div>
-            </li>
-          ))}
+          {texts.map((m) => {
+            const { text, placeholder, note } = messageBody(m, t);
+            return (
+              <li key={m.id} className="max-w-prose">
+                <div className="inline-block whitespace-pre-wrap break-words rounded-2xl rounded-tl-sm bg-stone-100 px-4 py-2 text-sm text-stone-900">
+                  {placeholder ? <span className="italic text-stone-500">{text}</span> : text}
+                  {note && <span className="mt-1 block text-xs text-stone-500">{note}</span>}
+                </div>
+                <div className="mt-1 text-xs text-stone-500">{formatDateTime(m.receivedAt, locale, tz)}</div>
+              </li>
+            );
+          })}
         </ul>
         <p className="mt-6 border-t border-stone-100 pt-3 text-xs text-stone-500">
           {t("footer", { days: config.policy.retentionDays })}

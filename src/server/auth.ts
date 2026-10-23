@@ -41,22 +41,28 @@ export async function requestEmailOtp(rawEmail: string, locale: Locale): Promise
 
   const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
   // Count and insert under a per-email lock, so parallel requests can't each pass the hourly limit.
-  const allowed = await withLock(`otp:${email}`, async (tx) => {
+  const otpId = await withLock(`otp:${email}`, async (tx) => {
     const [{ count }] = await tx
       .select({ count: sql<number>`count(*)::int` })
       .from(emailOtps)
       .where(and(eq(emailOtps.email, email), gt(emailOtps.createdAt, new Date(Date.now() - 3600_000))));
-    if (count >= OTP_MAX_PER_HOUR) return false;
-    await tx.insert(emailOtps).values({
-      email,
-      codeHash: hashOtp(email, code),
-      expiresAt: new Date(Date.now() + OTP_TTL_MS),
-    });
-    return true;
+    if (count >= OTP_MAX_PER_HOUR) return null;
+    const [row] = await tx
+      .insert(emailOtps)
+      .values({ email, codeHash: hashOtp(email, code), expiresAt: new Date(Date.now() + OTP_TTL_MS) })
+      .returning({ id: emailOtps.id });
+    return row.id;
   });
-  if (!allowed) return { ok: false, error: "tooManyCodes" };
+  if (!otpId) return { ok: false, error: "tooManyCodes" };
   const t = translator(locale, "email");
-  await sendEmail({ to: email, subject: t("otpSubject", { code }), text: t("otpBody", { code }) });
+  try {
+    await sendEmail({ to: email, subject: t("otpSubject", { code }), text: t("otpBody", { code }) });
+  } catch (err) {
+    // A code that never arrived shouldn't count toward the hourly limit.
+    console.error("Sign-in code email failed", err);
+    await db.delete(emailOtps).where(eq(emailOtps.id, otpId));
+    return { ok: false, error: "emailSendFailed" };
+  }
   return { ok: true };
 }
 
@@ -77,7 +83,8 @@ export async function verifyEmailOtp(rawEmail: string, code: string): Promise<Au
     .set({ attempts: sql`${emailOtps.attempts} + 1` })
     .where(and(eq(emailOtps.id, otp.id), isNull(emailOtps.consumedAt), lt(emailOtps.attempts, OTP_MAX_ATTEMPTS)))
     .returning({ id: emailOtps.id });
-  if (!spent) return { ok: false, error: "codeExpired" };
+  // The code is out of tries (or another request just used it, which is too rare to word apart).
+  if (!spent) return { ok: false, error: "tooManyAttempts" };
 
   const expected = Buffer.from(otp.codeHash);
   const actual = Buffer.from(hashOtp(email, code.trim()));

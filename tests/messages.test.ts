@@ -1,7 +1,10 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
-import { ledgerEntries, messages, phoneNumbers, users } from "@/db/schema";
+import { contacts, ledgerEntries, messages, phoneNumbers, users, type Message } from "@/db/schema";
+import { messageBody, messagePreview } from "@/app/(app)/messages/format";
+import { translator } from "@/i18n/messages";
+import { config } from "@/lib/config";
 import {
   countUnreadMessages,
   deleteConversation,
@@ -154,6 +157,33 @@ describe("conversations", () => {
     expect(await balance(user.id)).toBe(994);
   });
 
+  it("lists every sender with full counts, however many texts a busier sender has", async () => {
+    const { user, number } = await makeLine(1000);
+    const t0 = Date.now() - 3600_000;
+    await handleInboundMessage(text(number.e164, { from: "+12025550001", text: "a1", occurredAt: new Date(t0) }));
+    await db.insert(messages).values(
+      Array.from({ length: 600 }, (_, i) => ({
+        userId: user.id,
+        phoneNumberId: number.id,
+        fromNumber: "+12025550002",
+        toNumber: number.e164,
+        body: `b${i}`,
+        providerMessageId: `bulk-${i}`,
+        receivedAt: new Date(t0 + 1000 * (i + 1)),
+        readAt: i < 590 ? new Date() : null,
+      })),
+    );
+
+    const list = await listConversations(user.id);
+    expect(list.map((c) => [c.from, c.count, c.unread, c.last.body])).toEqual([
+      ["+12025550002", 600, 10, "b599"],
+      ["+12025550001", 1, 1, "a1"],
+    ]);
+    expect(await countUnreadMessages(user.id)).toBe(11);
+    // The limit is on conversations.
+    expect((await listConversations(user.id, 1)).map((c) => c.from)).toEqual(["+12025550002"]);
+  });
+
   it("purges text content past retention", async () => {
     const { number } = await makeLine(1000);
     const old = new Date(Date.now() - 40 * 24 * 3600 * 1000);
@@ -202,5 +232,40 @@ describe("contact names", () => {
   it("rejects overly long names", async () => {
     const user = await makeUser();
     await expect(setContactName(user.id, "+12025550001", "x".repeat(61))).rejects.toThrow("under 60");
+  });
+
+  it("names only senders who have texted the user, including deleted conversations", async () => {
+    const { user, number } = await makeLine(1000);
+    const other = await makeUser();
+    await handleInboundMessage(text(number.e164, { from: "+12025550001" }));
+
+    for (const [userId, from] of [
+      [user.id, "+12025550009"], // never texted
+      [other.id, "+12025550001"], // texted someone else
+      [user.id, "+1".padEnd(100_000, "2")],
+    ]) {
+      await expect(setContactName(userId, from, "Dentist")).rejects.toThrow("not found");
+    }
+    expect(await db.select().from(contacts)).toHaveLength(0);
+
+    await deleteConversation(user.id, "+12025550001");
+    await setContactName(user.id, "+12025550001", "Dentist");
+    expect(await getContactName(user.id, "+12025550001")).toBe("Dentist");
+  });
+});
+
+describe("text bodies", () => {
+  const t = translator("en", "messages") as unknown as Parameters<typeof messageBody>[1];
+  const body = (fields: Partial<Message>) => ({ body: "", mediaCount: 0, ...fields }) as Message;
+
+  it("words purged, empty and picture-only texts the same in the list and the thread", () => {
+    const purged = `Deleted after ${config.policy.retentionDays} days.`;
+    expect(messageBody(body({ body: "hi", mediaCount: 2 }), t)).toEqual({ text: "hi", placeholder: false, note: "2 attachments (not shown)" });
+    expect(messageBody(body({ body: null, mediaCount: 2 }), t)).toEqual({ text: purged, placeholder: true, note: null });
+    expect(messageBody(body({}), t)).toEqual({ text: "(no text)", placeholder: true, note: null });
+
+    expect(messagePreview(body({ body: null }), t)).toBe(purged);
+    expect(messagePreview(body({}), t)).toBe("(no text)");
+    expect(messagePreview(body({ mediaCount: 1 }), t)).toBe("1 attachment (not shown)");
   });
 });
