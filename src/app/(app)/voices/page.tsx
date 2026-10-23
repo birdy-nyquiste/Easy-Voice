@@ -1,8 +1,9 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { ActionForm, SubmitButton } from "@/components/forms";
-import { Badge, Card, CardTitle, Field, Notice, PageHeader, StatusBadge, Tabs, VoiceGender, inputClass } from "@/components/ui";
+import { Badge, Card, CardTitle, Field, FieldGroup, Notice, PageHeader, StatusBadge, Tabs, VoiceGender, inputClass } from "@/components/ui";
 import { PreviewButton } from "@/components/voice-preview";
 import { config } from "@/lib/config";
 import { formatCents, formatMegabytes } from "@/lib/format";
@@ -12,6 +13,10 @@ import { getElevenLabsKey } from "@/server/elevenlabs-keys";
 import { hasCloneSlot, listStockVoices, listUserVoices, refreshProcessingVoices } from "@/server/voices";
 import { cloneVoiceAction, deleteVoiceAction } from "./actions";
 import { SampleInput } from "./sample-input";
+
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getTranslations("voices"))("title") };
+}
 
 /**
  * Voice Library: every voice the user can give an agent, cloned or built-in, side by side.
@@ -141,7 +146,7 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
             <p className="text-sm text-stone-500">{noProviderReason}</p>
           ) : (
             <ActionForm action={cloneVoiceAction} className="space-y-4" resetOnSuccess>
-              <Field label={t("cloneWith")}>
+              <FieldGroup legend={t("cloneWith")}>
                 <div className="grid gap-2 sm:grid-cols-3">
                   {providers.map((p, i) => (
                     <label
@@ -174,7 +179,7 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
                     </Link>
                   )}
                 </div>
-              </Field>
+              </FieldGroup>
               {providers.length === 0 ? (
                 <p className="text-sm text-stone-500">{noProviderReason}</p>
               ) : (
@@ -202,7 +207,7 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
                       max: formatMegabytes(config.limits.cloneSampleBytes, locale),
                     })}
                   >
-                    <SampleInput maxBytes={config.limits.cloneSampleBytes} />
+                    {(control) => <SampleInput control={control} maxBytes={config.limits.cloneSampleBytes} />}
                   </Field>
                   <label className="flex items-start gap-2 text-sm text-stone-700">
                     <input type="checkbox" name="consent" required className="mt-0.5" />

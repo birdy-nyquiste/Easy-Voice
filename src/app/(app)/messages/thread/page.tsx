@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
 import { ActionForm, SubmitButton } from "@/components/forms";
@@ -11,6 +12,12 @@ import { deleteConversationAction, saveContactNameAction } from "../actions";
 import { messageBody } from "../format";
 import { MarkRead } from "./mark-read";
 import { viewerTimeZone } from "@/server/time-zone";
+
+export async function generateMetadata({ searchParams }: { searchParams: Promise<{ from?: string }> }): Promise<Metadata> {
+  const [user, { from }, t] = await Promise.all([requireUser(), searchParams, getTranslations("messages")]);
+  if (!from) return { title: t("title") };
+  return { title: t("threadTitle", { name: (await getContactName(user.id, from)) ?? formatPhone(from) }) };
+}
 
 export default async function ThreadPage({ searchParams }: { searchParams: Promise<{ from?: string }> }) {
   const user = await requireUser();

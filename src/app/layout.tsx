@@ -15,7 +15,9 @@ const vietnameseMono = Roboto_Mono({ variable: "--font-vietnamese-mono", subsets
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations("meta");
-  return { title: "Easy Voice", description: t("description") };
+  // Pages set their own title, so tabs and history tell them apart, and screen readers announce a
+  // client navigation (Next only does so when the title changes).
+  return { title: { template: "%s · Easy Voice", default: "Easy Voice" }, description: t("description") };
 }
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

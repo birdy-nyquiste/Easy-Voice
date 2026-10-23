@@ -146,12 +146,15 @@ export async function KnowledgeSection({ agent }: { agent: Agent }) {
                     size: formatNumber(toMegabytes(config.limits.knowledgePdfBytes), locale),
                   })}
                 >
-                  <KnowledgeFileInput
-                    maxPdfBytes={config.limits.knowledgePdfBytes}
-                    maxChars={config.limits.knowledgeFileChars}
-                    tooLarge={errorText(locale, "knowledgeFileTooLarge", { size: toMegabytes(config.limits.knowledgePdfBytes) })}
-                    tooLong={errorText(locale, "knowledgeFileTooLong", { max: config.limits.knowledgeFileChars })}
-                  />
+                  {(control) => (
+                    <KnowledgeFileInput
+                      control={control}
+                      maxPdfBytes={config.limits.knowledgePdfBytes}
+                      maxChars={config.limits.knowledgeFileChars}
+                      tooLarge={errorText(locale, "knowledgeFileTooLarge", { size: toMegabytes(config.limits.knowledgePdfBytes) })}
+                      tooLong={errorText(locale, "knowledgeFileTooLong", { max: config.limits.knowledgeFileChars })}
+                    />
+                  )}
                 </Field>
                 <SubmitButton>{t("addFor", { price })}</SubmitButton>
               </ActionForm>

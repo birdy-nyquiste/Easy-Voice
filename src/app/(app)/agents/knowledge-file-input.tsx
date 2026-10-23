@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { FieldControl } from "@/components/ui";
 
 /**
  * The knowledge file picker. Files over the limits are refused here: the server never sees an upload
@@ -8,11 +9,14 @@ import { useState } from "react";
  * The messages come rendered from the server, so their numbers are formatted like the server's.
  */
 export function KnowledgeFileInput({
+  control,
   maxPdfBytes,
   maxChars,
   tooLarge,
   tooLong,
 }: {
+  /** From the Field it sits in, for its label and hint. */
+  control: FieldControl;
   maxPdfBytes: number;
   maxChars: number;
   tooLarge: string;
@@ -22,6 +26,7 @@ export function KnowledgeFileInput({
   return (
     <>
       <input
+        {...control}
         type="file"
         name="file"
         required

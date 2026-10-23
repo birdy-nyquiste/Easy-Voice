@@ -42,8 +42,9 @@ API details and open questions are in [docs/telnyx-api-notes.md](docs/telnyx-api
 
 ## Models
 
-The LLM and speech-to-text models are set for the whole platform, never per user (SPEC §16):
-`TELNYX_LLM_MODEL` (default `moonshotai/Kimi-K2.6`), `TELNYX_STT_MODEL` (default `assemblyai/universal-3-5-pro`) and
+`TELNYX_LLM_MODEL` (default `moonshotai/Kimi-K2.6`) is the language model for agents left on the default. Users can
+pick another model per agent from the listed ones (`src/server/telnyx/models.ts`; SPEC §16). Speech-to-text is set for
+the whole platform, never per user: `TELNYX_STT_MODEL` (default `assemblyai/universal-3-5-pro`) and
 `TELNYX_STT_LANGUAGE` (default `auto`). Voices are picked per agent from the Telnyx catalog (see
 `src/server/telnyx/stock-voices.ts`). Each agent records which settings it was synced with. After you change these
 variables and deploy, existing agents are re-synced by the daily cron, or when their owner opens the Agents page.
@@ -59,15 +60,17 @@ or the feature stays off. Details and open questions are in [docs/elevenlabs-not
 
 ## Stripe
 
-Stripe only processes one-time top-up payments; there are no subscriptions. Number rental and usage are deducted from the balance. A top-up is between `MIN_TOPUP_CENTS` (default 1000) and `MAX_TOPUP_CENTS` (default 50000); the billing page offers the $10, $25, $50 and $100 presets that fall within them. Set `STRIPE_SECRET_KEY`. Point a webhook at `/api/webhooks/stripe` for the `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed` and `checkout.session.expired` events, then set `STRIPE_WEBHOOK_SECRET`. Locally: `stripe listen --forward-to localhost:3000/api/webhooks/stripe`.
+Stripe only processes one-time top-up payments; there are no subscriptions. Number rental and usage are deducted from the balance. A top-up is between `MIN_TOPUP_CENTS` (default 1000) and `MAX_TOPUP_CENTS` (default 50000); the billing page offers the $10, $25, $50 and $100 presets that fall within them. Set `STRIPE_SECRET_KEY`. Point a webhook at `/api/webhooks/stripe` for the `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed` and `checkout.session.expired` events, then set `STRIPE_WEBHOOK_SECRET`. Top-ups stay off until both are set. Locally: `stripe listen --forward-to localhost:3000/api/webhooks/stripe`.
 
 ## Deploying to Vercel
 
 - Connect a Neon database under Vercel → Storage. It provides `DATABASE_URL` (pooled) and `DATABASE_URL_UNPOOLED`.
-- Set the remaining production variables (see `.env.example`). In production the app refuses to start without
-  `AUTH_SECRET`, `CRON_SECRET` and `DATABASE_URL`, rather than falling back to dev defaults.
-- Vercel runs `vercel-build`, which applies pending migrations (`scripts/migrate.mjs`, using the unpooled URL) and then
-  builds. **Only production builds migrate.** Preview deploys share the production database, so they skip migrations.
+- Set the remaining production variables (see `.env.example`). In production (preview deploys included) the app
+  refuses to start without `DATABASE_URL`, `AUTH_SECRET`, `CRON_SECRET`, `APP_URL`, `RESEND_API_KEY` and `EMAIL_FROM`
+  (`src/instrumentation.ts`), rather than falling back to dev defaults or printing sign-in codes to the logs.
+- Vercel runs `vercel-build`, which builds and then applies pending migrations (`scripts/migrate.mjs`, using the
+  unpooled URL), so a failed build never leaves the live deployment on a schema it doesn't know. **Only production
+  builds migrate.** Preview deploys share the production database, so they skip migrations.
 
 ## Daily jobs
 

@@ -4,6 +4,7 @@
   },
   "common": {
     "working": "Đang xử lý…",
+    "loading": "Đang tải…",
     "saving": "Đang lưu…",
     "unknownNumber": "Số không xác định",
     "checking": "Đang kiểm tra…",

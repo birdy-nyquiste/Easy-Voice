@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
 import { ActionForm, SubmitButton } from "@/components/forms";
@@ -15,6 +16,12 @@ import { listStockVoices, listUserVoices } from "@/server/voices";
 import { deleteAgentAction } from "../actions";
 import { AgentForm } from "../agent-form";
 import { KnowledgeSection } from "../knowledge-section";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const [user, { id }] = await Promise.all([requireUser(), params]);
+  const agent = await getUserAgent(user.id, id);
+  return { title: agent?.name ?? (await getTranslations("agents"))("title") };
+}
 
 export default async function AgentPage({
   params,

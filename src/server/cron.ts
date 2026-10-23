@@ -16,8 +16,9 @@ import { refreshProcessingVoices } from "./voices";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Daily maintenance: renewals, grace-period releases, retention purge, expired sign-ins, stuck orders
- * and clones, texting setup.
+ * Daily maintenance: knowledge sources, agent resync, deleted agents' assistants, stuck number orders and
+ * clones, grace-period releases, renewals, texting setup, calls whose hangup never came, retention purge
+ * (calls and texts), expired sign-ins and missed call results.
  * Each stage runs even if an earlier one fails (a provider error must not hold up the retention
  * purge); failures are logged and reported by throwing once everything has run.
  */

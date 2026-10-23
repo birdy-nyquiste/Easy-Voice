@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { ButtonLink, Card, Empty, PageHeader, StatusBadge } from "@/components/ui";
@@ -8,6 +9,10 @@ import { requireUser } from "@/server/auth";
 import { getElevenLabsKey } from "@/server/elevenlabs-keys";
 import { isElevenLabsVoice } from "@/server/telnyx/stock-voices";
 import { listUserNumbers } from "@/server/numbers";
+
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getTranslations("agents"))("title") };
+}
 
 export default async function AgentsPage() {
   const user = await requireUser();

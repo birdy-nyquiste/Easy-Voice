@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 import { Badge, Card, Empty, Notice, PageHeader } from "@/components/ui";
@@ -9,6 +10,10 @@ import { listUserNumbers } from "@/server/numbers";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { messagePreview, threadHref } from "./format";
 import { viewerTimeZone } from "@/server/time-zone";
+
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getTranslations("messages"))("title") };
+}
 
 export default async function MessagesPage() {
   const user = await requireUser();

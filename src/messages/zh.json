@@ -4,6 +4,7 @@
   },
   "common": {
     "working": "处理中…",
+    "loading": "加载中…",
     "saving": "保存中…",
     "unknownNumber": "未知号码",
     "checking": "验证中…",

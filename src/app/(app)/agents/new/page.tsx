@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { Empty, PageHeader } from "@/components/ui";
@@ -7,6 +8,10 @@ import { listModels, listUserAgents } from "@/server/agents";
 import { requireUser } from "@/server/auth";
 import { listStockVoices, listUserVoices } from "@/server/voices";
 import { AgentForm } from "../agent-form";
+
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getTranslations("agents"))("new") };
+}
 
 /** Pick a template first; the form then starts from it (?template=<id>). */
 export default async function NewAgentPage({ searchParams }: { searchParams: Promise<{ template?: string }> }) {

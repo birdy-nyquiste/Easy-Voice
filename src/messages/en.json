@@ -4,6 +4,7 @@
   },
   "common": {
     "working": "Working…",
+    "loading": "Loading…",
     "saving": "Saving…",
     "unknownNumber": "Unknown number",
     "checking": "Checking…",

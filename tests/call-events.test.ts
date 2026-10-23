@@ -532,3 +532,14 @@ describe("webhook redelivery", () => {
     expect(ran).toBe(true);
   });
 });
+
+describe("call page polling", () => {
+  it("waits for results only for a while after hangup, and only for completed calls", () => {
+    const now = Date.now();
+    const ended = (minutesAgo: number) => ({ status: "completed" as const, resultsFetched: false, endedAt: new Date(now - minutesAgo * 60_000) });
+    expect(isAwaitingResults(ended(1), now)).toBe(true);
+    expect(isAwaitingResults(ended(RESULTS_WAIT_MS / 60_000 + 1), now)).toBe(false);
+    expect(isAwaitingResults({ ...ended(1), resultsFetched: true }, now)).toBe(false);
+    expect(isAwaitingResults({ ...ended(1), status: "failed" }, now)).toBe(false);
+  });
+});

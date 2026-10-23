@@ -4,6 +4,7 @@
   },
   "common": {
     "working": "Procesando…",
+    "loading": "Cargando…",
     "saving": "Guardando…",
     "unknownNumber": "Número desconocido",
     "checking": "Verificando…",

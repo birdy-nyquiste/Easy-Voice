@@ -11,7 +11,7 @@
     "db:migrate": "drizzle-kit migrate",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "vercel-build": "node scripts/migrate.mjs && next build"
+    "vercel-build": "next build && node scripts/migrate.mjs"
   },
   "dependencies": {
     "arctic": "^3.7.0",

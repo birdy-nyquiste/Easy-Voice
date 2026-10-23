@@ -174,6 +174,15 @@ describe("stored text", () => {
     expect(showStored("zh", "Old text", { key: "stored.gone" })).toBe("Old text");
     expect(showStored("zh", null, null)).toBeNull();
   });
+
+  it("falls back to the stored English when the message now needs a value the row doesn't have", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    // A row written before {name} was added to the message.
+    expect(showStored("zh", 'Voice clone "Mom"', { key: "stored.ledgerVoiceClone" })).toBe('Voice clone "Mom"');
+    expect(showStored("es", "Audio sample is too large.", { key: "errors.audioTooLarge", values: {} })).toBe("Audio sample is too large.");
+    expect(error).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
 });
 
 describe("pre-i18n backfill (drizzle/0013)", () => {

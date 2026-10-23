@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 import { ActionForm, SubmitButton } from "@/components/forms";
@@ -8,6 +9,10 @@ import { getElevenLabsKey } from "@/server/elevenlabs-keys";
 import { formatDateTime } from "@/lib/format";
 import { connectElevenLabsAction, disconnectElevenLabsAction } from "./actions";
 import { viewerTimeZone } from "@/server/time-zone";
+
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getTranslations("account"))("apiKeys") };
+}
 
 /** Third-party accounts the user brings (docs/elevenlabs-notes.md §5). */
 export default async function ApiKeysPage() {

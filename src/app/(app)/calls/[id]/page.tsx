@@ -1,7 +1,10 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
+import { cache } from "react";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { Badge, Card, CardTitle, Notice, PageHeader, StatusBadge } from "@/components/ui";
+import type { Call } from "@/db/schema";
 import { formatCents, formatDateTime, formatDuration, formatPhone } from "@/lib/format";
 import { showStored, type StoredMessage } from "@/lib/stored-text";
 import { requireUser } from "@/server/auth";
@@ -22,25 +25,37 @@ const ROUTINE_OUTCOMES = new Set<StoredMessage["key"]>([
   "stored.outcomeEndedEarly",
   "stored.outcomeBusy",
 ]);
+// The title and the page share one load per request: loading a call may ask the provider for its results.
+const loadCall = cache(async (id: string) => getUserCall((await requireUser()).id, id));
+
+/** "Call from (415) 555-0100": the page header, and the browser tab. */
+async function callTitle(call: Call) {
+  const t = await getTranslations("calls");
+  const other = call.direction === "inbound" ? call.fromNumber : call.toNumber;
+  return /^\+\d/.test(other) ? t(call.direction === "inbound" ? "from" : "toTitle", { number: formatPhone(other) }) : t("fromUnknown");
+}
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const call = await loadCall((await params).id);
+  return { title: call ? await callTitle(call) : (await getTranslations("calls"))("title") };
+}
 
 export default async function CallPage({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requireUser();
   const { id } = await params;
-  const call = await getUserCall(user.id, id);
+  const call = await loadCall(id); // signs the viewer in, or redirects
   if (!call) notFound();
   const agentName = await callAgentName(call);
   const live = isCallLive(call);
   const awaitingResults = isAwaitingResults(call);
   const [t, tc, locale] = await Promise.all([getTranslations("calls"), getTranslations("common"), getLocale()]);
   const tz = await viewerTimeZone();
-  const other = call.direction === "inbound" ? call.fromNumber : call.toNumber;
 
   return (
     <div className="space-y-6">
       {(live || awaitingResults) && <AutoRefresh everyMs={live ? 1500 : 4000} />}
       <PageHeader
         back={{ href: "/calls", label: t("all") }}
-        title={/^\+\d/.test(other) ? t(call.direction === "inbound" ? "from" : "toTitle", { number: formatPhone(other) }) : t("fromUnknown")}
+        title={await callTitle(call)}
         description={formatDateTime(call.createdAt, locale, tz)}
         action={<StatusBadge status={call.status} />}
       />

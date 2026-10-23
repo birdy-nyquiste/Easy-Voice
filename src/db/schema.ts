@@ -92,7 +92,11 @@ export const ledgerEntries = pgTable(
     amountCents: integer("amount_cents").notNull(), // + credit, - debit
     balanceAfterCents: integer("balance_after_cents").notNull(),
     kind: ledgerKind("kind").notNull(),
-    /** Guarantees a charge/credit is applied once, e.g. "call:<id>", "stripe:<session>". */
+    /**
+     * Guarantees a charge/credit is applied once: "call:<id>", "sms:<message id>", "number:<id>:0" (first month)
+     * or "number:<id>:<paid through>" (renewals), "voice:<id>", "knowledge:<id>", "payment:<payments.id>",
+     * "dev-credit:<uuid>"; a refund adds ":refund".
+     */
     idempotencyKey: text("idempotency_key").notNull().unique(),
     refType: text("ref_type"),
     refId: text("ref_id"),

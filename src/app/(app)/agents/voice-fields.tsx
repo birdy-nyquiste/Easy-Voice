@@ -33,13 +33,17 @@ export function VoiceFields({
   return (
     <>
       <Field label={t("voice")} hint={t("voiceHint")}>
-        <div className="flex gap-2">
-          <select name="voice" required value={voice} onChange={(e) => setVoice(e.target.value)} className={inputClass}>
-            {voiceOptions}
-          </select>
-          <PreviewButton voice={voice} />
-        </div>
-        {voiceGone && !voice && <p className="mt-1 text-sm text-red-600">{t("voiceGone")}</p>}
+        {(control) => (
+          <>
+            <div className="flex gap-2">
+              <select {...control} name="voice" required value={voice} onChange={(e) => setVoice(e.target.value)} className={inputClass}>
+                {voiceOptions}
+              </select>
+              <PreviewButton voice={voice} />
+            </div>
+            {voiceGone && !voice && <p className="mt-1 text-sm text-red-600">{t("voiceGone")}</p>}
+          </>
+        )}
       </Field>
       <ModelRow label={t("tts")}>
         <span className="font-medium">{ttsByVoice[voice] ?? "—"}</span>
@@ -47,19 +51,22 @@ export function VoiceFields({
       </ModelRow>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label={t("voiceSpeed")} hint={t("voiceSpeedHint", { normal: speedText(1) })}>
-          <div className="flex items-center gap-3">
-            <input
-              type="range"
-              name="voiceSpeed"
-              min={VOICE_SPEED.min}
-              max={VOICE_SPEED.max}
-              step={VOICE_SPEED.step}
-              value={speed}
-              onChange={(e) => setSpeed(Number(e.target.value))}
-              className="w-full accent-stone-900"
-            />
-            <span className="w-12 shrink-0 text-right text-sm tabular-nums text-stone-700">{t("speedValue", { speed: speedText(speed) })}</span>
-          </div>
+          {(control) => (
+            <div className="flex items-center gap-3">
+              <input
+                {...control}
+                type="range"
+                name="voiceSpeed"
+                min={VOICE_SPEED.min}
+                max={VOICE_SPEED.max}
+                step={VOICE_SPEED.step}
+                value={speed}
+                onChange={(e) => setSpeed(Number(e.target.value))}
+                className="w-full accent-stone-900"
+              />
+              <span className="w-12 shrink-0 text-right text-sm tabular-nums text-stone-700">{t("speedValue", { speed: speedText(speed) })}</span>
+            </div>
+          )}
         </Field>
         <Field label={t("backgroundSound")}>
           <select name="backgroundSound" defaultValue={behavior.backgroundSound} className={inputClass}>

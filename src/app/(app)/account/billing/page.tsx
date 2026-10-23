@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { getLocale, getTranslations } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { AutoRefresh } from "@/components/auto-refresh";
@@ -17,6 +18,10 @@ import { viewerTimeZone } from "@/server/time-zone";
 const PRESETS = [10, 25, 50, 100];
 /** Activity rows shown. */
 const LEDGER_LIMIT = 100;
+
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getTranslations("account"))("billing") };
+}
 
 export default async function BillingPage({
   searchParams,

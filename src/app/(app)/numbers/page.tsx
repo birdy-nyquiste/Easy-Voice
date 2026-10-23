@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 import { AutoRefresh } from "@/components/auto-refresh";
@@ -13,6 +14,10 @@ import { listRecentNegativeBalanceReleases, listUserNumbers, refreshPendingNumbe
 import { NegativeBalanceNotice } from "../negative-balance-notice";
 import { assignAgentAction, buyNumberAction, releaseNumberAction, simulateInboundAction, simulateTextAction } from "./actions";
 import { viewerTimeZone } from "@/server/time-zone";
+
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getTranslations("numbers"))("title") };
+}
 
 export default async function NumbersPage({ searchParams }: { searchParams: Promise<{ area?: string }> }) {
   const user = await requireUser();

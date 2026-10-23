@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 import { ActionForm, SubmitButton } from "@/components/forms";
@@ -19,6 +20,10 @@ import { viewerTimeZone } from "@/server/time-zone";
 function callAgent(a: Agent): CallAgent {
   const ask = readVariables(a.variables).filter((v) => v.askPerCall);
   return { id: a.id, name: a.name, ask: ask.map(({ key, value }) => ({ key, value })) };
+}
+
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getTranslations("calls"))("title") };
 }
 
 export default async function CallsPage() {

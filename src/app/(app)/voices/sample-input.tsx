@@ -2,7 +2,7 @@
 
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
-import { buttonClass, inputClass } from "@/components/ui";
+import { buttonClass, inputClass, type FieldControl } from "@/components/ui";
 import { formatMegabytes } from "@/lib/format";
 
 /**
@@ -17,8 +17,11 @@ function recordingProblem(err: unknown): "micDenied" | "micNotFound" | "micUnava
   return "recordingUnsupported";
 }
 
-/** File input that can also be filled from a microphone recording. */
-export function SampleInput({ maxBytes }: { maxBytes: number }) {
+/**
+ * File input that can also be filled from a microphone recording. `control` (from the Field it sits in)
+ * labels the file input only, not the record and remove buttons beside it.
+ */
+export function SampleInput({ control, maxBytes }: { control: FieldControl; maxBytes: number }) {
   const t = useTranslations("voices");
   const tc = useTranslations("common");
   const locale = useLocale();
@@ -103,6 +106,7 @@ export function SampleInput({ maxBytes }: { maxBytes: number }) {
   return (
     <div className="space-y-2">
       <input
+        {...control}
         ref={fileRef}
         type="file"
         name="audio"

@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { config } from "@/lib/config";
@@ -5,6 +6,11 @@ import { getCurrentUser } from "@/server/auth";
 import { LocaleSwitcher } from "@/components/locale-switcher";
 import { LoginForm } from "./login-form";
 import { oauthErrorKey } from "./oauth-error";
+
+export async function generateMetadata(): Promise<Metadata> {
+  // "Sign in to Easy Voice" already names the app.
+  return { title: { absolute: (await getTranslations("login"))("title") } };
+}
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   if (await getCurrentUser()) redirect("/dashboard");
