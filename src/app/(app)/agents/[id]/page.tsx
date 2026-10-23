@@ -4,11 +4,12 @@ import { ActionForm, SubmitButton } from "@/components/forms";
 import { Card, CardTitle, Notice, PageHeader, StatusBadge } from "@/components/ui";
 import { showStored } from "@/lib/stored-text";
 import { config } from "@/lib/config";
-import { getUserAgent, listModels, resyncStaleAgents } from "@/server/agents";
+import { getUserAgent, listModels, resyncStaleAgentsOnView } from "@/server/agents";
 import Link from "next/link";
 import { requireUser } from "@/server/auth";
 import { getElevenLabsKey } from "@/server/elevenlabs-keys";
-import { hasPendingKnowledge, refreshKnowledge } from "@/server/knowledge";
+import { countAgentSources, hasPendingKnowledge, refreshKnowledge } from "@/server/knowledge";
+import { listUserNumbers } from "@/server/numbers";
 import { isElevenLabsVoice } from "@/server/telnyx/stock-voices";
 import { listStockVoices, listUserVoices } from "@/server/voices";
 import { deleteAgentAction } from "../actions";
@@ -30,17 +31,32 @@ export default async function AgentPage({
   if (config.features.knowledgeBase) {
     // Settle sources and catch up the assistant here too, not only in the daily job.
     if (await hasPendingKnowledge(agent.id)) await refreshKnowledge({ agentId: agent.id });
-    if (await resyncStaleAgents(user.id)) agent = (await getUserAgent(user.id, id)) ?? agent;
+    if (await resyncStaleAgentsOnView(user.id)) agent = (await getUserAgent(user.id, id)) ?? agent;
   }
-  const [stock, clones, models, elKey] = await Promise.all([
-    listStockVoices(),
+  const [stock, clones, models, elKey, numbers, sources] = await Promise.all([
+    // Without the catalog the form keeps the agent's current voice and says why there are no others.
+    listStockVoices().catch((err) => {
+      console.error("voice catalog unavailable", err);
+      return null;
+    }),
     listUserVoices(user.id),
     // Without the catalog the form still offers the default model.
     listModels().catch(() => []),
     getElevenLabsKey(user.id),
+    listUserNumbers(user.id),
+    config.features.knowledgeBase ? countAgentSources(agent.id) : 0,
   ]);
   const [t, locale] = await Promise.all([getTranslations("agents"), getLocale()]);
   const keyRejected = isElevenLabsVoice(agent.voiceRef) && Boolean(elKey?.keyInvalidAt);
+  // Say what deleting takes with it: the number's answering, and the paid knowledge base for good.
+  const answers = numbers.some((n) => n.agentId === agent.id && n.status === "active");
+  const deleteConfirm = answers
+    ? sources
+      ? "deleteConfirmNumberKnowledge"
+      : "deleteConfirmNumber"
+    : sources
+      ? "deleteConfirmKnowledge"
+      : "deleteConfirm";
   return (
     <div className="space-y-6">
       <PageHeader back={{ href: "/agents", label: t("all") }} title={agent.name} action={<StatusBadge status={agent.status} />} />
@@ -64,7 +80,7 @@ export default async function AgentPage({
         <CardTitle>{t("dangerZone")}</CardTitle>
         <ActionForm action={deleteAgentAction}>
           <input type="hidden" name="id" value={agent.id} />
-          <SubmitButton variant="danger" confirm={t("deleteConfirm", { name: agent.name })}>
+          <SubmitButton variant="danger" confirm={t(deleteConfirm, { name: agent.name })}>
             {t("delete")}
           </SubmitButton>
         </ActionForm>

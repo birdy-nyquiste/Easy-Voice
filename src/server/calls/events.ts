@@ -60,7 +60,6 @@ function assistantStart(agent: Agent, call: Call): AssistantStart {
   const outbound = call.direction === "outbound";
   return {
     assistantId: agent.providerAssistantId!,
-    voiceRef: agent.voiceRef,
     variables: {
       ...variableDefaults(agent),
       ...call.variables,

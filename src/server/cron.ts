@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { calls, phoneNumbers, users } from "@/db/schema";
 import { config } from "@/lib/config";
 import { stored } from "@/lib/stored-text";
-import { resyncStaleAgents } from "./agents";
+import { deleteLeftoverAssistants, resyncStaleAgents } from "./agents";
 import { purgeExpiredSignIns } from "./auth";
 import { finalizeStaleCalls, purgeCallContent } from "./calls";
 import { fetchCallResults } from "./calls/results";
@@ -35,6 +35,7 @@ export async function runDailyJobs(now = new Date()) {
   // First, so agents whose knowledge base changed are caught up by the resync below.
   await stage("knowledge", runKnowledgeJobs, undefined);
   const resynced = await stage("resync agents", resyncStaleAgents, 0);
+  const assistantsDeleted = await stage("deleted agents' assistants", deleteLeftoverAssistants, 0);
   await stage("pending numbers", refreshPendingNumbers, undefined);
   // Release numbers of users whose balance has been negative past the grace period. Before renewals,
   // so a number that is being released isn't charged another month first.
@@ -104,7 +105,7 @@ export async function runDailyJobs(now = new Date()) {
     0,
   );
 
-  const summary = { renewed, released, callsFinalized, purged, messagesPurged, signInsPurged, resultsFetched, resynced, smsEnabled };
+  const summary = { renewed, released, callsFinalized, purged, messagesPurged, signInsPurged, resultsFetched, resynced, assistantsDeleted, smsEnabled };
   if (failed.length) throw new Error(`Daily jobs failed: ${failed.join(", ")} (others ran: ${JSON.stringify(summary)})`);
   return summary;
 }

@@ -39,7 +39,6 @@ describe("inbound calls", () => {
     expect(created.status).toBe("initiated");
     expect(mockProvider.answer).toHaveBeenCalledWith("cc-1", created.id, {
       assistantId: "assistant-test",
-      voiceRef: "Telnyx.KokoroTTS.af_heart",
       variables: { call_direction: "inbound", call_goal: "", contact_number: "+12025550123", current_time: expect.any(String) },
       greetingOverride: undefined, // inbound keeps the agent's own greeting
     });
@@ -256,7 +255,6 @@ describe("outbound calls", () => {
     await handleCallEvent(event("call.answered", { callControlId: "cc-out", clientState: c.id }));
     expect(mockProvider.startAssistant).toHaveBeenCalledWith("cc-out", {
       assistantId: "assistant-test",
-      voiceRef: "Telnyx.KokoroTTS.af_heart",
       variables: {
         call_direction: "outbound",
         call_goal: "Move my Thursday appointment",

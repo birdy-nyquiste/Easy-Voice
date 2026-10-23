@@ -460,6 +460,15 @@ export async function countUserSources(userId: string, q: Queryable = db): Promi
   return n;
 }
 
+/** The agent's sources (deleting the agent deletes them too). */
+export async function countAgentSources(agentId: string): Promise<number> {
+  const [{ n }] = await db
+    .select({ n: count() })
+    .from(knowledgeSources)
+    .where(and(eq(knowledgeSources.agentId, agentId), ne(knowledgeSources.status, "deleting")));
+  return n;
+}
+
 /** Whether the agent has sources still processing or being deleted (the page keeps polling). */
 export async function hasPendingKnowledge(agentId: string): Promise<boolean> {
   const [{ n }] = await db

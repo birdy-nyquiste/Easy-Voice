@@ -195,7 +195,6 @@ export interface CallVariables {
 
 export interface AssistantStart {
   assistantId: string;
-  voiceRef: string;
   variables: CallVariables;
   /** Replaces the stored greeting for this call only (used for outbound calls). */
   greetingOverride?: string;
@@ -240,6 +239,7 @@ export interface VoiceProvider {
 
   createAssistant(spec: AssistantSpec): Promise<{ assistantId: string }>;
   updateAssistant(assistantId: string, spec: AssistantSpec): Promise<void>;
+  /** Succeeds if the assistant is already gone. */
   deleteAssistant(assistantId: string): Promise<void>;
 
   /** Create a knowledge storage bucket (versioning off). Succeeds if we already own it. */

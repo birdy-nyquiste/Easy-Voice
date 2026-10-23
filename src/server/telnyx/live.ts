@@ -251,6 +251,8 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
         // with exact matches; with it, it tops up with numbers from nearby area codes.
         "filter[best_effort]": "true",
       });
+      // New numbers receive texts (SPEC §17.3), which a voice-only number never could.
+      if (cfg.messagingProfileId) q.append("filter[features][]", "sms");
       if (areaCode) q.set("filter[national_destination_code]", areaCode);
       let res: { data: { phone_number: string; best_effort?: boolean; region_information?: { region_type: string; region_name: string }[] }[] };
       try {
@@ -297,9 +299,15 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
 
     async listStockVoices() {
       if (voiceCache && Date.now() - voiceCache.at < VOICE_CACHE_MS) return voiceCache.voices;
-      // Unlike most endpoints this one isn't wrapped in `data`.
-      const res = await api<{ voices: CatalogVoice[] }>("GET", "/text-to-speech/voices?provider=telnyx");
-      voiceCache = { at: Date.now(), voices: toStockVoices(res.voices) };
+      try {
+        // Unlike most endpoints this one isn't wrapped in `data`.
+        const res = await api<{ voices: CatalogVoice[] }>("GET", "/text-to-speech/voices?provider=telnyx");
+        voiceCache = { at: Date.now(), voices: toStockVoices(res.voices) };
+      } catch (err) {
+        // An outdated catalog beats none: agent pages still load and agents can still be saved.
+        if (!voiceCache) throw err;
+        console.error("voice catalog refresh failed; using the cached one", err);
+      }
       return voiceCache.voices;
     },
 
@@ -314,8 +322,13 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
 
     async listModels() {
       if (modelCache && Date.now() - modelCache.at < VOICE_CACHE_MS) return modelCache.models;
-      const res = await api<{ data: CatalogModel[] }>("GET", "/ai/models");
-      modelCache = { at: Date.now(), models: toOfferedModels(res.data) };
+      try {
+        const res = await api<{ data: CatalogModel[] }>("GET", "/ai/models");
+        modelCache = { at: Date.now(), models: toOfferedModels(res.data) };
+      } catch (err) {
+        if (!modelCache) throw err;
+        console.error("model catalog refresh failed; using the cached one", err);
+      }
       return modelCache.models;
     },
 
@@ -371,7 +384,7 @@ export function createTelnyxProvider(cfg: TelnyxConfig): VoiceProvider {
     },
 
     async deleteAssistant(assistantId) {
-      await api("DELETE", `/ai/assistants/${encodeURIComponent(assistantId)}?hard_delete=true`);
+      await ignoreNotFound(api("DELETE", `/ai/assistants/${encodeURIComponent(assistantId)}?hard_delete=true`));
     },
 
     createBucket: (bucket) => storage.createBucket(bucket),

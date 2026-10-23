@@ -4,16 +4,33 @@ import { db } from "@/db";
 import { agents, voices } from "@/db/schema";
 import { MESSAGES } from "@/i18n/messages";
 import { DEFAULT_BEHAVIOR, readBehavior, undefinedVariables } from "@/lib/agent-settings";
-import { AGENT_TEMPLATES, TEMPLATE_IDS } from "@/lib/agent-templates";
+import { AGENT_TEMPLATES, offeredTemplates, TEMPLATE_IDS } from "@/lib/agent-templates";
 import { config } from "@/lib/config";
 import { errorText } from "@/lib/errors";
-import { createAgent, ENGLISH_ONLY_VOICE_RULE, platformFingerprint, resyncStaleAgents } from "@/server/agents";
+import {
+  createAgent,
+  deleteAgent,
+  deleteLeftoverAssistants,
+  ENGLISH_ONLY_VOICE_RULE,
+  listUserAgents,
+  platformFingerprint,
+  resyncStaleAgents,
+  resyncStaleAgentsOnView,
+  syncAgentQuietly,
+  updateAgent,
+} from "@/server/agents";
 import { mockProvider } from "@/server/telnyx/mock";
+import { MOCK_MODELS, toOfferedModels } from "@/server/telnyx/models";
 import { FeatureNotPermittedError } from "@/server/telnyx/types";
 import { cloneVoice } from "@/server/voices";
 import { makeUser, resetDb } from "./helpers";
 
 const CLONING_UNAVAILABLE = errorText("en", "cloningUnavailable");
+
+async function agentRow(id: string) {
+  const [a] = await db.select().from(agents).where(eq(agents.id, id));
+  return a;
+}
 
 const original = { ...config.telnyx };
 beforeEach(resetDb);
@@ -71,6 +88,106 @@ describe("platform model settings", () => {
     config.telnyx.sttLanguage = "zh";
     expect(await resyncStaleAgents(u1.id)).toBe(1);
     expect(await resyncStaleAgents()).toBe(1);
+  });
+
+  describe("on page views", () => {
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("re-syncs only on the production deployment, so previews don't push their settings over it", async () => {
+      const u = await makeUser();
+      const a = await createAgent(u.id, input);
+      await db.update(agents).set({ syncedConfig: "fingerprint-of-another-deployment" }).where(eq(agents.id, a.id));
+      const update = vi.spyOn(mockProvider, "updateAssistant");
+      vi.stubEnv("VERCEL", "1");
+      vi.stubEnv("VERCEL_ENV", "preview");
+      expect(await resyncStaleAgentsOnView(u.id)).toBe(0);
+      expect(update).not.toHaveBeenCalled();
+      vi.stubEnv("VERCEL_ENV", "production");
+      expect(await resyncStaleAgentsOnView(u.id)).toBe(1);
+      expect(update).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("finishes a save that was cut off before its push, and leaves one that may still be running", async () => {
+    const u = await makeUser();
+    const cutOff = await createAgent(u.id, input);
+    const running = await createAgent(u.id, { ...input, name: "B" });
+    await db.update(agents).set({ status: "syncing", updatedAt: new Date(Date.now() - 11 * 60 * 1000) }).where(eq(agents.id, cutOff.id));
+    await db.update(agents).set({ status: "syncing" }).where(eq(agents.id, running.id));
+    const update = vi.spyOn(mockProvider, "updateAssistant");
+
+    expect(await resyncStaleAgents()).toBe(1);
+    expect(update).toHaveBeenCalledTimes(1);
+    expect((await agentRow(cutOff.id)).status).toBe("ready");
+    expect((await agentRow(running.id)).status).toBe("syncing");
+  });
+});
+
+describe("pushes racing a save", () => {
+  const greeting = (g: string) => `This call may be recorded. ${g}`;
+
+  it("follows a background push of an older copy with the latest config", async () => {
+    const u = await makeUser();
+    const a = await createAgent(u.id, input);
+    await db.update(agents).set({ syncedConfig: "stale" }).where(eq(agents.id, a.id));
+    const olderCopy = await agentRow(a.id);
+    await updateAgent(u.id, a.id, { ...input, greeting: "Saved since" });
+    const update = vi.spyOn(mockProvider, "updateAssistant");
+
+    expect(await syncAgentQuietly(olderCopy)).toBe(true);
+    expect(update.mock.calls.map((c) => c[1].greeting)).toEqual([greeting("Hi"), greeting("Saved since")]);
+    expect(await agentRow(a.id)).toMatchObject({ greeting: "Saved since", status: "ready", syncedConfig: platformFingerprint() });
+  });
+
+  it("ends on the newer of two overlapping saves, whichever request lands last", async () => {
+    const u = await makeUser();
+    const a = await createAgent(u.id, input);
+    const landed: string[] = [];
+    const update = vi.spyOn(mockProvider, "updateAssistant").mockImplementation(async (_id, spec) => {
+      landed.push(spec.greeting);
+    });
+    update.mockImplementationOnce(async (_id, spec) => {
+      // A second save (another tab) completes while the first one's request is still on its way.
+      await updateAgent(u.id, a.id, { ...input, greeting: "Second" });
+      landed.push(spec.greeting);
+    });
+
+    const first = await updateAgent(u.id, a.id, { ...input, greeting: "First" });
+    expect(landed.at(-1)).toBe(greeting("Second"));
+    expect(first).toMatchObject({ greeting: "Second", status: "ready" });
+  });
+});
+
+describe("agent list", () => {
+  it("keeps the order agents were created in, whatever was saved since", async () => {
+    const u = await makeUser();
+    const a = await createAgent(u.id, { ...input, name: "A" });
+    await createAgent(u.id, { ...input, name: "B" });
+    await updateAgent(u.id, a.id, { ...input, name: "A, renamed" });
+    expect((await listUserAgents(u.id)).map((x) => x.name)).toEqual(["A, renamed", "B"]);
+  });
+});
+
+describe("deleting an agent", () => {
+  it("forgets the assistant once the provider has deleted it", async () => {
+    const u = await makeUser();
+    const a = await createAgent(u.id, input);
+    await deleteAgent(u.id, a.id);
+    expect(await agentRow(a.id)).toMatchObject({ deletedAt: expect.any(Date), providerAssistantId: null });
+  });
+
+  it("keeps an assistant the provider didn't delete, and the daily job retries it", async () => {
+    const u = await makeUser();
+    const a = await createAgent(u.id, input);
+    const del = vi.spyOn(mockProvider, "deleteAssistant").mockRejectedValueOnce(new Error("timeout"));
+
+    await deleteAgent(u.id, a.id);
+    expect(await agentRow(a.id)).toMatchObject({ deletedAt: expect.any(Date), providerAssistantId: a.providerAssistantId });
+
+    expect(await deleteLeftoverAssistants()).toBe(1);
+    expect(del).toHaveBeenLastCalledWith(a.providerAssistantId);
+    expect((await agentRow(a.id)).providerAssistantId).toBeNull();
+    expect(await deleteLeftoverAssistants()).toBe(0);
   });
 });
 
@@ -131,6 +248,15 @@ describe("agent model", () => {
   it("rejects models we don't offer", async () => {
     const u = await makeUser();
     await expect(createAgent(u.id, { ...input, model: "openai/gpt-5.6-sol" })).rejects.toThrow(/isn't available/);
+  });
+
+  it("asks for another model once the saved one is no longer offered, even if it wasn't changed", async () => {
+    const u = await makeUser();
+    const a = await createAgent(u.id, { ...input, model: "openai/gpt-5.4-mini" });
+    vi.spyOn(mockProvider, "listModels").mockResolvedValue(toOfferedModels(MOCK_MODELS).filter((m) => m.id !== "openai/gpt-5.4-mini"));
+    // It may have left the list for its price, which a flat per-minute price can't absorb.
+    await expect(updateAgent(u.id, a.id, { ...input, model: "openai/gpt-5.4-mini" })).rejects.toThrow(/isn't available/);
+    expect(await updateAgent(u.id, a.id, { ...input, model: "" })).toMatchObject({ model: null, status: "ready" });
   });
 
   it("says cloned voices are temporarily unavailable when the provider refuses them", async () => {
@@ -237,6 +363,11 @@ describe("templates", () => {
 
   it.each(TEMPLATE_IDS)("%s has a name and description", (id) => {
     expect(MESSAGES.en.agentTemplates[id]).toEqual({ name: expect.any(String), description: expect.any(String) });
+  });
+
+  it("offers front desk, which answers from a knowledge base, only where agents can have one", () => {
+    expect(offeredTemplates(true)).toEqual(TEMPLATE_IDS);
+    expect(offeredTemplates(false)).toEqual(TEMPLATE_IDS.filter((id) => id !== "frontDesk"));
   });
 
   it("can be saved once its variables are filled in", async () => {

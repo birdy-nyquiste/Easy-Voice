@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_BEHAVIOR } from "@/lib/agent-settings";
 import { createTelnyxProvider, HANGUP_TOOL_DESCRIPTION } from "@/server/telnyx/live";
 import { MOCK_MODELS, toOfferedModels } from "@/server/telnyx/models";
+import { MOCK_CATALOG } from "@/server/telnyx/stock-voices";
 import { FeatureNotPermittedError } from "@/server/telnyx/types";
 
 const { publicKey, privateKey } = generateKeyPairSync("ed25519");
@@ -106,6 +107,49 @@ describe("number search", () => {
     respond(401, { errors: [{ code: "10009", title: "Authentication failed" }] });
     await expect(provider.searchNumbers({ areaCode: "415" })).rejects.toThrow(/401/);
   });
+
+  it("asks for numbers that can receive texts too, when texting is set up", async () => {
+    const features = (url: string) => new URL(url).searchParams.getAll("filter[features][]");
+    respond(200, { data: [] });
+    await provider.searchNumbers({ areaCode: "415" });
+    expect(features(String(vi.mocked(fetch).mock.calls[0][0]))).toEqual(["voice", "sms"]);
+
+    respond(200, { data: [] });
+    await createTelnyxProvider({ ...telnyxConfig, messagingProfileId: "" }).searchNumbers({ areaCode: "415" });
+    expect(features(String(vi.mocked(fetch).mock.calls[0][0]))).toEqual(["voice"]);
+  });
+});
+
+describe("catalogs", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  const down =() => vi.fn(async () => new Response("unavailable", { status: 503 }));
+  const ok = (body: unknown) => vi.fn(async () => new Response(JSON.stringify(body), { status: 200 }));
+
+  it.each([
+    ["voices", (p: ReturnType<typeof createTelnyxProvider>) => p.listStockVoices(), { voices: MOCK_CATALOG }],
+    ["models", (p: ReturnType<typeof createTelnyxProvider>) => p.listModels(), { data: MOCK_MODELS }],
+  ] as const)("keeps serving the last %s when a refresh fails, and fails only without any", async (_, list, body) => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const live = createTelnyxProvider(telnyxConfig);
+    vi.stubGlobal("fetch", down());
+    await expect(list(live)).rejects.toThrow(/503/);
+
+    vi.stubGlobal("fetch", ok(body));
+    const first = await list(live);
+    expect(first.length).toBeGreaterThan(0);
+
+    // Past the hour the catalog is cached for.
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 2 * 60 * 60 * 1000 });
+    const failing = down();
+    vi.stubGlobal("fetch", failing);
+    await expect(list(live)).resolves.toEqual(first);
+    expect(failing).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("numbers and deletes", () => {
@@ -125,6 +169,11 @@ describe("numbers and deletes", () => {
   it("treats a number that is already gone as released", async () => {
     route({ "DELETE /phone_numbers/num_1": [404, { errors: [{ code: "10005" }] }] });
     await expect(provider.releaseNumber("num_1")).resolves.toBeUndefined();
+  });
+
+  it("treats an assistant that is already gone as deleted", async () => {
+    route({ "DELETE /ai/assistants/assistant-1": [404, { errors: [{ code: "10005" }] }] });
+    await expect(provider.deleteAssistant("assistant-1")).resolves.toBeUndefined();
   });
 
   it("finishes a purge whose recording or conversation is already gone", async () => {
@@ -331,7 +380,6 @@ describe("per-call variables", () => {
     vi.stubGlobal("fetch", fetchMock);
     await provider.answer("cc", "call-1", {
       assistantId: "assistant-1",
-      voiceRef: "Telnyx.KokoroTTS.af_heart",
       variables: { call_direction: "inbound", call_goal: "", contact_number: "+14155550100", current_time: "now" },
     });
     const body = bodyOf(fetchMock);
@@ -347,7 +395,6 @@ describe("per-call variables", () => {
     vi.stubGlobal("fetch", fetchMock);
     const res = await provider.startAssistant("cc", {
       assistantId: "assistant-1",
-      voiceRef: "x",
       variables: { call_direction: "outbound", call_goal: "Book a table for 2", contact_number: "+14155550100", current_time: "now" },
       greetingOverride: "Hi, this is an AI assistant calling.",
     });

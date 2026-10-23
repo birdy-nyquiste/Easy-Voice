@@ -27,6 +27,10 @@ export const config = {
   get devCreditEnabled() {
     return process.env.NODE_ENV !== "production";
   },
+  /** The production deployment, or not on Vercel at all (local dev, tests). Previews share production's database. */
+  get isProductionDeployment() {
+    return !process.env.VERCEL || process.env.VERCEL_ENV === "production";
+  },
 
   google: {
     clientId: process.env.GOOGLE_CLIENT_ID ?? "",
