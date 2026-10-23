@@ -1,11 +1,12 @@
 import "server-only";
-import { and, eq, isNull, ne } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 import { db, withUserLock, type Tx } from "@/db";
 import { agents, voices, type Voice } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
 import { failureColumns, stored, storedFromError, type StoredText } from "@/lib/stored-text";
 import { toMegabytes } from "@/lib/format";
+import { isUuid } from "@/lib/uuid";
 import { chargePurchase, refundPurchase, type Purchase } from "./billing/ledger";
 import { elevenLabs } from "./elevenlabs";
 import {
@@ -19,10 +20,36 @@ import { decryptSecret } from "./secrets";
 import type { Language } from "@/lib/language";
 import { voiceProvider, type PreviewAudio, type StockVoice } from "./telnyx";
 
-export async function listStockVoices(language?: Language): Promise<StockVoice[]> {
-  const all = await voiceProvider().listStockVoices();
-  if (!language) return all;
-  return all.filter((v) => v.language.toLowerCase().startsWith(language));
+/**
+ * A clone still processing after this without a provider id was never made: the request making it
+ * stopped before the provider answered. It is failed (and refunded), as in knowledge.ts.
+ */
+const STUCK_MS = 60 * 60 * 1000;
+
+export async function listStockVoices(): Promise<StockVoice[]> {
+  return voiceProvider().listStockVoices();
+}
+
+/** A built-in voice we offer, by its voice string. */
+export async function findStockVoice(ref: string): Promise<StockVoice | null> {
+  return (await listStockVoices()).find((v) => v.ref === ref) ?? null;
+}
+
+/** Split a voice picker value: "stock:<ref>" or "clone:<voice uuid>". */
+export function parseVoiceValue(voice: string): { kind: "stock" | "clone"; value: string } | null {
+  const i = voice.indexOf(":");
+  const kind = voice.slice(0, i);
+  return i > 0 && (kind === "stock" || kind === "clone") ? { kind, value: voice.slice(i + 1) } : null;
+}
+
+/** One of the user's own clones, unless deleted. */
+export async function findOwnedClone(userId: string, voiceId: string): Promise<Voice | null> {
+  if (!isUuid(voiceId)) return null; // a malformed id from the client would make Postgres fail, not miss
+  const [v] = await db
+    .select()
+    .from(voices)
+    .where(and(eq(voices.id, voiceId), eq(voices.userId, userId), isNull(voices.deletedAt)));
+  return v ?? null;
 }
 
 /** What built-in voices say when previewed; bilingual voices show off both languages. */
@@ -37,20 +64,17 @@ const previewCache = new Map<string, PreviewAudio>();
 
 /** Audio for a voice picker value ("stock:<ref>" or "clone:<voice uuid>"); null if not found. */
 export async function voicePreview(userId: string, voice: string): Promise<PreviewAudio | null> {
-  const [kind, value] = [voice.slice(0, voice.indexOf(":")), voice.slice(voice.indexOf(":") + 1)];
+  const parsed = parseVoiceValue(voice);
   let key: string;
   let load: () => Promise<PreviewAudio>;
-  if (kind === "stock") {
+  if (parsed?.kind === "stock") {
     // Only catalog voices we offer, so this can't be used to run arbitrary (paid) providers.
-    const match = (await listStockVoices()).find((v) => v.ref === value);
+    const match = await findStockVoice(parsed.value);
     if (!match) return null;
     key = voice;
     load = () => voiceProvider().synthesizePreview(match.ref, match.speaks.includes("zh") ? PREVIEW_TEXT.bilingual : PREVIEW_TEXT.en);
-  } else if (kind === "clone") {
-    const [v] = await db
-      .select()
-      .from(voices)
-      .where(and(eq(voices.id, value), eq(voices.userId, userId), isNull(voices.deletedAt)));
+  } else if (parsed?.kind === "clone") {
+    const v = await findOwnedClone(userId, parsed.value);
     if (!v?.providerVoiceId) return null;
     key = `clone:${v.providerVoiceId}`;
     const providerVoiceId = v.providerVoiceId;
@@ -59,13 +83,17 @@ export async function voicePreview(userId: string, voice: string): Promise<Previ
       const keyRow = await getElevenLabsKey(userId);
       if (!keyRow) return null;
       const apiKey = decryptSecret(keyRow.keyEncrypted);
-      load = () =>
-        elevenLabs()
+      load = async () => {
+        const audio = await elevenLabs()
           .synthesize(apiKey, providerVoiceId, PREVIEW_TEXT.bilingual)
           .catch(async (err) => {
             if (isKeyRejection(err)) await recordKeyStatus(userId, true);
             throw err;
           });
+        // ElevenLabs took the key, so a rejection recorded earlier no longer holds.
+        await recordKeyStatus(userId, false);
+        return audio;
+      };
     } else {
       load = () => voiceProvider().getCloneSample(providerVoiceId);
     }
@@ -89,6 +117,11 @@ export type CloneProvider = Voice["provider"];
 /** Whether new clones can be made with (and agents can use voices from) this provider. */
 export function cloningAvailable(provider: CloneProvider): boolean {
   return provider === "elevenlabs" ? config.features.elevenLabs : config.features.voiceCloning;
+}
+
+/** Whether the user's clones (not deleted) leave room for another with this provider; failed ones don't count. */
+export function hasCloneSlot(clones: Pick<Voice, "provider" | "status">[], provider: CloneProvider): boolean {
+  return clones.filter((c) => c.provider === provider && c.status !== "failed").length < config.limits.clonedVoicesPerUser;
 }
 
 /**
@@ -141,10 +174,10 @@ export async function cloneVoice(
 
 async function checkCloneLimit(tx: Tx, userId: string, provider: CloneProvider) {
   const existing = await tx
-    .select({ id: voices.id })
+    .select({ provider: voices.provider, status: voices.status })
     .from(voices)
-    .where(and(eq(voices.userId, userId), eq(voices.provider, provider), isNull(voices.deletedAt), ne(voices.status, "failed")));
-  if (existing.length >= config.limits.clonedVoicesPerUser) {
+    .where(and(eq(voices.userId, userId), isNull(voices.deletedAt)));
+  if (!hasCloneSlot(existing, provider)) {
     throw new UserError(provider === "elevenlabs" ? "cloneLimitElevenLabs" : "cloneLimit", { max: config.limits.clonedVoicesPerUser });
   }
 }
@@ -178,6 +211,8 @@ async function cloneWithElevenLabs(
     const userErr = elevenLabsUserError(err, "clone");
     return failVoice(row, userErr instanceof UserError ? storedFromError(userErr) : stored("voiceElevenLabsFailed"));
   }
+  // ElevenLabs took the key, so a rejection recorded earlier no longer holds.
+  await recordKeyStatus(userId, false);
   const [u] = await db
     .update(voices)
     .set({ providerVoiceId: voiceId, voiceRef: `ElevenLabs.${config.elevenlabs.ttsModel}.${voiceId}`, status: "ready" })
@@ -208,20 +243,30 @@ async function failVoice(v: Voice, reason: StoredText): Promise<Voice> {
   return u;
 }
 
-/** Move processing clones to ready/failed. */
-export async function refreshProcessingVoices(userId: string): Promise<void> {
+/** Move processing clones to ready/failed: one user's (the Voices page), or everyone's (the daily job). */
+export async function refreshProcessingVoices(userId?: string): Promise<void> {
   const rows = await db
     .select()
     .from(voices)
-    .where(and(eq(voices.userId, userId), eq(voices.provider, "telnyx"), eq(voices.status, "processing"), isNull(voices.deletedAt)));
+    // Including clones the user deleted while they were stuck before reaching the provider: those
+    // still need their refund.
+    .where(
+      and(userId ? eq(voices.userId, userId) : undefined, eq(voices.status, "processing"), or(isNull(voices.deletedAt), isNull(voices.providerVoiceId))),
+    );
   for (const v of rows) {
-    if (!v.providerVoiceId) continue;
     try {
+      if (!v.providerVoiceId) {
+        // Being made right now, or never will be: failing it refunds an Easy Voice clone and frees the slot.
+        if (Date.now() - v.createdAt.getTime() > STUCK_MS) await failVoice(v, stored("voiceCloneFailed"));
+        continue;
+      }
+      // ElevenLabs clones are settled by the request that makes them.
+      if (v.provider !== "telnyx" || v.deletedAt) continue;
       const res = await voiceProvider().getClonedVoice(v.providerVoiceId);
       if (res.status === "ready") await db.update(voices).set({ status: "ready", voiceRef: res.ref || v.voiceRef }).where(eq(voices.id, v.id));
       else if (res.status === "failed") await failVoice(v, res.failureReason ?? stored("voiceCloningFailed"));
     } catch (err) {
-      console.error("getClonedVoice failed", v.id, err);
+      console.error("refreshProcessingVoices failed", v.id, err);
     }
   }
 }
@@ -234,15 +279,22 @@ export async function deleteVoice(userId: string, voiceId: string): Promise<void
     .from(agents)
     .where(and(eq(agents.voiceId, v.id), isNull(agents.deletedAt)));
   if (using.length) throw new UserError("voiceInUse");
-  if (v.providerVoiceId) {
-    try {
-      if (v.provider === "elevenlabs") {
-        // It lives in the user's ElevenLabs account; deleting it there frees their voice slot.
-        const keyRow = await getElevenLabsKey(userId);
-        if (keyRow) await elevenLabs().deleteVoice(decryptSecret(keyRow.keyEncrypted), v.providerVoiceId);
-      } else {
-        await voiceProvider().deleteClonedVoice(v.providerVoiceId);
+  if (v.providerVoiceId && v.provider === "elevenlabs") {
+    // It lives in the user's ElevenLabs account; deleting it there frees their voice slot. We tell them
+    // it goes from there too, so if that fails it stays here as well (already gone there is fine).
+    const keyRow = await getElevenLabsKey(userId);
+    if (keyRow) {
+      try {
+        await elevenLabs().deleteVoice(decryptSecret(keyRow.keyEncrypted), v.providerVoiceId);
+      } catch (err) {
+        console.error("ElevenLabs deleteVoice failed", v.id, err);
+        if (isKeyRejection(err)) await recordKeyStatus(userId, true);
+        throw new UserError("elevenLabsDeleteFailed");
       }
+    }
+  } else if (v.providerVoiceId) {
+    try {
+      await voiceProvider().deleteClonedVoice(v.providerVoiceId);
     } catch (err) {
       console.error("deleteClonedVoice failed", v.id, err);
     }

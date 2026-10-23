@@ -1,16 +1,22 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { ActionForm, SubmitButton } from "@/components/forms";
-import { Badge, Card, CardTitle, Field, Notice, PageHeader, StatusBadge, Tabs, VoiceGender, inputClass } from "@/components/ui";
+import { Badge, Card, CardTitle, Field, FieldGroup, Notice, PageHeader, StatusBadge, Tabs, VoiceGender, inputClass } from "@/components/ui";
 import { PreviewButton } from "@/components/voice-preview";
 import { config } from "@/lib/config";
 import { formatCents, formatMegabytes } from "@/lib/format";
 import { showStored } from "@/lib/stored-text";
 import { requireUser } from "@/server/auth";
 import { getElevenLabsKey } from "@/server/elevenlabs-keys";
-import { listStockVoices, listUserVoices, refreshProcessingVoices } from "@/server/voices";
+import { hasCloneSlot, listStockVoices, listUserVoices, refreshProcessingVoices } from "@/server/voices";
 import { cloneVoiceAction, deleteVoiceAction } from "./actions";
 import { SampleInput } from "./sample-input";
+
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getTranslations("voices"))("title") };
+}
 
 /**
  * Voice Library: every voice the user can give an agent, cloned or built-in, side by side.
@@ -36,23 +42,27 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
 
   const cloning = config.features.voiceCloning;
   const elevenLabs = config.features.elevenLabs;
-  const roomFor = (provider: "telnyx" | "elevenlabs") =>
-    clones.filter((c) => c.provider === provider && c.status !== "failed").length < config.limits.clonedVoicesPerUser;
   // Clone providers the form offers, in order: ours, then third-party accounts the user has connected.
   const providers = [
-    ...(cloning && roomFor("telnyx") ? (["telnyx"] as const) : []),
-    ...(elevenLabs && elKey && roomFor("elevenlabs") ? (["elevenlabs"] as const) : []),
+    ...(cloning && hasCloneSlot(clones, "telnyx") ? (["telnyx"] as const) : []),
+    ...(elevenLabs && elKey && hasCloneSlot(clones, "elevenlabs") ? (["elevenlabs"] as const) : []),
   ];
   // Third-party accounts are set up under Account → API keys, not here.
   const canAddService = elevenLabs && !elKey;
+  const max = config.limits.clonedVoicesPerUser;
   const noProviderReason = canAddService
-    ? t("connectToClone")
+    ? cloning
+      ? t("cloneLimitOrConnect", { max })
+      : t("connectToClone")
     : cloning || (elevenLabs && elKey)
-      ? t("cloneLimit", { max: config.limits.clonedVoicesPerUser })
+      ? t("cloneLimit", { max })
       : te("cloningUnavailable");
+  // Only clones the provider has accepted: one that never got there would keep the page polling.
+  const inProgress = clones.some((c) => c.status === "processing" && c.providerVoiceId);
 
   return (
     <div className="space-y-6">
+      {inProgress && <AutoRefresh everyMs={4000} />}
       <PageHeader title={t("title")} description={t("description")} />
 
       <Card>
@@ -79,13 +89,14 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
                       {v.failureReason && <span className="text-red-600">{showStored(locale, v.failureReason, v.failureMsg)}</span>}
                     </span>
                     <span className="flex items-center gap-1">
-                      {v.providerVoiceId && v.status !== "failed" && <PreviewButton voice={`clone:${v.id}`} compact />}
+                      {v.providerVoiceId && v.status !== "failed" && <PreviewButton voice={`clone:${v.id}`} name={v.name} compact />}
                       <ActionForm action={deleteVoiceAction}>
                         <input type="hidden" name="voiceId" value={v.id} />
                         <SubmitButton
                           variant="danger"
                           confirm={
-                            v.provider === "elevenlabs"
+                            // Only a clone ElevenLabs made is in the user's account there.
+                            v.provider === "elevenlabs" && v.providerVoiceId
                               ? t("deleteConfirmElevenLabs", { name: v.name })
                               : t("deleteConfirm", { name: v.name })
                           }
@@ -102,7 +113,7 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
             <ul className="grid gap-2 sm:grid-cols-2">
               {stock.map((v) => (
                 <li key={v.ref} className="flex items-start gap-1 rounded-lg border border-stone-100 px-3 py-2 text-sm">
-                  <PreviewButton voice={`stock:${v.ref}`} compact />
+                  <PreviewButton voice={`stock:${v.ref}`} name={v.name} compact />
                   <span className="min-w-0 space-y-1">
                     <span className="block font-medium">{v.name}</span>
                     <span className="flex flex-wrap gap-1.5">
@@ -134,8 +145,8 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
           {providers.length === 0 && !canAddService ? (
             <p className="text-sm text-stone-500">{noProviderReason}</p>
           ) : (
-            <ActionForm action={cloneVoiceAction} className="space-y-4">
-              <Field label={t("cloneWith")}>
+            <ActionForm action={cloneVoiceAction} className="space-y-4" resetOnSuccess>
+              <FieldGroup legend={t("cloneWith")}>
                 <div className="grid gap-2 sm:grid-cols-3">
                   {providers.map((p, i) => (
                     <label
@@ -168,7 +179,7 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
                     </Link>
                   )}
                 </div>
-              </Field>
+              </FieldGroup>
               {providers.length === 0 ? (
                 <p className="text-sm text-stone-500">{noProviderReason}</p>
               ) : (
@@ -196,7 +207,7 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
                       max: formatMegabytes(config.limits.cloneSampleBytes, locale),
                     })}
                   >
-                    <SampleInput maxBytes={config.limits.cloneSampleBytes} />
+                    {(control) => <SampleInput control={control} maxBytes={config.limits.cloneSampleBytes} />}
                   </Field>
                   <label className="flex items-start gap-2 text-sm text-stone-700">
                     <input type="checkbox" name="consent" required className="mt-0.5" />

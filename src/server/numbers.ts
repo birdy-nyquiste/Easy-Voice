@@ -1,21 +1,51 @@
 import "server-only";
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, gt, inArray, ne } from "drizzle-orm";
 import { db, withUserLock } from "@/db";
 import { agents, phoneNumbers, type PhoneNumber, type User } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
+import { isUsNumber } from "@/lib/format";
 import { failureColumns, stored, type StoredText } from "@/lib/stored-text";
 import { applyLedger, chargePurchase, refundPurchase, type Purchase } from "./billing/ledger";
 import { enableInboundSms } from "./messages";
 import { voiceProvider } from "./telnyx";
+import { isDefiniteRejection, type NumberOrderResult } from "./telnyx/types";
 
 const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
+/**
+ * A pending number with no order id after this never got an answer from the provider (timeout, lost
+ * response, the server stopped mid-order). It is looked up at the provider: activated if the order
+ * went through, refunded if not.
+ */
+const STUCK_ORDER_MS = 60 * 60 * 1000;
 
 export async function listUserNumbers(userId: string): Promise<PhoneNumber[]> {
   return db
     .select()
     .from(phoneNumbers)
     .where(and(eq(phoneNumbers.userId, userId), ne(phoneNumbers.status, "released")));
+}
+
+/** One of the user's active numbers, or numberNotFound. */
+export async function getActiveUserNumber(userId: string, numberId: string): Promise<PhoneNumber> {
+  const [n] = await db
+    .select()
+    .from(phoneNumbers)
+    .where(and(eq(phoneNumbers.id, numberId), eq(phoneNumbers.userId, userId), eq(phoneNumbers.status, "active")));
+  if (!n) throw new UserError("numberNotFound");
+  return n;
+}
+
+/**
+ * Numbers we released in the last 30 days because the balance stayed negative, so the numbers page
+ * can say what happened (the user didn't release them).
+ */
+export async function listRecentNegativeBalanceReleases(userId: string): Promise<PhoneNumber[]> {
+  const released = await db
+    .select()
+    .from(phoneNumbers)
+    .where(and(eq(phoneNumbers.userId, userId), eq(phoneNumbers.status, "released"), gt(phoneNumbers.releasedAt, new Date(Date.now() - MONTH_MS))));
+  return released.filter((n) => n.failureMsg?.key === "stored.numberReleasedNegative");
 }
 
 export async function searchAvailableNumbers(areaCode: string) {
@@ -37,7 +67,8 @@ function numberPurchase(n: Pick<PhoneNumber, "id" | "userId" | "e164">): Purchas
 
 /** Buy a number: charges the first month up front, refunds if the order fails. */
 export async function purchaseNumber(user: User, e164: string): Promise<PhoneNumber> {
-  if (!/^\+1\d{10}$/.test(e164)) throw new UserError("invalidUsNumber");
+  // The number is posted by the browser, so it may not be one the US-local search offered.
+  if (!isUsNumber(e164)) throw new UserError("invalidUsNumber");
 
   // Limit check, row insert and charge commit together under the user's lock.
   const row = await withUserLock(user.id, async (tx) => {
@@ -48,6 +79,13 @@ export async function purchaseNumber(user: User, e164: string): Promise<PhoneNum
     if (existing.length >= config.limits.numbersPerUser) {
       throw new UserError("numberLimit", { max: config.limits.numbersPerUser });
     }
+    // Calls and texts are routed by number, so it must not be live on another account. (In live mode
+    // the provider also refuses to sell a number twice; the mock doesn't.)
+    const [taken] = await tx
+      .select({ id: phoneNumbers.id })
+      .from(phoneNumbers)
+      .where(and(eq(phoneNumbers.e164, e164), inArray(phoneNumbers.status, ["pending", "active"])));
+    if (taken) throw new UserError("numberUnavailable");
     const [inserted] = await tx.insert(phoneNumbers).values({ userId: user.id, e164, status: "pending" }).returning();
     await chargePurchase(
       numberPurchase(inserted),
@@ -57,27 +95,40 @@ export async function purchaseNumber(user: User, e164: string): Promise<PhoneNum
     return inserted;
   });
 
+  let order: NumberOrderResult;
   try {
-    const order = await voiceProvider().orderNumber(e164);
-    const [updated] = await db
-      .update(phoneNumbers)
-      .set({ providerOrderId: order.orderId, providerNumberId: order.numberId, paidThrough: new Date(Date.now() + MONTH_MS) })
-      .where(eq(phoneNumbers.id, row.id))
-      .returning();
-    if (order.status === "failure") return failNumber(updated, order.failureReason ?? stored("numberOrderRejected"));
-    if (order.status === "success") return activateNumber(updated, order.numberId);
-    return updated;
+    order = await voiceProvider().orderNumber(e164);
   } catch (err) {
-    console.error("orderNumber failed", err);
-    await failNumber(row, stored("numberCouldNotOrder"));
-    throw new UserError("numberOrderFailed");
+    console.error("orderNumber failed", row.id, err);
+    if (isDefiniteRejection(err)) {
+      await failNumber(row, stored("numberCouldNotOrder"));
+      throw new UserError("numberOrderFailed");
+    }
+    // The order may have gone through anyway. Refunding now could leave the platform paying for a
+    // number nobody holds, so it stays pending until refreshPendingNumbers finds out.
+    return row;
   }
+  const [updated] = await db
+    .update(phoneNumbers)
+    .set({ providerOrderId: order.orderId, providerNumberId: order.numberId, paidThrough: new Date(Date.now() + MONTH_MS) })
+    .where(eq(phoneNumbers.id, row.id))
+    .returning();
+  if (order.status === "failure") return failNumber(updated, order.failureReason ?? stored("numberOrderRejected"));
+  if (order.status === "success") return activateNumber(updated, order.numberId);
+  return updated;
 }
 
 async function activateNumber(n: PhoneNumber, numberId?: string): Promise<PhoneNumber> {
   const [u] = await db
     .update(phoneNumbers)
-    .set({ status: "active", providerNumberId: numberId ?? n.providerNumberId, failureReason: null, failureMsg: null })
+    .set({
+      status: "active",
+      providerNumberId: numberId ?? n.providerNumberId,
+      // Set at order time, except for an order recovered by refreshPendingNumbers.
+      paidThrough: n.paidThrough ?? new Date(Date.now() + MONTH_MS),
+      failureReason: null,
+      failureMsg: null,
+    })
     .where(eq(phoneNumbers.id, n.id))
     .returning();
   // Receiving texts is a bonus; a failure here must not fail the purchase (the daily cron retries).
@@ -95,22 +146,30 @@ async function failNumber(n: PhoneNumber, reason: StoredText): Promise<PhoneNumb
   return u;
 }
 
-/** Poll the provider for pending orders (called on page view and by cron). */
-export async function refreshPendingNumbers(userId?: string): Promise<void> {
+/** Poll the provider for pending orders (called on page view and by cron). True if any was refunded. */
+export async function refreshPendingNumbers(userId?: string): Promise<boolean> {
+  let refunded = false;
   const pending = await db
     .select()
     .from(phoneNumbers)
     .where(userId ? and(eq(phoneNumbers.status, "pending"), eq(phoneNumbers.userId, userId)) : eq(phoneNumbers.status, "pending"));
   for (const n of pending) {
-    if (!n.providerOrderId) continue;
     try {
+      if (!n.providerOrderId) {
+        if (Date.now() - n.createdAt.getTime() < STUCK_ORDER_MS) continue; // may still be ordering
+        const numberId = await voiceProvider().findNumber(n.e164);
+        if (numberId) await activateNumber(n, numberId);
+        else refunded = Boolean(await failNumber(n, stored("numberCouldNotOrder")));
+        continue;
+      }
       const order = await voiceProvider().getNumberOrder(n.providerOrderId);
       if (order.status === "success") await activateNumber(n, order.numberId);
-      else if (order.status === "failure") await failNumber(n, order.failureReason ?? stored("numberOrderFailed"));
+      else if (order.status === "failure") refunded = Boolean(await failNumber(n, order.failureReason ?? stored("numberOrderFailed")));
     } catch (err) {
       console.error("getNumberOrder failed", n.id, err);
     }
   }
+  return refunded;
 }
 
 export async function releaseNumber(userId: string, numberId: string, reason: StoredText = stored("numberReleasedByUser")): Promise<void> {
@@ -118,8 +177,14 @@ export async function releaseNumber(userId: string, numberId: string, reason: St
     .select()
     .from(phoneNumbers)
     .where(and(eq(phoneNumbers.id, numberId), eq(phoneNumbers.userId, userId)));
-  if (!n || n.status === "released") throw new UserError("numberNotFound");
-  if (n.providerNumberId && n.status === "active") await voiceProvider().releaseNumber(n.providerNumberId);
+  // A pending order can't be released (the page never offers it): it would complete at the provider
+  // afterwards with nobody holding the number.
+  if (!n || n.status === "released" || n.status === "pending") throw new UserError("numberNotFound");
+  if (n.status === "active") {
+    // Older rows may lack the provider id; find the number so it isn't left on the account.
+    const providerId = n.providerNumberId ?? (await voiceProvider().findNumber(n.e164));
+    if (providerId) await voiceProvider().releaseNumber(providerId);
+  }
   await db
     .update(phoneNumbers)
     .set({

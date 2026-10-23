@@ -1,33 +1,62 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
+import { cache } from "react";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { Badge, Card, CardTitle, Notice, PageHeader, StatusBadge } from "@/components/ui";
+import type { Call } from "@/db/schema";
 import { formatCents, formatDateTime, formatDuration, formatPhone } from "@/lib/format";
-import { showStored } from "@/lib/stored-text";
-import { getUserAgent } from "@/server/agents";
+import { showStored, type StoredMessage } from "@/lib/stored-text";
 import { requireUser } from "@/server/auth";
-import { getUserCall } from "@/server/calls";
+import { callAgentName, getUserCall } from "@/server/calls";
+import { isAwaitingResults, isCallLive } from "@/server/calls/state";
 import { deleteCallAction, hangupAction } from "../actions";
 import { AutoRefresh } from "@/components/auto-refresh";
+import { viewerTimeZone } from "@/server/time-zone";
+
+/** Outcomes that are just how the call went at the other end, or a routine rejection; any other is a failure. */
+const ROUTINE_OUTCOMES = new Set<StoredMessage["key"]>([
+  "stored.outcomeNoAnswer",
+  "stored.outcomeLineBusy",
+  "stored.outcomeDeclined",
+  "stored.outcomeCallerHungUp",
+  "stored.outcomeCancelled",
+  "stored.outcomeUnreachable",
+  "stored.outcomeEndedEarly",
+  "stored.outcomeBusy",
+]);
+// The title and the page share one load per request: loading a call may ask the provider for its results.
+const loadCall = cache(async (id: string) => getUserCall((await requireUser()).id, id));
+
+/** "Call from (415) 555-0100": the page header, and the browser tab. */
+async function callTitle(call: Call) {
+  const t = await getTranslations("calls");
+  const other = call.direction === "inbound" ? call.fromNumber : call.toNumber;
+  return /^\+\d/.test(other) ? t(call.direction === "inbound" ? "from" : "toTitle", { number: formatPhone(other) }) : t("fromUnknown");
+}
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const call = await loadCall((await params).id);
+  return { title: call ? await callTitle(call) : (await getTranslations("calls"))("title") };
+}
 
 export default async function CallPage({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requireUser();
   const { id } = await params;
-  const call = await getUserCall(user.id, id);
+  const call = await loadCall(id); // signs the viewer in, or redirects
   if (!call) notFound();
-  const agent = call.agentId ? await getUserAgent(user.id, call.agentId) : null;
-  const live = !call.endedAt;
-  const awaitingResults = call.status === "completed" && !call.resultsFetched;
+  const agentName = await callAgentName(call);
+  const live = isCallLive(call);
+  const awaitingResults = isAwaitingResults(call);
   const [t, tc, locale] = await Promise.all([getTranslations("calls"), getTranslations("common"), getLocale()]);
-  const other = call.direction === "inbound" ? call.fromNumber : call.toNumber;
+  const tz = await viewerTimeZone();
 
   return (
     <div className="space-y-6">
-      {(live || awaitingResults) && <AutoRefresh everyMs={live ? 1500 : 4000} />}
+      {(live || awaitingResults) && <AutoRefresh everyMs={live ? 1500 : 4000} slowestMs={live ? 5000 : undefined} />}
       <PageHeader
         back={{ href: "/calls", label: t("all") }}
-        title={t(call.direction === "inbound" ? "from" : "toTitle", { number: formatPhone(other) })}
-        description={formatDateTime(call.createdAt, locale)}
+        title={await callTitle(call)}
+        description={formatDateTime(call.createdAt, locale, tz)}
         action={<StatusBadge status={call.status} />}
       />
 
@@ -49,13 +78,15 @@ export default async function CallPage({ params }: { params: Promise<{ id: strin
         </Card>
       )}
       {call.outcome && (
-        <Notice tone={call.status === "completed" ? "amber" : "red"}>{showStored(locale, call.outcome, call.outcomeMsg)}</Notice>
+        <Notice tone={call.outcomeMsg && ROUTINE_OUTCOMES.has(call.outcomeMsg.key) ? "amber" : "red"}>
+          {showStored(locale, call.outcome, call.outcomeMsg)}
+        </Notice>
       )}
 
       <Card>
         <dl className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
           <div><dt className="text-stone-500">{t("direction")}</dt><dd className="mt-1"><Badge>{t(call.direction === "inbound" ? "directionInbound" : "directionOutbound")}</Badge></dd></div>
-          <div><dt className="text-stone-500">{tc("agent")}</dt><dd className="mt-1 font-medium">{agent?.name ?? "—"}</dd></div>
+          <div><dt className="text-stone-500">{tc("agent")}</dt><dd className="mt-1 font-medium">{agentName ?? "—"}</dd></div>
           <div><dt className="text-stone-500">{t("colDuration")}</dt><dd className="mt-1 font-medium tabular-nums">{formatDuration(call.durationSec)}</dd></div>
           <div><dt className="text-stone-500">{t("colCost")}</dt><dd className="mt-1 font-medium tabular-nums">{call.billedCents != null ? formatCents(call.billedCents, locale) : "—"}</dd></div>
         </dl>
@@ -80,7 +111,7 @@ export default async function CallPage({ params }: { params: Promise<{ id: strin
                 {call.transcript.map((m, i) => (
                   <li key={i} className={`flex ${m.role === "assistant" ? "" : "justify-end"}`}>
                     <div className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm ${m.role === "assistant" ? "bg-stone-100" : "bg-stone-900 text-white"}`}>
-                      <div className="mb-0.5 text-xs opacity-60">{m.role === "assistant" ? agent?.name ?? tc("agent") : t("caller")}</div>
+                      <div className={`mb-0.5 text-xs ${m.role === "assistant" ? "text-stone-600" : "text-stone-300"}`}>{m.role === "assistant" ? agentName ?? tc("agent") : t("caller")}</div>
                       {m.text}
                     </div>
                   </li>

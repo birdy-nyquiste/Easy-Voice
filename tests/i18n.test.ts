@@ -1,14 +1,14 @@
 import { readFileSync } from "node:fs";
 import { createTranslator } from "next-intl";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { LOCALES, localeFromAcceptLanguage } from "@/i18n/locales";
 import { MESSAGES } from "@/i18n/messages";
 import { errorText, UserError } from "@/lib/errors";
-import { formatCents, formatMegabytes } from "@/lib/format";
+import { formatCallerNumber, formatCents, formatDate, formatDateTime, formatMegabytes, formatNumber, validTimeZone } from "@/lib/format";
 import { showStored, stored, storedColumns, storedFromError } from "@/lib/stored-text";
 
-/** Intl puts a no-break space between "USD" and the amount. */
-const plain = (s: string | null) => s?.replace(/\u00a0/g, " ");
+/** Intl puts no-break spaces between "USD" and the amount, and before "PM". */
+const plain = (s: string | null) => s?.replace(/[\u00a0\u202f]/g, " ");
 
 type Tree = { [key: string]: string | Tree };
 
@@ -88,8 +88,52 @@ describe("localeFromAcceptLanguage", () => {
 
   it("falls back to English for Traditional Chinese, other languages and no header", () => {
     expect(localeFromAcceptLanguage("zh-TW")).toBe("en");
+    // What browsers actually send: the bare "zh" follows the regional tag.
+    expect(localeFromAcceptLanguage("zh-TW,zh;q=0.9,en;q=0.8")).toBe("en");
+    expect(localeFromAcceptLanguage("zh-HK,zh;q=0.9")).toBe("en");
+    expect(localeFromAcceptLanguage("zh-Hant-TW,zh;q=0.8")).toBe("en");
+    expect(localeFromAcceptLanguage("zh,zh-TW;q=0.5")).toBe("zh"); // plain Chinese preferred
     expect(localeFromAcceptLanguage("fr-FR,de;q=0.8")).toBe("en");
     expect(localeFromAcceptLanguage(null)).toBe("en");
+  });
+});
+
+describe("dates and numbers", () => {
+  afterEach(() => vi.useRealTimers());
+  const at = "2026-10-21T22:05:00Z";
+
+  it("shows times in the viewer's zone, or in UTC (labelled) before the browser has said which", () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-22T12:00:00Z") });
+    expect(plain(formatDateTime(at, "en", "America/Los_Angeles"))).toBe("Oct 21, 3:05 PM");
+    expect(plain(formatDateTime(at, "en", "Asia/Shanghai"))).toBe("Oct 22, 6:05 AM");
+    expect(plain(formatDateTime(at, "en", null))).toBe("Oct 21, 10:05 PM UTC");
+    expect(plain(formatDateTime("2025-10-21T22:05:00Z", "en", "America/Los_Angeles"))).toBe("Oct 21, 2025, 3:05 PM");
+    expect(formatDate(at, "en", "America/Los_Angeles")).toBe("Oct 21");
+    expect(formatDateTime(null, "en", "UTC")).toBe("—");
+  });
+
+  it("accepts only real time zones", () => {
+    expect(validTimeZone("Europe/Paris")).toBe("Europe/Paris");
+    expect(validTimeZone("Not/A_Zone")).toBeNull();
+    expect(validTimeZone(undefined)).toBeNull();
+  });
+
+  it("formats numbers in page messages like the rest of the interface (Latin American Spanish)", () => {
+    expect(formatNumber(500000, "es")).toBe("500,000");
+    expect(formatNumber(4.4, "es")).toBe("4.4");
+    expect(formatNumber(500000, "vi")).toBe("500.000");
+  });
+
+  it("names callers without caller ID instead of showing the stored word", () => {
+    expect(formatCallerNumber("+14155550100", "Unknown number")).toBe("(415) 555-0100");
+    expect(formatCallerNumber("unknown", "Unknown number")).toBe("Unknown number");
+    expect(formatCallerNumber("anonymous", "Unknown number")).toBe("Unknown number");
+  });
+
+  it("uses singular and plural forms for Spanish unread counts", () => {
+    const t = createTranslator({ locale: "es", messages: MESSAGES.es, namespace: "messages" });
+    expect(t("newCount", { count: 1 })).toBe("1 nuevo");
+    expect(t("newCount", { count: 3 })).toBe("3 nuevos");
   });
 });
 
@@ -130,6 +174,15 @@ describe("stored text", () => {
     expect(showStored("zh", "Old text", { key: "stored.gone" })).toBe("Old text");
     expect(showStored("zh", null, null)).toBeNull();
   });
+
+  it("falls back to the stored English when the message now needs a value the row doesn't have", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    // A row written before {name} was added to the message.
+    expect(showStored("zh", 'Voice clone "Mom"', { key: "stored.ledgerVoiceClone" })).toBe('Voice clone "Mom"');
+    expect(showStored("es", "Audio sample is too large.", { key: "errors.audioTooLarge", values: {} })).toBe("Audio sample is too large.");
+    expect(error).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
 });
 
 describe("pre-i18n backfill (drizzle/0013)", () => {
@@ -163,8 +216,13 @@ describe("pre-i18n backfill (drizzle/0013)", () => {
       expect(storedColumns(stored(key)).text, key).toBe(text.replace(/''/g, "'"));
       checked.push(key);
     }
-    // Knowledge-base lines came after i18n, so no rows predate their messages.
-    const backfilled = Object.keys(MESSAGES.en.stored).filter((k) => /^(ledger|outcome)/.test(k) && !k.startsWith("ledgerKnowledge"));
+    // Knowledge-base lines and these outcomes came after i18n, so no rows predate their messages.
+    const addedLater = ["outcomeStatusLost", "outcomeCancelled"];
+    // Reworded after the backfill (the raw hangup cause is no longer shown); the rows it backfilled show the new text.
+    const rewordedLater = ["outcomeEndedEarly"];
+    const backfilled = Object.keys(MESSAGES.en.stored).filter(
+      (k) => /^(ledger|outcome)/.test(k) && !k.startsWith("ledgerKnowledge") && !addedLater.includes(k) && !rewordedLater.includes(k),
+    );
     expect(new Set(checked)).toEqual(new Set(backfilled));
   });
 });

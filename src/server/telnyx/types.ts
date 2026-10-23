@@ -49,6 +49,24 @@ export interface PreviewAudio {
   contentType: string;
 }
 
+/** A provider answered an HTTP request with an error status. */
+export class ProviderHttpError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Whether a failed request certainly did nothing: the provider refused it (4xx). Timeouts, network
+ * errors, 5xx, 408 and 429 leave it unknown whether the request was applied.
+ */
+export function isDefiniteRejection(err: unknown): boolean {
+  return err instanceof ProviderHttpError && err.status >= 400 && err.status < 500 && err.status !== 408 && err.status !== 429;
+}
+
 /** The provider account isn't allowed to use a feature (e.g. cloned voices before verification). */
 export class FeatureNotPermittedError extends Error {
   name = "FeatureNotPermittedError";
@@ -92,9 +110,8 @@ export type EmbeddingStatus = "processing" | "ready" | "failed";
 export interface StoredObject {
   key: string;
   sizeBytes: number;
+  modifiedAt: Date;
 }
-
-export type CrawlStatus = "processing" | "success" | "partial_success" | "failure";
 
 export interface DialResult {
   callControlId: string;
@@ -104,6 +121,8 @@ export interface DialResult {
 export interface CallResults {
   transcript: { role: string; text: string }[];
   summary?: string;
+  /** The summary is still being generated; the transcript is complete. */
+  summaryPending?: boolean;
 }
 
 export type CallEventType =
@@ -176,7 +195,6 @@ export interface CallVariables {
 
 export interface AssistantStart {
   assistantId: string;
-  voiceRef: string;
   variables: CallVariables;
   /** Replaces the stored greeting for this call only (used for outbound calls). */
   greetingOverride?: string;
@@ -194,6 +212,9 @@ export interface VoiceProvider {
   searchNumbers(q: { areaCode?: string; limit?: number }): Promise<AvailableNumber[]>;
   orderNumber(e164: string): Promise<NumberOrderResult>;
   getNumberOrder(orderId: string): Promise<NumberOrderResult>;
+  /** The provider's id for a number on our account, or null if we don't have it. */
+  findNumber(e164: string): Promise<string | null>;
+  /** Succeeds if the number is already gone. */
   releaseNumber(numberId: string): Promise<void>;
   /** Put a number on the platform messaging profile so it can receive texts. Idempotent. */
   enableInboundMessaging(e164: string): Promise<void>;
@@ -218,6 +239,7 @@ export interface VoiceProvider {
 
   createAssistant(spec: AssistantSpec): Promise<{ assistantId: string }>;
   updateAssistant(assistantId: string, spec: AssistantSpec): Promise<void>;
+  /** Succeeds if the assistant is already gone. */
   deleteAssistant(assistantId: string): Promise<void>;
 
   /** Create a knowledge storage bucket (versioning off). Succeeds if we already own it. */
@@ -230,9 +252,11 @@ export interface VoiceProvider {
   deleteObject(bucket: string, key: string): Promise<void>;
   /** Embedding status by object key; objects not listed yet are still processing. */
   embeddingStatuses(bucket: string): Promise<Map<string, EmbeddingStatus>>;
-  /** Crawl a website into the bucket (same-domain pages, embedded as they arrive). */
+  /**
+   * Crawl a website into the bucket (same-domain pages, embedded as they arrive). There is no way to
+   * tell when a crawl has finished: its task reports success at once (docs/telnyx-api-notes.md §17).
+   */
   crawlUrl(bucket: string, url: string): Promise<{ taskId: string }>;
-  getCrawlStatus(taskId: string): Promise<CrawlStatus>;
   /** Turn embedding off, then delete the (empty) bucket. Succeeds if it is already gone. */
   deleteBucket(bucket: string): Promise<void>;
 

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import type { Messages } from "@/i18n/messages";
-import type { ComponentProps, ReactNode } from "react";
+import { cloneElement, isValidElement, useId, type ComponentProps, type ReactElement, type ReactNode } from "react";
 
 export function PageHeader({
   title,
@@ -54,7 +54,12 @@ const tones = {
 };
 
 export function Badge({ tone = "gray", children }: { tone?: keyof typeof tones; children: ReactNode }) {
-  return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tones[tone]}`}>{children}</span>;
+  // Never wraps ("↙ entrante", "đã hoàn tất"): in a tight row the text beside it gives way instead.
+  return (
+    <span className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tones[tone]}`}>
+      {children}
+    </span>
+  );
 }
 
 type Status = keyof Messages["status"];
@@ -101,13 +106,62 @@ export function ButtonLink({ variant = "primary", ...props }: ComponentProps<typ
 export const inputClass =
   "block w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm shadow-sm outline-none focus:border-stone-500 focus:ring-2 focus:ring-stone-200";
 
-export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
+/**
+ * Keyboard focus ring for links and buttons drawn without the browser's outline. stone-500 keeps 3:1
+ * against white, the gray rows and the dark avatar (WCAG 1.4.11).
+ */
+export const focusRing = "outline-none focus-visible:ring-2 focus-visible:ring-stone-500";
+
+/** What Field puts on its control: the id its label points at, and the hint that describes it. */
+export interface FieldControl {
+  id: string;
+  "aria-describedby"?: string;
+}
+
+/**
+ * A label, its control and an optional hint. The label names only the control and the hint is its
+ * description, so screen readers don't read the hint (or a button beside the control) as part of the
+ * name. A lone <input>, <select> or <textarea> gets the ids by itself; anything more (a control with
+ * buttons beside it, a file picker component) is a function that puts `control` on the control.
+ */
+export function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: ReactNode;
+  children: ReactNode | ((control: FieldControl) => ReactNode);
+}) {
+  const id = useId();
+  const control: FieldControl = { id, "aria-describedby": hint ? `${id}-hint` : undefined };
   return (
-    <label className="block space-y-1.5">
-      <span className="text-sm font-medium text-stone-700">{label}</span>
-      {children}
-      {hint && <span className="block text-xs text-stone-500">{hint}</span>}
-    </label>
+    <div className="space-y-1.5">
+      <label htmlFor={id} className="block text-sm font-medium text-stone-700">
+        {label}
+      </label>
+      {typeof children === "function" ? children(control) : withControl(children, control)}
+      {hint && (
+        <p id={`${id}-hint`} className="text-xs text-stone-500">
+          {hint}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function withControl(children: ReactNode, control: FieldControl) {
+  const isControl = isValidElement(children) && (children.type === "input" || children.type === "select" || children.type === "textarea");
+  return isControl ? cloneElement(children as ReactElement<FieldControl>, control) : children;
+}
+
+/** A labelled group of controls, e.g. radio cards: a <fieldset>, so no label ends up inside another. */
+export function FieldGroup({ legend, children }: { legend: string; children: ReactNode }) {
+  return (
+    <fieldset>
+      <legend className="text-sm font-medium text-stone-700">{legend}</legend>
+      <div className="mt-1.5">{children}</div>
+    </fieldset>
   );
 }
 

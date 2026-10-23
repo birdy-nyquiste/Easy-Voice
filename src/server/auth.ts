@@ -1,10 +1,10 @@
 import "server-only";
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
-import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
-import { db } from "@/db";
+import { db, withLock } from "@/db";
 import { emailOtps, sessions, users, type User } from "@/db/schema";
 import type { Locale } from "@/i18n/locales";
 import { translator } from "@/i18n/messages";
@@ -17,6 +17,13 @@ const OTP_TTL_MS = 10 * 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
 const OTP_MAX_PER_HOUR = 5;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+/** The longest address SMTP allows. */
+const MAX_EMAIL_LENGTH = 254;
+/**
+ * local@label.label…: domain labels can't contain dots, so there is only one way to split the
+ * domain and the match runs in linear time (an overlapping pattern backtracked quadratically).
+ */
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/;
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 const hashOtp = (email: string, code: string) => sha256(`${config.authSecret}:${email}:${code}`);
@@ -29,22 +36,33 @@ type AuthResult = { ok: true } | { ok: false; error: ErrorKey };
 
 export async function requestEmailOtp(rawEmail: string, locale: Locale): Promise<AuthResult> {
   const email = normalizeEmail(rawEmail);
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: "invalidEmail" };
-
-  const [{ count }] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(emailOtps)
-    .where(and(eq(emailOtps.email, email), gt(emailOtps.createdAt, new Date(Date.now() - 3600_000))));
-  if (count >= OTP_MAX_PER_HOUR) return { ok: false, error: "tooManyCodes" };
+  // Length first: the login form is public, so the pattern must never see huge input.
+  if (email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) return { ok: false, error: "invalidEmail" };
 
   const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
-  await db.insert(emailOtps).values({
-    email,
-    codeHash: hashOtp(email, code),
-    expiresAt: new Date(Date.now() + OTP_TTL_MS),
+  // Count and insert under a per-email lock, so parallel requests can't each pass the hourly limit.
+  const otpId = await withLock(`otp:${email}`, async (tx) => {
+    const [{ count }] = await tx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(emailOtps)
+      .where(and(eq(emailOtps.email, email), gt(emailOtps.createdAt, new Date(Date.now() - 3600_000))));
+    if (count >= OTP_MAX_PER_HOUR) return null;
+    const [row] = await tx
+      .insert(emailOtps)
+      .values({ email, codeHash: hashOtp(email, code), expiresAt: new Date(Date.now() + OTP_TTL_MS) })
+      .returning({ id: emailOtps.id });
+    return row.id;
   });
+  if (!otpId) return { ok: false, error: "tooManyCodes" };
   const t = translator(locale, "email");
-  await sendEmail({ to: email, subject: t("otpSubject", { code }), text: t("otpBody", { code }) });
+  try {
+    await sendEmail({ to: email, subject: t("otpSubject", { code }), text: t("otpBody", { code }) });
+  } catch (err) {
+    // A code that never arrived shouldn't count toward the hourly limit.
+    console.error("Sign-in code email failed", err);
+    await db.delete(emailOtps).where(eq(emailOtps.id, otpId));
+    return { ok: false, error: "emailSendFailed" };
+  }
   return { ok: true };
 }
 
@@ -56,15 +74,30 @@ export async function verifyEmailOtp(rawEmail: string, code: string): Promise<Au
     .where(and(eq(emailOtps.email, email), isNull(emailOtps.consumedAt), gt(emailOtps.expiresAt, new Date())))
     .orderBy(desc(emailOtps.createdAt))
     .limit(1);
-  if (!otp || otp.attempts >= OTP_MAX_ATTEMPTS) return { ok: false, error: "codeExpired" };
+  if (!otp) return { ok: false, error: "codeExpired" };
+
+  // Spend the attempt in the database before comparing, so parallel guesses can't all read the same
+  // count: at most OTP_MAX_ATTEMPTS comparisons per code, however the requests are timed.
+  const [spent] = await db
+    .update(emailOtps)
+    .set({ attempts: sql`${emailOtps.attempts} + 1` })
+    .where(and(eq(emailOtps.id, otp.id), isNull(emailOtps.consumedAt), lt(emailOtps.attempts, OTP_MAX_ATTEMPTS)))
+    .returning({ id: emailOtps.id });
+  // The code is out of tries (or another request just used it, which is too rare to word apart).
+  if (!spent) return { ok: false, error: "tooManyAttempts" };
 
   const expected = Buffer.from(otp.codeHash);
   const actual = Buffer.from(hashOtp(email, code.trim()));
   if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
-    await db.update(emailOtps).set({ attempts: otp.attempts + 1 }).where(eq(emailOtps.id, otp.id));
     return { ok: false, error: "codeIncorrect" };
   }
-  await db.update(emailOtps).set({ consumedAt: new Date() }).where(eq(emailOtps.id, otp.id));
+  // Only one request can consume a code.
+  const [consumed] = await db
+    .update(emailOtps)
+    .set({ consumedAt: new Date() })
+    .where(and(eq(emailOtps.id, otp.id), isNull(emailOtps.consumedAt)))
+    .returning({ id: emailOtps.id });
+  if (!consumed) return { ok: false, error: "codeExpired" };
 
   const user = await upsertUser({ email });
   await createSession(user);
@@ -126,6 +159,20 @@ export async function requireUser(): Promise<User> {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   return user;
+}
+
+/**
+ * Delete expired sessions and sign-in codes (daily). Codes hold the address of anyone who typed one
+ * into the login form, users or not, so they aren't kept; they stay for an hour past expiry because
+ * the hourly code limit counts them.
+ */
+export async function purgeExpiredSignIns(now = new Date()): Promise<number> {
+  const s = await db.delete(sessions).where(lt(sessions.expiresAt, now)).returning({ id: sessions.id });
+  const o = await db
+    .delete(emailOtps)
+    .where(lt(emailOtps.expiresAt, new Date(now.getTime() - 3600_000)))
+    .returning({ id: emailOtps.id });
+  return s.length + o.length;
 }
 
 export async function logout(): Promise<void> {

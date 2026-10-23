@@ -3,12 +3,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_BEHAVIOR } from "@/lib/agent-settings";
 import { createTelnyxProvider, HANGUP_TOOL_DESCRIPTION } from "@/server/telnyx/live";
 import { MOCK_MODELS, toOfferedModels } from "@/server/telnyx/models";
+import { MOCK_CATALOG } from "@/server/telnyx/stock-voices";
 import { FeatureNotPermittedError } from "@/server/telnyx/types";
 
 const { publicKey, privateKey } = generateKeyPairSync("ed25519");
 const rawPub = publicKey.export({ format: "der", type: "spki" }).subarray(-32).toString("base64");
 
-const provider = createTelnyxProvider({
+const telnyxConfig: Parameters<typeof createTelnyxProvider>[0] = {
   mode: "live",
   apiKey: "test",
   publicKey: rawPub,
@@ -19,14 +20,16 @@ const provider = createTelnyxProvider({
   cloneModel: "Qwen3TTS",
   insightGroupId: "",
   messagingProfileId: "mp-1",
-});
+};
+const provider = createTelnyxProvider(telnyxConfig);
 
+const callId = "7d1f3c2a-9b4e-4f6a-8c1d-2e3f4a5b6c7d";
 const body = JSON.stringify({
   data: {
     id: "evt-1",
     event_type: "call.initiated",
     occurred_at: "2026-10-07T10:00:00Z",
-    payload: { call_control_id: "cc", direction: "incoming", from: "+1202", to: "+1415", client_state: Buffer.from("abc").toString("base64") },
+    payload: { call_control_id: "cc", direction: "incoming", from: "+1202", to: "+1415", client_state: Buffer.from(callId).toString("base64") },
   },
 });
 
@@ -40,7 +43,12 @@ describe("Telnyx webhook verification", () => {
 
   it("accepts a valid signature and normalizes the event", async () => {
     const e = await provider.parseWebhook(body, headers(now));
-    expect(e).toMatchObject({ id: "evt-1", type: "call.initiated", direction: "inbound", clientState: "abc", callControlId: "cc" });
+    expect(e).toMatchObject({ id: "evt-1", type: "call.initiated", direction: "inbound", clientState: callId, callControlId: "cc" });
+  });
+
+  it("drops a client_state that isn't one of our call ids", async () => {
+    const foreign = body.replace(Buffer.from(callId).toString("base64"), Buffer.from("abc").toString("base64"));
+    expect(await provider.parseWebhook(foreign, headers(now, foreign))).toMatchObject({ callControlId: "cc", clientState: undefined });
   });
 
   it("rejects a tampered body", async () => {
@@ -99,6 +107,103 @@ describe("number search", () => {
     respond(401, { errors: [{ code: "10009", title: "Authentication failed" }] });
     await expect(provider.searchNumbers({ areaCode: "415" })).rejects.toThrow(/401/);
   });
+
+  it("asks for numbers that can receive texts too, when texting is set up", async () => {
+    const features = (url: string) => new URL(url).searchParams.getAll("filter[features][]");
+    respond(200, { data: [] });
+    await provider.searchNumbers({ areaCode: "415" });
+    expect(features(String(vi.mocked(fetch).mock.calls[0][0]))).toEqual(["voice", "sms"]);
+
+    respond(200, { data: [] });
+    await createTelnyxProvider({ ...telnyxConfig, messagingProfileId: "" }).searchNumbers({ areaCode: "415" });
+    expect(features(String(vi.mocked(fetch).mock.calls[0][0]))).toEqual(["voice"]);
+  });
+});
+
+describe("catalogs", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  const down = () => vi.fn(async () => new Response("unavailable", { status: 503 }));
+  const ok = (body: unknown) => vi.fn(async () => new Response(JSON.stringify(body), { status: 200 }));
+
+  it.each([
+    ["voices", (p: ReturnType<typeof createTelnyxProvider>) => p.listStockVoices(), { voices: MOCK_CATALOG }],
+    ["models", (p: ReturnType<typeof createTelnyxProvider>) => p.listModels(), { data: MOCK_MODELS }],
+  ] as const)("keeps serving the last %s when a refresh fails, and fails only without any", async (_, list, body) => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const live = createTelnyxProvider(telnyxConfig);
+    vi.stubGlobal("fetch", down());
+    await expect(list(live)).rejects.toThrow(/503/);
+
+    vi.stubGlobal("fetch", ok(body));
+    const first = await list(live);
+    expect(first.length).toBeGreaterThan(0);
+
+    // Past the hour the catalog is cached for.
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 2 * 60 * 60 * 1000 });
+    const failing = down();
+    vi.stubGlobal("fetch", failing);
+    await expect(list(live)).resolves.toEqual(first);
+    expect(failing).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("numbers and deletes", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** Answer each request by method and path. */
+  function route(handlers: Record<string, [number, unknown]>) {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = new URL(url).pathname.replace(/^\/v2/, "");
+      const [status, body] = handlers[`${init?.method ?? "GET"} ${path}`] ?? [500, { errors: [{ detail: "unexpected" }] }];
+      return new Response(JSON.stringify(body), { status });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("treats a number that is already gone as released", async () => {
+    route({ "DELETE /phone_numbers/num_1": [404, { errors: [{ code: "10005" }] }] });
+    await expect(provider.releaseNumber("num_1")).resolves.toBeUndefined();
+  });
+
+  it("treats an assistant that is already gone as deleted", async () => {
+    route({ "DELETE /ai/assistants/assistant-1": [404, { errors: [{ code: "10005" }] }] });
+    await expect(provider.deleteAssistant("assistant-1")).resolves.toBeUndefined();
+  });
+
+  it("finishes a purge whose recording or conversation is already gone", async () => {
+    route({
+      "GET /recordings": [200, { data: [{ id: "rec_1" }] }],
+      "DELETE /recordings/rec_1": [404, {}],
+      "DELETE /ai/conversations/conv_1": [404, {}],
+    });
+    await expect(provider.purgeCallData({ callControlId: "cc", callSessionId: "sess", conversationId: "conv_1" })).resolves.toBeUndefined();
+  });
+
+  it("reports a completed order as pending until the number's id can be looked up", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    route({
+      "POST /number_orders": [200, { data: { id: "ord_1", status: "success", phone_numbers: [{ phone_number: "+14155551234", status: "success" }] } }],
+      "GET /phone_numbers": [503, {}],
+    });
+    expect(await provider.orderNumber("+14155551234")).toMatchObject({ orderId: "ord_1", status: "pending", numberId: undefined });
+    route({
+      "POST /number_orders": [200, { data: { id: "ord_1", status: "success", phone_numbers: [{ phone_number: "+14155551234", status: "success" }] } }],
+      "GET /phone_numbers": [200, { data: [{ id: "num_9" }] }],
+    });
+    expect(await provider.orderNumber("+14155551234")).toMatchObject({ status: "success", numberId: "num_9" });
+  });
+
+  it("gives every request a timeout", async () => {
+    const fetchMock = route({ "DELETE /phone_numbers/num_1": [200, {}] });
+    await provider.releaseNumber("num_1");
+    expect((fetchMock.mock.calls[0][1] as RequestInit).signal).toBeInstanceOf(AbortSignal);
+  });
 });
 
 describe("call results", () => {
@@ -116,6 +221,22 @@ describe("call results", () => {
     expect(res?.transcript.map((m) => m.text)).toEqual(["m1", "m2", "m3"]);
     for (const [url] of fetchMock.mock.calls) expect(new URL(url).searchParams.get("page[size]")).toBe("100");
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns the transcript while the summary is still being generated", async () => {
+    const withInsights = createTelnyxProvider({ ...telnyxConfig, insightGroupId: "ig-1" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const data = url.includes("conversations-insights") ? [{ status: "in_progress" }] : [{ role: "user", text: "Hi" }];
+        return new Response(JSON.stringify({ data }), { status: 200 });
+      }),
+    );
+    expect(await withInsights.getCallResults({ callControlId: "cc", conversationId: "conv-1" })).toEqual({
+      transcript: [{ role: "user", text: "Hi" }],
+      summary: undefined,
+      summaryPending: true,
+    });
   });
 });
 
@@ -214,7 +335,7 @@ describe("assistant config", () => {
 });
 
 describe("LLM catalog", () => {
-  it("offers recommended, priced models up to the output price cap", () => {
+  it("offers recommended, priced models up to the output price cap, except ones that need our own key", () => {
     expect(toOfferedModels(MOCK_MODELS).map((m) => m.id)).toEqual([
       "anthropic/claude-haiku-4-5",
       "zai-org/GLM-5.3-Flash",
@@ -259,7 +380,6 @@ describe("per-call variables", () => {
     vi.stubGlobal("fetch", fetchMock);
     await provider.answer("cc", "call-1", {
       assistantId: "assistant-1",
-      voiceRef: "Telnyx.KokoroTTS.af_heart",
       variables: { call_direction: "inbound", call_goal: "", contact_number: "+14155550100", current_time: "now" },
     });
     const body = bodyOf(fetchMock);
@@ -275,7 +395,6 @@ describe("per-call variables", () => {
     vi.stubGlobal("fetch", fetchMock);
     const res = await provider.startAssistant("cc", {
       assistantId: "assistant-1",
-      voiceRef: "x",
       variables: { call_direction: "outbound", call_goal: "Book a table for 2", contact_number: "+14155550100", current_time: "now" },
       greetingOverride: "Hi, this is an AI assistant calling.",
     });
@@ -343,16 +462,17 @@ describe("knowledge storage", () => {
     expect(await provider.listObjects("ev-kb-abc")).toEqual([]);
   });
 
-  it("lists objects across pages", async () => {
+  it("lists objects across pages, with when each was last written", async () => {
+    const at = "2026-10-21T21:05:12.000Z";
     const page = (keys: string[], next?: string) =>
-      `<ListBucketResult>${keys.map((k) => `<Contents><Key>${k}</Key><Size>10</Size></Contents>`).join("")}` +
+      `<ListBucketResult>${keys.map((k) => `<Contents><Key>${k}</Key><LastModified>${at}</LastModified><Size>10</Size></Contents>`).join("")}` +
       `<IsTruncated>${next ? "true" : "false"}</IsTruncated>${next ? `<NextContinuationToken>${next}</NextContinuationToken>` : ""}</ListBucketResult>`;
     const fetchMock = vi.fn(async (url: string) => new Response(url.includes("continuation-token") ? page(["depth-4-1.txt"]) : page(["src/a.txt", "depth-4-0.txt"], "t2")));
     vi.stubGlobal("fetch", fetchMock);
     expect(await provider.listObjects("ev-kb-abc")).toEqual([
-      { key: "src/a.txt", sizeBytes: 10 },
-      { key: "depth-4-0.txt", sizeBytes: 10 },
-      { key: "depth-4-1.txt", sizeBytes: 10 },
+      { key: "src/a.txt", sizeBytes: 10, modifiedAt: new Date(at) },
+      { key: "depth-4-0.txt", sizeBytes: 10, modifiedAt: new Date(at) },
+      { key: "depth-4-1.txt", sizeBytes: 10, modifiedAt: new Date(at) },
     ]);
   });
 });

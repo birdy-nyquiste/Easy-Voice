@@ -4,9 +4,9 @@ import { db } from "@/db";
 import { agents, calls, voices } from "@/db/schema";
 import { deleteAgent, getUserAgent, listUserAgents, updateAgent } from "@/server/agents";
 import { deleteCallRecord, getRecordingUrl, getUserCall, hangupCall, listUserCalls, startOutboundCall } from "@/server/calls";
-import { assignAgentToNumber, listUserNumbers, releaseNumber } from "@/server/numbers";
+import { assignAgentToNumber, getActiveUserNumber, listUserNumbers, releaseNumber } from "@/server/numbers";
 import { mockProvider } from "@/server/telnyx/mock";
-import { deleteVoice, listUserVoices } from "@/server/voices";
+import { deleteVoice, listUserVoices, voicePreview } from "@/server/voices";
 import { makeLine, resetDb } from "./helpers";
 
 beforeEach(resetDb);
@@ -54,9 +54,26 @@ describe("per-user isolation", () => {
     await expect(assignAgentToNumber(a.user.id, a.number.id, b.agent.id)).rejects.toThrow(/Agent not found/);
     await expect(deleteVoice(b.user.id, voice.id)).rejects.toThrow(/not found/);
     await expect(deleteCallRecord(b.user.id, call.id)).rejects.toThrow(/not found/);
-    const hangup = vi.spyOn(mockProvider, "hangup");
-    await hangupCall(b.user.id, call.id);
+  });
+
+  it("can't simulate calls or texts to another user's number (mock mode)", async () => {
+    const { a, b } = await twoUsers();
+    // The simulate actions resolve the posted number id through this before running the webhook handlers.
+    await expect(getActiveUserNumber(b.user.id, a.number.id)).rejects.toThrow(/not found/);
+    expect((await getActiveUserNumber(a.user.id, a.number.id)).e164).toBe(a.number.e164);
+  });
+
+  it("can't hang up another user's live call", async () => {
+    const { a, b } = await twoUsers();
+    const [live] = await db
+      .insert(calls)
+      .values({ userId: a.user.id, agentId: a.agent.id, phoneNumberId: a.number.id, direction: "inbound", fromNumber: "+12025550123", toNumber: a.number.e164, providerCallControlId: "cc-live", status: "answered", answeredAt: new Date() })
+      .returning();
+    const hangup = vi.spyOn(mockProvider, "hangup").mockResolvedValue();
+    await hangupCall(b.user.id, live.id);
     expect(hangup).not.toHaveBeenCalled();
+    await hangupCall(a.user.id, live.id); // the owner can
+    expect(hangup).toHaveBeenCalledWith("cc-live");
   });
 
   it("can't place calls with another user's agent", async () => {
@@ -68,6 +85,22 @@ describe("per-user isolation", () => {
     const { b, voice } = await twoUsers();
     const input = { name: "x", instructions: "x", greeting: "x", language: "en", voice: `clone:${voice.id}` };
     await expect(updateAgent(b.user.id, b.agent.id, input)).rejects.toThrow(/Unknown voice/);
+  });
+});
+
+describe("malformed ids", () => {
+  it("treats an id that isn't a UUID as not found instead of failing", async () => {
+    const { user, agent } = await makeLine(1000);
+    const bad = "not-a-uuid";
+    expect(await getUserCall(user.id, bad)).toBeNull();
+    expect(await getRecordingUrl(user.id, bad)).toBeNull();
+    await expect(deleteCallRecord(user.id, bad)).rejects.toThrow(/not found/);
+    await expect(hangupCall(user.id, bad)).resolves.toBeUndefined();
+    expect(await getUserAgent(user.id, bad)).toBeNull();
+    await expect(startOutboundCall(user, { agentId: bad, to: "4155550100" })).rejects.toThrow(/Agent not found/);
+    const input = { name: "x", instructions: "x", greeting: "x", language: "en", voice: `clone:${bad}` };
+    await expect(updateAgent(user.id, agent.id, input)).rejects.toThrow(/Unknown voice/);
+    expect(await voicePreview(user.id, `clone:${bad}`)).toBeNull();
   });
 });
 

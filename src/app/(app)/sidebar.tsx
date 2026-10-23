@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { LocaleSwitcher } from "@/components/locale-switcher";
-import { isActivePath } from "@/components/ui";
+import { focusRing, isActivePath } from "@/components/ui";
 import { SIDEBAR_COOKIE } from "@/lib/ui-prefs";
 import { logoutAction } from "../login/actions";
 
@@ -37,14 +37,12 @@ const LINKS: { href: string; label: "overview" | "agents" | "voices" | "numbers"
       <path d="M4.5 3.5h2.1a1 1 0 0 1 .97.76l.62 2.5a1 1 0 0 1-.37 1.04l-1.17.88a9 9 0 0 0 4.67 4.67l.88-1.17a1 1 0 0 1 1.04-.37l2.5.62a1 1 0 0 1 .76.97v2.1a1 1 0 0 1-1 1H14C8.2 16.5 3.5 11.8 3.5 6V4.5a1 1 0 0 1 1-1Z" />
     ),
   },
-  {
-    href: "/messages",
-    label: "messages",
-    icon: <path d="M5 4h10a1.5 1.5 0 0 1 1.5 1.5v6.5a1.5 1.5 0 0 1-1.5 1.5H9.5L6 16.5v-3H5A1.5 1.5 0 0 1 3.5 12V5.5A1.5 1.5 0 0 1 5 4Z" />,
-  },
+  { href: "/messages", label: "messages", icon: <MessagesIcon /> },
 ];
 
-const focusRing = "outline-none focus-visible:ring-2 focus-visible:ring-stone-300";
+function MessagesIcon() {
+  return <path d="M5 4h10a1.5 1.5 0 0 1 1.5 1.5v6.5a1.5 1.5 0 0 1-1.5 1.5H9.5L6 16.5v-3H5A1.5 1.5 0 0 1 3.5 12V5.5A1.5 1.5 0 0 1 5 4Z" />;
+}
 
 function Icon({ children, className = "h-5 w-5" }: { children: ReactNode; className?: string }) {
   return (
@@ -79,6 +77,19 @@ export function Sidebar({ account, unread, initialCollapsed }: { account: Accoun
   const t = useTranslations("nav");
   const path = usePathname();
   const [collapsed, setCollapsed] = useState(initialCollapsed);
+  const nav = useRef<HTMLElement>(null);
+
+  // On phones the links are one row that scrolls sideways: keep the current one in view. Sideways
+  // only (not scrollIntoView), so the page itself never jumps.
+  useEffect(() => {
+    const row = nav.current;
+    const link = row?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!row || !link || row.scrollWidth <= row.clientWidth) return;
+    const box = row.getBoundingClientRect();
+    const at = link.getBoundingClientRect();
+    if (at.left < box.left) row.scrollLeft -= box.left - at.left + 8;
+    else if (at.right > box.right) row.scrollLeft += at.right - box.right + 8;
+  }, [path]);
 
   function toggle() {
     const next = !collapsed;
@@ -110,12 +121,32 @@ export function Sidebar({ account, unread, initialCollapsed }: { account: Accoun
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-stone-900 text-sm text-white md:ml-1.5">◉</span>
           <span className={labelClass}>Easy Voice</span>
         </Link>
-        <div className="md:hidden">
+        <div className="flex items-center gap-2 md:hidden">
+          {/* The Messages link (and its count) can be scrolled out of the row below, so new texts show here too. */}
+          {unread > 0 && (
+            <Link
+              href="/messages"
+              className={`relative flex h-8 w-8 items-center justify-center rounded-full text-stone-600 hover:bg-stone-100 hover:text-stone-900 ${focusRing}`}
+            >
+              <Icon>
+                <MessagesIcon />
+              </Icon>
+              <span aria-hidden className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-sky-600 ring-2 ring-white" />
+              <span className="sr-only">
+                {t("messages")}
+                {t("unreadSr", { count: unread })}
+              </span>
+            </Link>
+          )}
           <AccountPopover account={account} placement="below" />
         </div>
       </div>
 
-      <nav className={`flex gap-1 overflow-x-auto px-2 pb-2 md:flex-col md:overflow-visible md:px-3 ${collapsed ? "md:px-2" : ""}`}>
+      {/* pt-0.5: the row scrolls, which clips anything outside it, focus rings included. */}
+      <nav
+        ref={nav}
+        className={`flex gap-1 overflow-x-auto px-2 pb-2 pt-0.5 md:flex-col md:overflow-visible md:px-3 md:pt-0 ${collapsed ? "md:px-2" : ""}`}
+      >
         {LINKS.map((l) => {
           const active = isActivePath(path, l.href);
           const showUnread = l.href === "/messages" && unread > 0;
@@ -137,8 +168,8 @@ export function Sidebar({ account, unread, initialCollapsed }: { account: Accoun
                 {showUnread && (
                   // Hidden from view in the rail (the dot shows instead) but still read out.
                   <span className={`rounded-full bg-sky-600 px-1.5 py-0.5 text-xs font-medium text-white ${collapsed ? "md:sr-only" : ""}`}>
-                    {unread}
-                    <span className="sr-only">{t("unreadSr")}</span>
+                    <span aria-hidden>{unread}</span>
+                    <span className="sr-only">{t("unreadSr", { count: unread })}</span>
                   </span>
                 )}
               </span>
@@ -281,7 +312,8 @@ function AccountCard({ account }: { account: Account }) {
         onClick={toggle}
         aria-expanded={open}
         aria-label={t(account.lowBalance ? "accountMenuEmpty" : "accountMenu", { email: account.email })}
-        className={`flex w-full items-center gap-2.5 rounded-xl p-2 text-left ${focusRing}`}
+        // Inset: the card clips anything drawn outside the button, which fills it.
+        className={`flex w-full items-center gap-2.5 rounded-xl p-2 text-left ${focusRing} focus-visible:ring-inset`}
       >
         <Avatar account={account} />
         <span className="min-w-0 flex-1 truncate text-sm text-stone-700" title={account.email}>

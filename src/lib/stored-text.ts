@@ -1,5 +1,6 @@
-import type { Locale } from "@/i18n/locales";
-import { translator, type Messages } from "@/i18n/messages";
+import { createTranslator } from "next-intl";
+import { BCP47, type Locale } from "@/i18n/locales";
+import { MESSAGES, type Messages } from "@/i18n/messages";
 import type { ErrorKey, ErrorValues, UserError } from "./errors";
 
 /**
@@ -47,13 +48,36 @@ export function showStored(locale: Locale, text: string | null, msg: StoredMessa
   return (msg && render(locale, msg)) ?? text;
 }
 
+/**
+ * Rows can outlive their message: a key renamed or removed, or a placeholder added that the row has no
+ * value for. Either falls back to the stored English rather than showing next-intl's "errors.someKey".
+ */
+const FAILED = "\u0000";
+type RowTranslator = (key: string, values: ErrorValues) => string;
+const rowTranslators = new Map<string, RowTranslator>();
+
 function render(locale: Locale, msg: StoredMessage): string | null {
   const [namespace, key] = msg.key.split(".") as ["stored" | "errors", string];
-  // Keys come from the database, so they're checked at runtime rather than by the compiler.
-  const t = translator(locale, namespace) as unknown as { (key: string, values: ErrorValues): string; has(key: string): boolean };
-  // A key renamed or removed since the row was written falls back to the stored English.
-  if (!t.has(key)) return null;
-  return t(key, dollarsFromText(msg.values ?? {}));
+  const text = rowTranslator(locale, namespace)(key, dollarsFromText(msg.values ?? {}));
+  return text === FAILED ? null : text;
+}
+
+/** Like translator() (es-419 amounts too), but a message that can't be formatted comes back as FAILED, unlogged. */
+function rowTranslator(locale: Locale, namespace: "stored" | "errors"): RowTranslator {
+  const cacheKey = `${locale}:${namespace}`;
+  let t = rowTranslators.get(cacheKey);
+  if (!t) {
+    // Keys come from the database, so they're checked at runtime rather than by the compiler.
+    t = createTranslator({
+      locale: BCP47[locale] as Locale,
+      messages: MESSAGES[locale],
+      namespace,
+      onError: () => {},
+      getMessageFallback: () => FAILED,
+    }) as unknown as RowTranslator;
+    rowTranslators.set(cacheKey, t);
+  }
+  return t;
 }
 
 /** Rows written before amounts were stored as numbers hold "$25.00"; the messages now format a number. */

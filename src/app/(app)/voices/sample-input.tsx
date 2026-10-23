@@ -2,16 +2,33 @@
 
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
-import { buttonClass, inputClass } from "@/components/ui";
+import { buttonClass, inputClass, type FieldControl } from "@/components/ui";
 import { formatMegabytes } from "@/lib/format";
 
-/** File input that can also be filled from a microphone recording. */
-export function SampleInput({ maxBytes }: { maxBytes: number }) {
+/**
+ * Why recording couldn't start. Only a refusal means access was denied; for the rest, uploading a file
+ * still works. A browser without recording (or a page not served over HTTPS) fails before asking.
+ */
+function recordingProblem(err: unknown): "micDenied" | "micNotFound" | "micUnavailable" | "recordingUnsupported" {
+  const name = (err as { name?: unknown } | null)?.name;
+  if (name === "NotAllowedError" || name === "SecurityError") return "micDenied";
+  if (name === "NotFoundError" || name === "OverconstrainedError") return "micNotFound";
+  if (name === "NotReadableError" || name === "AbortError") return "micUnavailable";
+  return "recordingUnsupported";
+}
+
+/**
+ * File input that can also be filled from a microphone recording. `control` (from the Field it sits in)
+ * labels the file input only, not the record and remove buttons beside it.
+ */
+export function SampleInput({ control, maxBytes }: { control: FieldControl; maxBytes: number }) {
   const t = useTranslations("voices");
   const tc = useTranslations("common");
   const locale = useLocale();
   const fileRef = useRef<HTMLInputElement>(null);
   const recRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const mounted = useRef(true);
   const [recording, setRecording] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -19,6 +36,29 @@ export function SampleInput({ maxBytes }: { maxBytes: number }) {
   useEffect(() => () => {
     if (preview) URL.revokeObjectURL(preview);
   }, [preview]);
+
+  // Leaving the page mid-recording must turn the microphone off.
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (recRef.current?.state === "recording") recRef.current.stop();
+      releaseMic();
+    };
+  }, []);
+
+  // A successful clone resets the form; drop the recorded sample and its preview with it.
+  useEffect(() => {
+    const form = fileRef.current?.form;
+    const clear = () => setPreview(null);
+    form?.addEventListener("reset", clear);
+    return () => form?.removeEventListener("reset", clear);
+  }, []);
+
+  function releaseMic() {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  }
 
   /** Put a file into the input (or clear it), validating its size. */
   function setSample(file: File | null) {
@@ -37,11 +77,14 @@ export function SampleInput({ maxBytes }: { maxBytes: number }) {
     setError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      if (!mounted.current) return releaseMic(); // left the page while the permission prompt was open
       const rec = new MediaRecorder(stream);
       const chunks: Blob[] = [];
       rec.ondataavailable = (e) => chunks.push(e.data);
       rec.onstop = () => {
-        stream.getTracks().forEach((t) => t.stop());
+        releaseMic();
+        if (!mounted.current) return;
         const type = rec.mimeType || "audio/webm";
         const ext = type.includes("mp4") ? "m4a" : "webm";
         setSample(new File(chunks, `recording.${ext}`, { type }));
@@ -49,8 +92,9 @@ export function SampleInput({ maxBytes }: { maxBytes: number }) {
       rec.start();
       recRef.current = rec;
       setRecording(true);
-    } catch {
-      setError(t("micDenied"));
+    } catch (err) {
+      releaseMic();
+      setError(t(recordingProblem(err)));
     }
   }
 
@@ -62,6 +106,7 @@ export function SampleInput({ maxBytes }: { maxBytes: number }) {
   return (
     <div className="space-y-2">
       <input
+        {...control}
         ref={fileRef}
         type="file"
         name="audio"
@@ -74,7 +119,10 @@ export function SampleInput({ maxBytes }: { maxBytes: number }) {
         <button type="button" onClick={recording ? stop : start} className={buttonClass(recording ? "danger" : "secondary")}>
           {recording ? t("stopRecording") : t("record")}
         </button>
-        {recording && <span className="text-sm text-red-600">{t("recording")}</span>}
+        {/* Always present, so screen readers announce when recording starts. */}
+        <span role="status" className="text-sm text-red-600">
+          {recording && t("recording")}
+        </span>
       </div>
       {preview && !recording && (
         <div className="flex items-center gap-3">
@@ -84,7 +132,11 @@ export function SampleInput({ maxBytes }: { maxBytes: number }) {
           </button>
         </div>
       )}
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && (
+        <p role="alert" className="text-sm text-red-600">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

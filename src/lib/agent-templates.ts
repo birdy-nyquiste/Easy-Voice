@@ -107,6 +107,11 @@ Never make commitments on {{owner_name}}'s behalf beyond what the goal asks for.
 export type TemplateId = keyof typeof AGENT_TEMPLATES;
 export const TEMPLATE_IDS = Object.keys(AGENT_TEMPLATES) as TemplateId[];
 
+/** The templates to offer: front desk answers from a knowledge base, so only where that feature is on. */
+export function offeredTemplates(knowledgeBase: boolean): TemplateId[] {
+  return knowledgeBase ? TEMPLATE_IDS : TEMPLATE_IDS.filter((id) => id !== "frontDesk");
+}
+
 export function toTemplateId(v: unknown): TemplateId | null {
   return typeof v === "string" && v in AGENT_TEMPLATES ? (v as TemplateId) : null;
 }

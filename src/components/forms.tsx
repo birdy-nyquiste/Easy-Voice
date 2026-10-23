@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, startTransition, useActionState, useContext, type ReactNode } from "react";
+import { createContext, startTransition, useActionState, useContext, useEffect, useRef, type ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 import { useTranslations } from "next-intl";
 import type { ActionState } from "@/lib/action";
@@ -11,11 +11,13 @@ export function SubmitButton({
   pendingText,
   variant = "primary",
   confirm,
+  disabled = false,
 }: {
   children: ReactNode;
   pendingText?: string;
   variant?: "primary" | "secondary" | "danger";
   confirm?: string;
+  disabled?: boolean;
 }) {
   const t = useTranslations("common");
   const formStatus = useFormStatus();
@@ -24,7 +26,7 @@ export function SubmitButton({
   return (
     <button
       type="submit"
-      disabled={pending}
+      disabled={pending || disabled}
       className={buttonClass(variant)}
       onClick={(e) => {
         if (confirm && !window.confirm(confirm)) e.preventDefault();
@@ -36,6 +38,21 @@ export function SubmitButton({
 }
 
 const ActionPendingContext = createContext<boolean | null>(null);
+const ActionStateContext = createContext<{ state: ActionState; pending: boolean } | null>(null);
+
+/**
+ * The form's latest error or success message, announced to screen readers. ActionForm shows it after
+ * its fields unless `message="custom"`, in which case the form places this itself (e.g. next to a
+ * Save button at the top). `initialOk` is shown until the next submission (e.g. "Saved." after a
+ * redirect).
+ */
+export function FormMessage({ initialOk, className = "text-sm" }: { initialOk?: string; className?: string }) {
+  const ctx = useContext(ActionStateContext);
+  const state = ctx?.state;
+  if (state?.error) return <p role="alert" className={`${className} text-red-600`}>{state.error}</p>;
+  const ok = state?.ok ?? (state || ctx?.pending ? undefined : initialOk);
+  return ok ? <p role="status" className={`${className} text-emerald-700`}>{ok}</p> : null;
+}
 
 /**
  * A form bound to a server action that shows the returned error/success message.
@@ -46,15 +63,30 @@ export function ActionForm({
   action,
   children,
   className,
+  message = "end",
+  resetOnSuccess = false,
 }: {
   action: (state: ActionState, data: FormData) => Promise<ActionState>;
   children: ReactNode;
   className?: string;
+  /** Where the result message goes: after the fields, or wherever the form puts <FormMessage />. */
+  message?: "end" | "custom";
+  /**
+   * Clear the fields after a success (keeping the message), for forms where submitting the same
+   * input twice would do the thing twice, e.g. a paid clone. Inputs with their own state listen
+   * for the form's reset event.
+   */
+  resetOnSuccess?: boolean;
 }) {
   const t = useTranslations("errors");
   const [state, formAction, pending] = useActionState(safeAction(action, t("network")), undefined);
+  const formRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (resetOnSuccess && state?.ok) formRef.current?.reset();
+  }, [resetOnSuccess, state]);
   return (
     <form
+      ref={formRef}
       className={className}
       onSubmit={(e) => {
         e.preventDefault();
@@ -63,9 +95,10 @@ export function ActionForm({
         startTransition(() => formAction(data));
       }}
     >
-      <ActionPendingContext.Provider value={pending}>{children}</ActionPendingContext.Provider>
-      {state?.error && <p className="mt-2 text-sm text-red-600">{state.error}</p>}
-      {state?.ok && <p className="mt-2 text-sm text-emerald-700">{state.ok}</p>}
+      <ActionStateContext.Provider value={{ state, pending }}>
+        <ActionPendingContext.Provider value={pending}>{children}</ActionPendingContext.Provider>
+        {message === "end" && <FormMessage className="mt-2 text-sm" />}
+      </ActionStateContext.Provider>
     </form>
   );
 }

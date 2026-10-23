@@ -17,6 +17,9 @@ import {
 type Row = AgentVariable & { id: number };
 type TextField = HTMLInputElement | HTMLTextAreaElement;
 
+/** Fixed widths, so the header lines up with rows whose "ask" column holds only a checkbox. */
+const VARIABLE_COLUMNS = "sm:grid-cols-[11rem_1fr_8rem_4rem]";
+
 /**
  * Greeting, instructions and the variables they can use. Variables are edited here, next to the
  * text that uses them, and posted as one JSON field.
@@ -121,14 +124,14 @@ export function ScriptFields({
 
         {rows.length > 0 && (
           <div className="space-y-2">
-            <div className="hidden gap-2 px-0.5 text-xs font-medium text-stone-500 sm:grid sm:grid-cols-[11rem_1fr_auto_auto]">
+            <div className={`hidden items-end gap-2 px-0.5 text-xs font-medium text-stone-500 sm:grid ${VARIABLE_COLUMNS}`}>
               <span>{t("variableName")}</span>
               <span>{t("variableValue")}</span>
-              <span>{t("askPerCall")}</span>
-              <span className="w-16" />
+              <span className="text-center">{t("askPerCall")}</span>
+              <span />
             </div>
             {rows.map((r) => (
-              <div key={r.id} className="grid items-center gap-2 sm:grid-cols-[11rem_1fr_auto_auto]">
+              <div key={r.id} className={`grid items-center gap-2 ${VARIABLE_COLUMNS}`}>
                 <input
                   aria-label={t("variableName")}
                   value={r.key}
@@ -202,28 +205,39 @@ function LabelRow({ htmlFor, label, insert }: { htmlFor: string; label: string; 
   );
 }
 
-/** A menu that types {{name}} at the cursor of a text field. */
+/**
+ * Types {{name}} at the cursor of a text field. Choosing and inserting are separate: on Windows and
+ * Linux, arrowing through a closed select changes its value, so inserting on change would insert
+ * every variable passed over.
+ */
 function InsertVariable({ names, target }: { names: string[]; target: RefObject<TextField | null> }) {
   const t = useTranslations("agents");
+  const [chosen, setChosen] = useState(names[0]);
+  // A variable renamed or removed since it was chosen falls back to the first.
+  const name = names.includes(chosen) ? chosen : names[0];
+  const control = "rounded-md border border-stone-200 bg-white px-2 py-1 text-xs text-stone-600 hover:bg-stone-50";
   return (
-    <select
-      value=""
-      aria-label={t("insertVariable")}
-      onChange={(e) => {
-        const el = target.current;
-        if (!el || !e.target.value) return;
-        el.setRangeText(`{{${e.target.value}}}`, el.selectionStart ?? el.value.length, el.selectionEnd ?? el.value.length, "end");
-        // setRangeText doesn't fire input events; let listeners see the new text.
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        el.focus();
-      }}
-      className="rounded-md border border-stone-200 bg-white px-2 py-1 text-xs font-medium text-stone-600 hover:bg-stone-50"
-    >
-      <option value="">{t("insertVariable")}</option>
-      {names.map((n) => (
-        <option key={n} value={n}>{`{{${n}}}`}</option>
-      ))}
-    </select>
+    <div className="flex items-center gap-1">
+      <select value={name} aria-label={t("insertVariable")} onChange={(e) => setChosen(e.target.value)} className={`${control} font-mono`}>
+        {names.map((n) => (
+          <option key={n} value={n}>{`{{${n}}}`}</option>
+        ))}
+      </select>
+      <button
+        type="button"
+        onClick={() => {
+          const el = target.current;
+          if (!el) return;
+          el.setRangeText(`{{${name}}}`, el.selectionStart ?? el.value.length, el.selectionEnd ?? el.value.length, "end");
+          // setRangeText doesn't fire input events; let listeners see the new text.
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.focus();
+        }}
+        className={`${control} font-medium`}
+      >
+        {t("insert")}
+      </button>
+    </div>
   );
 }
 

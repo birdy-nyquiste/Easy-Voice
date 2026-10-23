@@ -1,15 +1,14 @@
-import { requiredEnv } from "./env";
+import { choiceEnv, intEnv, requiredEnv } from "./env";
 
-function int(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (!raw) return fallback;
-  const n = Number.parseInt(raw, 10);
-  if (Number.isNaN(n)) throw new Error(`Env ${name} must be an integer`);
-  return n;
-}
+const MODES = ["mock", "live"] as const;
+// Production defaults to live so a missing env var can't silently simulate telephony.
+const telnyxMode = choiceEnv("TELNYX_MODE", MODES, process.env.NODE_ENV === "production" ? "live" : "mock");
 
 export const config = {
-  appUrl: process.env.APP_URL ?? "http://localhost:3000",
+  /** Where Google and Stripe send the user back to, without a trailing slash (paths are appended to it). */
+  get appUrl() {
+    return requiredEnv("APP_URL", "http://localhost:3000").replace(/\/+$/, "");
+  },
   get authSecret() {
     return requiredEnv("AUTH_SECRET", "dev-insecure-secret");
   },
@@ -27,6 +26,10 @@ export const config = {
   get devCreditEnabled() {
     return process.env.NODE_ENV !== "production";
   },
+  /** The production deployment, or not on Vercel at all (local dev, tests). Previews share production's database. */
+  get isProductionDeployment() {
+    return !process.env.VERCEL || process.env.VERCEL_ENV === "production";
+  },
 
   google: {
     clientId: process.env.GOOGLE_CLIENT_ID ?? "",
@@ -37,21 +40,27 @@ export const config = {
   },
 
   email: {
-    resendApiKey: process.env.RESEND_API_KEY ?? "",
-    from: process.env.EMAIL_FROM ?? "Easy Voice <login@example.com>",
+    /** Without it, dev prints emails (sign-in codes included) to the console; production requires it. */
+    get resendApiKey() {
+      return requiredEnv("RESEND_API_KEY", "");
+    },
+    /** Resend rejects senders on domains it hasn't verified, so production must set its own. */
+    get from() {
+      return requiredEnv("EMAIL_FROM", "Easy Voice <login@example.com>");
+    },
   },
 
   stripe: {
     secretKey: process.env.STRIPE_SECRET_KEY ?? "",
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
+    /** Both: without the webhook secret a checkout would take money that no webhook can ever credit. */
     get enabled() {
-      return Boolean(this.secretKey);
+      return Boolean(this.secretKey && this.webhookSecret);
     },
   },
 
   telnyx: {
-    // Production defaults to live so a missing env var can't silently simulate telephony.
-    mode: (process.env.TELNYX_MODE ?? (process.env.NODE_ENV === "production" ? "live" : "mock")) as "mock" | "live",
+    mode: telnyxMode,
     apiKey: process.env.TELNYX_API_KEY ?? "",
     publicKey: process.env.TELNYX_PUBLIC_KEY ?? "",
     connectionId: process.env.TELNYX_CONNECTION_ID ?? "",
@@ -64,7 +73,7 @@ export const config = {
     llmModel: process.env.TELNYX_LLM_MODEL || "moonshotai/Kimi-K2.6",
     sttModel: process.env.TELNYX_STT_MODEL || "assemblyai/universal-3-5-pro",
     sttLanguage: process.env.TELNYX_STT_LANGUAGE || "auto",
-    cloneModel: process.env.TELNYX_CLONE_MODEL ?? "Qwen3TTS",
+    cloneModel: process.env.TELNYX_CLONE_MODEL || "Qwen3TTS",
     /** Insight group with a "summary" insight; summaries are skipped when unset. */
     insightGroupId: process.env.TELNYX_INSIGHT_GROUP_ID ?? "",
     /** Messaging profile whose webhook points at us; numbers are put on it to receive texts. Unset = no texts. */
@@ -73,9 +82,7 @@ export const config = {
 
   elevenlabs: {
     /** Follows TELNYX_MODE unless set: "mock" simulates ElevenLabs in-process. */
-    mode: (process.env.ELEVENLABS_MODE ?? process.env.TELNYX_MODE ?? (process.env.NODE_ENV === "production" ? "live" : "mock")) as
-      | "mock"
-      | "live",
+    mode: choiceEnv("ELEVENLABS_MODE", MODES, telnyxMode),
     /**
      * TTS model for ElevenLabs voices on calls. Flash v2.5 is the low-latency phone model (~75 ms,
      * Mandarin + English) and half the credits of Multilingual.
@@ -84,22 +91,25 @@ export const config = {
   },
 
   pricing: {
-    callPerMinuteCents: int("PRICE_CALL_PER_MINUTE_CENTS", 15),
-    numberMonthlyCents: int("PRICE_NUMBER_MONTHLY_CENTS", 300),
-    voiceCloneCents: int("PRICE_VOICE_CLONE_CENTS", 500),
+    callPerMinuteCents: intEnv("PRICE_CALL_PER_MINUTE_CENTS", 15),
+    numberMonthlyCents: intEnv("PRICE_NUMBER_MONTHLY_CENTS", 300),
+    voiceCloneCents: intEnv("PRICE_VOICE_CLONE_CENTS", 500),
     /**
      * Telnyx charges $0.004/segment plus up to $0.0045 in carrier fees for inbound texts, and may add
      * an unregistered (non-10DLC) carrier fee of ~$0.012; 2¢ stays above the worst case.
      */
-    smsInboundPerPartCents: int("PRICE_SMS_INBOUND_PER_PART_CENTS", 2),
+    smsInboundPerPartCents: intEnv("PRICE_SMS_INBOUND_PER_PART_CENTS", 2),
     /** One-time charge per knowledge-base source, any type (SPEC §18.2). Embedding a typical source costs Telnyx cents. */
-    knowledgeSourceCents: int("PRICE_KNOWLEDGE_SOURCE_CENTS", 100),
-    minTopupCents: int("MIN_TOPUP_CENTS", 1000),
+    knowledgeSourceCents: intEnv("PRICE_KNOWLEDGE_SOURCE_CENTS", 100),
+    /** Stripe won't charge less than $0.50. */
+    minTopupCents: intEnv("MIN_TOPUP_CENTS", 1000, 50),
+    maxTopupCents: intEnv("MAX_TOPUP_CENTS", 50_000),
   },
 
   policy: {
-    negativeBalanceReleaseDays: int("NEGATIVE_BALANCE_RELEASE_DAYS", 7),
-    retentionDays: int("RETENTION_DAYS", 30),
+    // At least a day each: 0 would release a number, or purge a call, the moment it qualifies.
+    negativeBalanceReleaseDays: intEnv("NEGATIVE_BALANCE_RELEASE_DAYS", 7, 1),
+    retentionDays: intEnv("RETENTION_DAYS", 30, 1),
   },
 
   features: {
@@ -156,9 +166,18 @@ export const config = {
     /** TXT / MD files, in characters: about $0.75 to embed at the most. */
     knowledgeFileChars: 500_000,
     knowledgePdfBytes: 4 * 1024 * 1024,
-    /** A crawl that brings in more than this fails and its pages are deleted. */
-    knowledgeCrawlPages: 50,
+    /**
+     * A crawl that brings in more text than this fails and its pages are deleted. Pages arrive
+     * concatenated in ~2 MB chunks, so the number of objects says nothing about the number of pages.
+     */
     knowledgeCrawlBytes: 4 * 1024 * 1024,
+    /**
+     * A crawl is taken to be finished once nothing has been written for this long: Telnyx never says
+     * when one ends, and a live crawl wrote again after 10+ quiet minutes (docs/telnyx-api-notes.md §17).
+     */
+    get knowledgeCrawlQuietMs() {
+      return config.telnyx.mode === "live" ? 60 * 60 * 1000 : 5000;
+    },
   },
 };
 

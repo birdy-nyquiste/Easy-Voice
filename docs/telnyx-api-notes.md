@@ -543,7 +543,7 @@ Confirmed:
   the assistant. The LLM Playground has no retrieval option. Retrieval during a call can only be checked by calling.
 
 Still open: see `docs/telnyx-support-questions-knowledge-base.md` (retention after 30 days, vector deletion, crawl
-limits and billing, behaviour with an empty bucket, retrieval during calls on each model).
+billing (limits: see §17), behaviour with an empty bucket, retrieval during calls on each model).
 
 ## 16. Assistant behavior fields and variables — checked live 2026-10-21
 
@@ -571,3 +571,40 @@ when an agent has no key terms), custom keys in `dynamic_variables`.
   multilingual, video); there is no template endpoint. Its section list: Agent, Voice, Avatar, Workflow,
   Integrations, Analysis, Calling, Messaging, Widget, Observability, Simulation, Advanced.
 
+
+## 17. Website crawl limits — checked live 2026-10-21
+
+Probe: two throwaway buckets on the platform account, each set up as the app does it (create bucket,
+`POST /ai/embeddings` on it, then `POST /ai/embeddings/url`), polled every 30 s until the object count held for 10
+minutes, then emptied and deleted (objects, `DELETE /ai/embeddings/buckets/{name}`, bucket; the embeddings endpoint
+answered 404 afterwards).
+
+| Start URL | Objects | Text | Timeline |
+|---|---|---|---|
+| `https://developers.telnyx.com/` | 2 (3 by cleanup) | 18 KB | 1st object at ~2 min, 2nd at ~4 min, then nothing for 10+ min; a 3rd had arrived by 21:39, ~37 min after submission |
+| `https://docs.python.org/3/` | 8 | 12.5 MB | objects from ~2 min to ~11 min, then nothing for 10 min |
+
+- **The task status means nothing.** `POST /ai/embeddings/url` answers `status: "success"` with `finished_at: null`
+  at once, before any page is written, and `GET /ai/embeddings/{task_id}` kept answering exactly that for the whole
+  crawl and after it. Neither status nor `finished_at` tells us when a crawl is done.
+- **Objects are not pages.** Each `depth-<level>-<n>.txt` object is the extracted text of many pages concatenated
+  (no separators or URLs per page), split at about 2 MB. `<level>` counts down from 4 at the start URL to 1, so a
+  crawl follows links about three hops deep. `<n>` numbers the chunks within a level. The Python docs gave
+  `depth-4-0` (64 bytes, the start page), `depth-3-0` (204 KB), `depth-2-0`…`depth-2-4` (1.1–2.8 MB each) and
+  `depth-1-0` (2.1 MB). Writing seems to happen once per batch of pages, not per page.
+- **No page or size limit seen.** The only limit visible is the depth (about three hops). One URL produced 12.5 MB
+  of text, and all 8 objects showed up as embedded files (`GET /ai/embeddings/buckets/{name}`), so presumably all of
+  it was billed for embedding. A larger site within three hops could produce much more. A JavaScript-rendered site
+  (the Telnyx docs) yields almost nothing.
+- **Late writes.** A crawl can write again after more than 10 minutes of silence (developers.telnyx.com, above).
+  "Done" can only be guessed from the bucket going quiet, and even that isn't reliable.
+
+What this meant for `settleCrawl` / `crawlMayWrite` in `src/server/knowledge.ts` (both fixed the same day: a crawl
+now counts as done once the bucket has been quiet for `knowledgeCrawlQuietMs`, and only the byte limit is checked):
+
+- Both trust `getCrawlStatus`, which maps the immediate `success` to finished. In live mode a new URL source would be
+  settled on the next refresh with 0 pages and failed as unreadable, and cleanup would think the crawl can no longer
+  write.
+- `knowledgeCrawlPages` (50) counts objects, which are ~2 MB chunks, so it can't catch a site that is too large.
+  `knowledgeCrawlBytes` (4 MB) did catch the Python docs (12.5 MB), but only after Telnyx had already embedded and
+  presumably billed all of it.

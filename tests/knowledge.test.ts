@@ -10,6 +10,7 @@ import {
   addTextSource,
   addUrlSource,
   cleanUpKnowledge,
+  countUserSources,
   deleteSource,
   getAgentKnowledge,
   knowledgeBucketName,
@@ -26,6 +27,7 @@ const price = config.pricing.knowledgeSourceCents;
 beforeEach(async () => {
   await resetDb();
   mockKnowledge.delayMs = 0;
+  crawlQuietMs(0);
 });
 afterEach(() => {
   Object.assign(mockKnowledge, knobs);
@@ -33,6 +35,11 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
 });
+
+/** How long a crawl must be quiet before it counts as finished. */
+function crawlQuietMs(ms: number) {
+  vi.spyOn(config.limits, "knowledgeCrawlQuietMs", "get").mockReturnValue(ms);
+}
 
 const text = (title = "Hours") => ({ title, text: "We open at 7:15 am on weekdays." });
 
@@ -64,7 +71,7 @@ describe("adding sources", () => {
     expect(ready.status).toBe("ready");
 
     const bucket = knowledgeBucketName(agent.id);
-    expect(await mockProvider.listObjects(bucket)).toEqual([{ key: `src/${s.id}.txt`, sizeBytes: expect.any(Number) }]);
+    expect(await mockProvider.listObjects(bucket)).toEqual([{ key: `src/${s.id}.txt`, sizeBytes: expect.any(Number), modifiedAt: expect.any(Date) }]);
     const last = specs.at(-1)!;
     expect(last.knowledgeBucket).toBe(bucket);
     expect(last.instructions).toContain(KNOWLEDGE_RULES.reference);
@@ -86,6 +93,24 @@ describe("adding sources", () => {
     );
   });
 
+  it("counts the source limit across all of a user's agents, not per agent", async () => {
+    const { user, agent } = await makeLine(5000);
+    const [second] = await db
+      .insert(agents)
+      .values({ userId: user.id, name: "Second", instructions: "x", greeting: "Hi", language: "en", voiceRef: "Telnyx.KokoroTTS.af_heart", providerAssistantId: "assistant-2", status: "ready" })
+      .returning();
+    const max = config.limits.knowledgeSources;
+    for (let i = 0; i < max; i++) await addTextSource(user.id, i % 2 ? second.id : agent.id, text(`T${i}`));
+    await expect(addTextSource(user.id, second.id, text())).rejects.toThrow(errorText("en", "knowledgeLimit", { max }));
+  });
+
+  it("counts a line break as one character, as the text box does, though forms send CRLF", async () => {
+    const { user, agent } = await makeLine(1000);
+    const lines = "a\n".repeat(Math.floor(config.limits.knowledgeTextChars / 2)); // at the limit in the text box
+    const s = await addTextSource(user.id, agent.id, { title: "Lines", text: lines.replace(/\n/g, "\r\n") });
+    expect(s.content).toBe(lines.trim());
+  });
+
   it("refuses when the balance can't pay, writing nothing", async () => {
     const { user, agent } = await makeLine(config.pricing.knowledgeSourceCents - 1);
     await expect(addTextSource(user.id, agent.id, text())).rejects.toThrow(/Insufficient balance/);
@@ -99,7 +124,7 @@ describe("adding sources", () => {
     const long = "a".repeat(config.limits.knowledgeFileChars + 1);
     await expect(addFileSource(user.id, agent.id, new File([long], "big.md"))).rejects.toThrow(/characters/);
     const md = await addFileSource(user.id, agent.id, new File(["# Menu\nTea"], "menu.md"));
-    expect(await mockProvider.listObjects(knowledgeBucketName(agent.id))).toEqual([{ key: `src/${md.id}.txt`, sizeBytes: 10 }]);
+    expect(await mockProvider.listObjects(knowledgeBucketName(agent.id))).toEqual([{ key: `src/${md.id}.txt`, sizeBytes: 10, modifiedAt: expect.any(Date) }]);
     expect(await balance(user.id)).toBe(1000 - config.pricing.knowledgeSourceCents);
   });
 
@@ -176,6 +201,29 @@ describe("website sources", () => {
     await expect(addUrlSource(user.id, agent.id, "https://example.org")).rejects.toThrow(errorText("en", "knowledgeOneUrl"));
   });
 
+  it("waits until the bucket has been quiet, however the crawl task reports, and restarts the wait on a late page", async () => {
+    const { user, agent } = await makeLine(1000);
+    crawlQuietMs(60_000);
+    const s = await addUrlSource(user.id, agent.id, "https://example.com");
+    const bucket = knowledgeBucketName(agent.id);
+    const status = async () => (await db.select().from(knowledgeSources).where(eq(knowledgeSources.id, s.id)))[0].status;
+    await refreshKnowledge();
+    expect(await status()).toBe("processing");
+
+    // Quiet since the pages landed, until one more arrives late.
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 61_000 });
+    try {
+      await mockProvider.putObject(bucket, "depth-1-0.txt", new Blob(["late"], { type: "text/plain" }), "text/plain");
+      await refreshKnowledge();
+      expect(await status()).toBe("processing");
+      vi.setSystemTime(Date.now() + 61_000);
+      await refreshKnowledge();
+      expect(await status()).toBe("ready");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("deletes an oversized crawl without a refund", async () => {
     const { user, agent } = await makeLine(1000);
     const s = await addUrlSource(user.id, agent.id, "https://too-large.example.com");
@@ -193,9 +241,9 @@ describe("website sources", () => {
     expect(await balance(user.id)).toBe(1000);
   });
 
-  it("keeps a website deleted mid-submission until its crawl ends, then removes its pages", async () => {
+  it("keeps a website deleted mid-submission until its crawl goes quiet, then removes its pages", async () => {
     const { user, agent } = await makeLine(1000);
-    mockKnowledge.delayMs = 60_000;
+    crawlQuietMs(60_000);
     const crawl = mockProvider.crawlUrl.bind(mockProvider);
     vi.spyOn(mockProvider, "crawlUrl").mockImplementation(async (bucket, url) => {
       // Deleted before the crawl's task id is recorded.
@@ -207,8 +255,10 @@ describe("website sources", () => {
     const [pending] = await db.select().from(knowledgeSources);
     expect(pending).toMatchObject({ status: "deleting", url: null, crawlTaskId: expect.any(String) });
     expect((await mockProvider.listObjects(knowledgeBucketName(agent.id))).length).toBe(3);
+    await cleanUpKnowledge();
+    expect((await mockProvider.listObjects(knowledgeBucketName(agent.id))).length).toBe(3);
 
-    mockKnowledge.delayMs = 0;
+    crawlQuietMs(0);
     await cleanUpKnowledge();
     expect(await db.select().from(knowledgeSources)).toEqual([]);
     expect(await mockProvider.listObjects(knowledgeBucketName(agent.id))).toEqual([]);
@@ -223,6 +273,38 @@ describe("website sources", () => {
     await deleteSource(a.user.id, sa.id);
     expect(await mockProvider.listObjects(knowledgeBucketName(a.agent.id))).toEqual([]);
     expect((await mockProvider.listObjects(knowledgeBucketName(b.agent.id))).length).toBe(3);
+  });
+
+  it("fails and refunds a website whose crawl was never submitted", async () => {
+    const { user, agent } = await makeLine(1000);
+    vi.spyOn(mockProvider, "crawlUrl").mockImplementationOnce(() => new Promise(() => {})); // the server stops mid-submit
+    void addUrlSource(user.id, agent.id, "https://example.com");
+    await vi.waitFor(async () => expect(await db.select().from(knowledgeSources)).toHaveLength(1));
+    const [s] = await db.select().from(knowledgeSources);
+    expect(s.crawlTaskId).toBeNull();
+    await refreshKnowledge();
+    expect((await db.select().from(knowledgeSources))[0].status).toBe("processing"); // may still be submitting
+
+    await db.update(knowledgeSources).set({ createdAt: new Date(Date.now() - 2 * 3_600_000) }).where(eq(knowledgeSources.id, s.id));
+    await refreshKnowledge();
+    expect((await db.select().from(knowledgeSources))[0]).toMatchObject({ status: "failed", failureMsg: { key: "stored.knowledgeUploadFailed" } });
+    expect(await balance(user.id)).toBe(1000);
+  });
+
+  it("says a deleted website is still being removed, and refuses another until it's gone", async () => {
+    const { user, agent } = await makeLine(1000);
+    crawlQuietMs(60_000);
+    const s = await addUrlSource(user.id, agent.id, "https://example.com");
+    const website = async () => (await getAgentKnowledge((await db.select().from(agents).where(eq(agents.id, agent.id)))[0])).website;
+    expect(await website()).toBe("listed");
+
+    await deleteSource(user.id, s.id); // its crawl may still be writing
+    expect(await website()).toBe("removing");
+    await expect(addUrlSource(user.id, agent.id, "https://example.org")).rejects.toThrow(errorText("en", "knowledgeUrlStillRemoving"));
+
+    crawlQuietMs(0);
+    await cleanUpKnowledge();
+    expect(await website()).toBeNull();
   });
 
   it("rejects addresses that aren't web pages", async () => {
@@ -281,6 +363,61 @@ describe("deleting", () => {
     expect(await db.select().from(agentKnowledge)).toEqual([]);
   });
 
+  it("keeps a deleted agent's knowledge base until its website crawl goes quiet, then removes it", async () => {
+    const { user, agent } = await makeLine(1000);
+    crawlQuietMs(60_000);
+    await addUrlSource(user.id, agent.id, "https://example.com");
+    await deleteAgent(user.id, agent.id);
+    await cleanUpKnowledge();
+    // The crawl may still write pages: deleting the bucket now would let it recreate them.
+    expect((await mockProvider.listObjects(knowledgeBucketName(agent.id))).length).toBeGreaterThan(0);
+    expect(await db.select().from(agentKnowledge)).toHaveLength(1);
+
+    crawlQuietMs(0);
+    await cleanUpKnowledge();
+    expect(await db.select().from(agentKnowledge)).toEqual([]);
+    expect(await db.select().from(knowledgeSources)).toEqual([]);
+    await expect(mockProvider.enableEmbedding(knowledgeBucketName(agent.id))).rejects.toThrow(/no bucket/);
+  });
+
+  it("removes a text upload that lands after its source was deleted and cleaned up", async () => {
+    const { user, agent } = await makeLine(1000);
+    const put = mockProvider.putObject.bind(mockProvider);
+    vi.spyOn(mockProvider, "putObject").mockImplementationOnce(async (...args) => {
+      const [s] = await db.select().from(knowledgeSources);
+      await deleteSource(user.id, s.id); // nothing to delete at the provider yet, so its row goes at once
+      return put(...args);
+    });
+    await addTextSource(user.id, agent.id, text());
+    expect(await db.select().from(knowledgeSources)).toEqual([]);
+    expect(await mockProvider.listObjects(knowledgeBucketName(agent.id))).toEqual([]);
+  });
+
+  it("removes a bucket an upload created again after its agent's knowledge base was torn down", async () => {
+    const { user, agent } = await makeLine(1000);
+    const create = mockProvider.createBucket.bind(mockProvider);
+    vi.spyOn(mockProvider, "createBucket").mockImplementationOnce(async (bucket) => {
+      await deleteAgent(user.id, agent.id);
+      await cleanUpKnowledge({ agentId: agent.id });
+      return create(bucket);
+    });
+    await addTextSource(user.id, agent.id, text());
+    expect(await db.select().from(agentKnowledge)).toEqual([]);
+    await expect(mockProvider.enableEmbedding(knowledgeBucketName(agent.id))).rejects.toThrow(/no bucket/);
+  });
+
+  it("removes the knowledge base of an agent an older build deleted without marking it", async () => {
+    const { user, agent } = await makeLine(1000);
+    await addTextSource(user.id, agent.id, text());
+    // Builds from before knowledge bases only set deleted_at (previews share the database).
+    await db.update(agents).set({ deletedAt: new Date() }).where(eq(agents.id, agent.id));
+    expect(await countUserSources(user.id)).toBe(0);
+    await runKnowledgeJobs();
+    expect(await db.select().from(knowledgeSources)).toEqual([]);
+    expect(await db.select().from(agentKnowledge)).toEqual([]);
+    await expect(mockProvider.enableEmbedding(knowledgeBucketName(agent.id))).rejects.toThrow(/no bucket/);
+  });
+
   it("removes the whole knowledge base with the agent", async () => {
     const { user, agent } = await makeLine(1000);
     await addTextSource(user.id, agent.id, text());
@@ -309,7 +446,7 @@ describe("agent sync", () => {
     await addTextSource(user.id, agent.id, text());
     captureSpecs();
     mockKnowledge.rejectRetrieval = true;
-    await setKnowledgeMode(user.id, agent.id, "strict");
+    expect(await setKnowledgeMode(user.id, agent.id, "strict")).toBe(false); // saved, not applied yet
     const [quiet] = await db.select().from(agents).where(eq(agents.id, agent.id));
     expect(quiet.status).toBe("ready");
 
@@ -325,6 +462,21 @@ describe("agent sync", () => {
     // Pushed without the knowledge base, so it shows as not applied and is retried.
     expect(saved.syncedConfig).toBe(agentFingerprint());
     expect((await getAgentKnowledge(saved)).notApplied).toBe(true);
+  });
+
+  it("says when switching the knowledge base off hasn't reached the agent yet", async () => {
+    const { user, agent } = await makeLine(1000);
+    await addTextSource(user.id, agent.id, text()); // the agent can search it now
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(mockProvider, "updateAssistant").mockRejectedValue(new Error("Telnyx 500"));
+    expect(await setKnowledgeMode(user.id, agent.id, "off")).toBe(false);
+    const [stale] = await db.select().from(agents).where(eq(agents.id, agent.id));
+    expect(await getAgentKnowledge(stale)).toMatchObject({ notApplied: false, notRemoved: true });
+
+    vi.mocked(mockProvider.updateAssistant).mockRestore();
+    await resyncStaleAgents(user.id);
+    const [synced] = await db.select().from(agents).where(eq(agents.id, agent.id));
+    expect(await getAgentKnowledge(synced)).toMatchObject({ notApplied: false, notRemoved: false });
   });
 
   it("drops the tool everywhere when the feature is switched off", async () => {

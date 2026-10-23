@@ -1,3 +1,4 @@
+import { isUuid } from "@/lib/uuid";
 import type { CallEvent, CallEventType, InboundMessageEvent, ProviderEvent } from "./types";
 
 const KNOWN: CallEventType[] = [
@@ -18,14 +19,11 @@ function str(v: unknown): string | undefined {
   return typeof v === "string" && v ? v : undefined;
 }
 
+/** Our client_state is always a call id; anything else is dropped, so the call is matched by its other ids. */
 export function decodeClientState(v: unknown): string | undefined {
   const s = str(v);
-  if (!s) return undefined;
-  try {
-    return Buffer.from(s, "base64").toString("utf8");
-  } catch {
-    return undefined;
-  }
+  const decoded = s && Buffer.from(s, "base64").toString("utf8");
+  return decoded && isUuid(decoded) ? decoded : undefined;
 }
 
 export function encodeClientState(v: string): string {

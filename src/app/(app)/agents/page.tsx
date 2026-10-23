@@ -1,27 +1,39 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { ButtonLink, Card, Empty, PageHeader, StatusBadge } from "@/components/ui";
 import { config } from "@/lib/config";
 import { formatPhone } from "@/lib/format";
-import { listUserAgents, resyncStaleAgents } from "@/server/agents";
+import { listUserAgents, resyncStaleAgentsOnView } from "@/server/agents";
 import { requireUser } from "@/server/auth";
 import { getElevenLabsKey } from "@/server/elevenlabs-keys";
 import { isElevenLabsVoice } from "@/server/telnyx/stock-voices";
 import { listUserNumbers } from "@/server/numbers";
 
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getTranslations("agents"))("title") };
+}
+
 export default async function AgentsPage() {
   const user = await requireUser();
   // Bring agents up to date with changed platform model settings (cheap no-op otherwise).
-  await resyncStaleAgents(user.id);
+  await resyncStaleAgentsOnView(user.id);
   const [agents, numbers, elKey] = await Promise.all([listUserAgents(user.id), listUserNumbers(user.id), getElevenLabsKey(user.id)]);
   const keyRejected = Boolean(elKey?.keyInvalidAt);
   const [t, tl] = await Promise.all([getTranslations("agents"), getTranslations("languages")]);
+  const max = config.limits.agentsPerUser;
   return (
     <div>
       <PageHeader
         title={t("title")}
         description={t("description")}
-        action={agents.length < config.limits.agentsPerUser && <ButtonLink href="/agents/new">{t("new")}</ButtonLink>}
+        action={
+          agents.length < max ? (
+            <ButtonLink href="/agents/new">{t("new")}</ButtonLink>
+          ) : (
+            <p className="max-w-xs text-sm text-stone-500">{t("limitReached", { max })}</p>
+          )
+        }
       />
       {agents.length === 0 ? (
         <Empty>

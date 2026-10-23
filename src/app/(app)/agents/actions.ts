@@ -1,11 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getLocale, getTranslations } from "next-intl/server";
 import { redirect } from "next/navigation";
+import type { Agent } from "@/db/schema";
 import { attempt, type ActionState } from "@/lib/action";
-import { UserError } from "@/lib/errors";
-import { showStored } from "@/lib/stored-text";
 import { createAgent, deleteAgent, updateAgent } from "@/server/agents";
 import { requireUser } from "@/server/auth";
 import { cleanUpKnowledge } from "@/server/knowledge";
@@ -47,23 +45,18 @@ function variablesField(raw: FormDataEntryValue | null): unknown {
 
 export async function saveAgentAction(_: ActionState, form: FormData): Promise<ActionState> {
   let id = String(form.get("id") ?? "");
-  const creating = !id;
+  let status: Agent["status"] | undefined;
   const result = await attempt(async () => {
     const user = await requireUser();
     const agent = id ? await updateAgent(user.id, id, fields(form)) : await createAgent(user.id, fields(form));
-    id = agent.id;
+    ({ id, status } = agent);
     revalidatePath("/", "layout");
-    if (agent.status === "failed") {
-      throw new UserError("agentSaveFailed", { reason: showStored(await getLocale(), agent.failureReason ?? "", agent.failureMsg) });
-    }
-    return (await getTranslations("common"))("saved");
   });
-  // The agent page remounts its form after a save (see agents/[id]/page.tsx), which would drop
-  // this action's state, so confirm via the URL instead.
-  if (result?.ok) redirect(`/agents/${id}?saved=1`);
-  // A create that failed to sync still saved the agent. Go to it (the page shows why it failed)
-  // so saving again updates it instead of creating a duplicate.
-  if (creating && id) redirect(`/agents/${id}`);
+  // Once saved, the agent page remounts its form (see agents/[id]/page.tsx), which would drop this
+  // action's state, so the page shows the outcome: "Saved." via the URL, or why the sync failed.
+  // A new agent that failed to sync is saved too: going to it makes saving again update it
+  // instead of creating a duplicate.
+  if (status) redirect(status === "ready" ? `/agents/${id}?saved=1` : `/agents/${id}`);
   return result;
 }
 

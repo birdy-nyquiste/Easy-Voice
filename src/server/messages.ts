@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, isNull, lt, lte } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { contacts, messages, phoneNumbers, type Message, type PhoneNumber } from "@/db/schema";
 import { config } from "@/lib/config";
@@ -98,23 +98,38 @@ export interface Conversation {
   unread: number;
 }
 
-/** Conversations (one per sender), newest first. */
+/**
+ * Conversations (one per sender), newest first, at most `limit` of them. Counts are over every
+ * text in the conversation, so they match the unread badge.
+ */
 export async function listConversations(userId: string, limit = 500): Promise<Conversation[]> {
-  const rows = await db
-    .select()
+  const visible = and(eq(messages.userId, userId), isNull(messages.deletedAt));
+  const groups = await db
+    .select({
+      from: messages.fromNumber,
+      count: sql<number>`count(*)::int`,
+      unread: sql<number>`(count(*) filter (where ${messages.readAt} is null))::int`,
+    })
     .from(messages)
-    .where(and(eq(messages.userId, userId), isNull(messages.deletedAt)))
-    .orderBy(desc(messages.receivedAt))
+    .where(visible)
+    .groupBy(messages.fromNumber)
+    .orderBy(desc(sql`max(${messages.receivedAt})`), asc(messages.fromNumber))
     .limit(limit);
-  const names = await getContactNames(userId);
-  const byFrom = new Map<string, Conversation>();
-  for (const m of rows) {
-    const c = byFrom.get(m.fromNumber) ?? { from: m.fromNumber, name: names.get(m.fromNumber), last: m, count: 0, unread: 0 };
-    c.count++;
-    if (!m.readAt) c.unread++;
-    byFrom.set(m.fromNumber, c);
-  }
-  return [...byFrom.values()];
+  if (groups.length === 0) return [];
+  const [latest, names] = await Promise.all([
+    db
+      .selectDistinctOn([messages.fromNumber])
+      .from(messages)
+      .where(and(visible, inArray(messages.fromNumber, groups.map((g) => g.from))))
+      .orderBy(messages.fromNumber, desc(messages.receivedAt)),
+    getContactNames(userId),
+  ]);
+  const lastByFrom = new Map(latest.map((m) => [m.fromNumber, m]));
+  return groups.flatMap((g) => {
+    const last = lastByFrom.get(g.from);
+    // Missing only if the conversation was deleted between the two queries.
+    return last ? [{ ...g, name: names.get(g.from), last }] : [];
+  });
 }
 
 export async function countUnreadMessages(userId: string): Promise<number> {
@@ -185,7 +200,10 @@ export async function getContactName(userId: string, number: string): Promise<st
   return c?.name;
 }
 
-/** Name a sender; an empty name removes it. */
+/** Longer than any phone number, short code or sender ID a text can come from. */
+const MAX_SENDER_LENGTH = 64;
+
+/** Name a sender who has texted the user; an empty name removes it. */
 export async function setContactName(userId: string, number: string, rawName: string): Promise<void> {
   const name = rawName.trim().replace(/\s+/g, " ");
   if (!number) throw new UserError("missingNumber");
@@ -196,6 +214,17 @@ export async function setContactName(userId: string, number: string, rawName: st
     await db.delete(contacts).where(and(eq(contacts.userId, userId), eq(contacts.number, number)));
     return;
   }
+  // The number comes from the form, so only senders the user has actually had texts from (deleted
+  // conversations too) get a row; anything else could add rows without limit.
+  const [texted] =
+    number.length > MAX_SENDER_LENGTH
+      ? []
+      : await db
+          .select({ id: messages.id })
+          .from(messages)
+          .where(and(eq(messages.userId, userId), eq(messages.fromNumber, number)))
+          .limit(1);
+  if (!texted) throw new UserError("conversationNotFound");
   await db
     .insert(contacts)
     .values({ userId, number, name })

@@ -1,7 +1,7 @@
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
-import { ActionForm, SubmitButton } from "@/components/forms";
-import { Card, CardTitle, Field, inputClass } from "@/components/ui";
+import { ActionForm, FormMessage, SubmitButton } from "@/components/forms";
+import { Card, CardTitle, Field, Notice, inputClass } from "@/components/ui";
 import { MAX_CALL_MINUTES, MAX_KEY_TERMS_LENGTH, readBehavior, readVariables, SILENCE_HANGUP_SECS } from "@/lib/agent-settings";
 import type { AgentTemplate } from "@/lib/agent-templates";
 import { config } from "@/lib/config";
@@ -9,7 +9,7 @@ import type { Agent, Voice } from "@/db/schema";
 import { OUTBOUND_GREETING, RECORDING_NOTICE } from "@/server/agents";
 import type { LlmModel, StockVoice } from "@/server/telnyx";
 import { modelName, sttModelName } from "@/server/telnyx/models";
-import { DEFAULT_VOICE_REF, ttsModelName } from "@/server/telnyx/stock-voices";
+import { DEFAULT_VOICE_REF, ttsModelName, voiceSpeaks } from "@/server/telnyx/stock-voices";
 import { saveAgentAction } from "./actions";
 import { ModelRow } from "./model-row";
 import { ScriptFields } from "./script-fields";
@@ -23,15 +23,19 @@ export function AgentForm({
   agent,
   template,
   templateName = "",
-  stock,
+  stock: catalog,
   clones,
   models,
+  saved = false,
 }: {
   agent?: Agent;
+  /** Just saved: show "Saved." next to the button until the next save. */
+  saved?: boolean;
   /** For a new agent: what the form starts with. */
   template?: AgentTemplate;
   templateName?: string;
-  stock: StockVoice[];
+  /** Built-in voices; null when the catalog couldn't be loaded. */
+  stock: StockVoice[] | null;
   clones: Voice[];
   models: LlmModel[];
 }) {
@@ -42,10 +46,18 @@ export function AgentForm({
   const gender = (g: string) => (g === "female" || g === "male" ? tg(g) : g);
   const defaultModel = config.telnyx.llmModel;
   const otherModels = models.filter((m) => m.id !== defaultModel);
-  // Keep a previously saved model selectable even if it's no longer offered.
-  if (agent?.model && !otherModels.some((m) => m.id === agent.model)) {
-    otherModels.push({ id: agent.model, name: modelName(agent.model), inputPricePerM: 0, outputPricePerM: 0 });
+  // Keep a previously saved model selectable even if it's no longer offered, marked as such: saving
+  // asks for another one. (An empty list means the catalog couldn't be loaded, not that it's gone.)
+  const savedModel = agent?.model;
+  if (savedModel && !otherModels.some((m) => m.id === savedModel)) {
+    const name = modelName(savedModel);
+    const gone = models.length > 0 && savedModel !== defaultModel;
+    otherModels.push({ id: savedModel, name: gone ? t("modelGone", { name }) : name, inputPricePerM: 0, outputPricePerM: 0 });
   }
+  // Without the catalog, keep the agent's current built-in voice on offer rather than reporting it gone.
+  const stock =
+    catalog ??
+    (agent && !agent.voiceId ? [{ ref: agent.voiceRef, name: t("currentVoice"), language: agent.language, speaks: voiceSpeaks(agent.voiceRef) }] : []);
   const currentVoice = agent
     ? agent.voiceId
       ? `clone:${agent.voiceId}`
@@ -65,12 +77,21 @@ export function AgentForm({
     ...stock.map((v) => [`stock:${v.ref}`, ttsModelName(v.ref)]),
     ...readyClones.map((v) => [`clone:${v.id}`, ttsModelName(v.voiceRef ?? "")]),
   ]);
+  // A voice that left the catalog (or a clone that's no longer usable) can't be saved again, and a
+  // select whose value has no option silently submits the first one. Start empty instead, and say why.
+  const voiceGone = Boolean(agent) && !(currentVoice in ttsByVoice);
   const initial = agent ?? template;
   const behavior = readBehavior(agent ? agent.behavior : template?.behavior);
   const variables = agent ? readVariables(agent.variables) : (template?.variables ?? []);
   return (
-    <ActionForm action={saveAgentAction} className="space-y-6">
+    <ActionForm action={saveAgentAction} className="space-y-6" message="custom">
       {agent && <input type="hidden" name="id" value={agent.id} />}
+
+      {/* The result goes next to the button: below the last card it would be far out of view. */}
+      <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+        <FormMessage initialOk={saved ? tc("saved") : undefined} />
+        <SubmitButton pendingText={tc("saving")}>{agent ? t("saveChanges") : t("create")}</SubmitButton>
+      </div>
 
       <Section title={t("sectionIdentity")} description={t("sectionIdentityHint")}>
         <div className="grid gap-4 sm:grid-cols-2">
@@ -84,8 +105,10 @@ export function AgentForm({
             </select>
           </Field>
         </div>
+        {!catalog && <Notice>{t("voicesUnavailable")}</Notice>}
         <VoiceFields
-          defaultVoice={currentVoice}
+          defaultVoice={voiceGone ? "" : currentVoice}
+          voiceGone={voiceGone}
           ttsByVoice={ttsByVoice}
           behavior={behavior}
           voiceOptions={
@@ -193,10 +216,6 @@ export function AgentForm({
           </Field>
         </div>
       </Section>
-
-      <div>
-        <SubmitButton pendingText={tc("saving")}>{agent ? t("saveChanges") : t("create")}</SubmitButton>
-      </div>
     </ActionForm>
   );
 }

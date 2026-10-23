@@ -26,6 +26,7 @@ export async function saveUserLocale(user: User, locale: Locale): Promise<void> 
  */
 export async function syncLocaleAtSignIn(user: User): Promise<void> {
   const picked = await cookieLocale();
-  if (picked) await saveUserLocale(user, picked);
-  else if (user.locale) await setLocaleCookie(user.locale);
+  if (picked) return saveUserLocale(user, picked);
+  const saved = parseLocale(user.locale); // may be a language this build doesn't have
+  if (saved) await setLocaleCookie(saved);
 }

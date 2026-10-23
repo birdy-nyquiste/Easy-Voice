@@ -47,6 +47,18 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # Production applies only committed migrations, and tests build their database from them too, so a
+      # schema change without its migration (an enum value, an index, a default) could slip through.
+      # drizzle-kit generate needs no database.
+      - name: Migrations match the schema
+        run: |
+          pnpm db:generate
+          if [ -n "$(git status --porcelain -- drizzle)" ]; then
+            echo "src/db/schema.ts has changes with no migration. Run pnpm db:generate and commit drizzle/."
+            git status --porcelain -- drizzle
+            exit 1
+          fi
+
       - name: Lint
         run: pnpm lint
 

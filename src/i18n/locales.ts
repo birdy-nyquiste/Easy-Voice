@@ -20,8 +20,15 @@ export function localeFromAcceptLanguage(header: string | null): Locale {
     })
     .filter((r) => r.tag && r.q > 0)
     .sort((a, b) => b.q - a.q);
+  // Traditional Chinese readers get English rather than Simplified. Browsers list the bare "zh" after
+  // the regional tag ("zh-TW,zh;q=0.9"), so a Traditional tag also rules out a "zh" ranked below it.
+  let traditional = false;
   for (const { tag } of ranked) {
-    // Traditional Chinese readers get English rather than Simplified.
+    if (/^zh-(tw|hk|mo|hant)/.test(tag)) {
+      traditional = true;
+      continue;
+    }
+    if (tag === "zh" && traditional) continue;
     if (tag === "zh" || tag.startsWith("zh-cn") || tag.startsWith("zh-sg") || tag.startsWith("zh-hans")) return "zh";
     if (tag === "es" || tag.startsWith("es-")) return "es";
     if (tag === "ja" || tag.startsWith("ja-")) return "ja";

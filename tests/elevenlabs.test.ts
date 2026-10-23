@@ -9,6 +9,7 @@ import { connectElevenLabs, disconnectElevenLabs } from "@/server/elevenlabs-key
 import { liveElevenLabs } from "@/server/elevenlabs/live";
 import { mockElevenLabs } from "@/server/elevenlabs/mock";
 import { ElevenLabsError } from "@/server/elevenlabs/types";
+import { UserError } from "@/lib/errors";
 import { decryptSecret, encryptSecret } from "@/server/secrets";
 import { mockProvider } from "@/server/telnyx/mock";
 import { cloneVoice, deleteVoice, voicePreview } from "@/server/voices";
@@ -44,7 +45,7 @@ describe("connecting ElevenLabs", () => {
   it("checks the key, stores it encrypted and as a Telnyx integration secret", async () => {
     const u = await makeUser();
     const secret = vi.spyOn(mockProvider, "createIntegrationSecret");
-    const row = await connectElevenLabs(u.id, `  ${KEY} `);
+    const { key: row } = await connectElevenLabs(u.id, `  ${KEY} `);
     expect(row).toMatchObject({ keyHint: "1111", accountId: "alice" });
     expect(row.keyEncrypted).not.toContain(KEY);
     expect(decryptSecret(row.keyEncrypted)).toBe(KEY);
@@ -61,17 +62,67 @@ describe("connecting ElevenLabs", () => {
 
   it("replaces a key for the same account: agents move to the new secret, the old one is deleted", async () => {
     const u = await makeUser();
-    const first = await connectElevenLabs(u.id, KEY);
+    const { key: first } = await connectElevenLabs(u.id, KEY);
     const clone = await elevenLabsClone(u.id);
     await createAgent(u.id, { ...agentInput, voice: `clone:${clone.id}` });
     const update = vi.spyOn(mockProvider, "updateAssistant");
     const del = vi.spyOn(mockProvider, "deleteIntegrationSecret");
 
-    const second = await connectElevenLabs(u.id, "sk_acct_alice_2222");
+    const { key: second, agentsNotMoved, previousKeyKept } = await connectElevenLabs(u.id, "sk_acct_alice_2222");
     expect(second.keyHint).toBe("2222");
     expect(second.telnyxSecretRef).not.toBe(first.telnyxSecretRef);
     expect(update.mock.calls[0][1].voiceApiKeyRef).toBe(second.telnyxSecretRef);
     expect(del).toHaveBeenCalledWith(first.telnyxSecretId);
+    expect({ agentsNotMoved, previousKeyKept }).toEqual({ agentsNotMoved: 0, previousKeyKept: null });
+  });
+
+  it("reports agents that couldn't move to a replaced key, and an old secret that couldn't be deleted", async () => {
+    const u = await makeUser();
+    await connectElevenLabs(u.id, KEY);
+    const clone = await elevenLabsClone(u.id);
+    const agent = await createAgent(u.id, { ...agentInput, voice: `clone:${clone.id}` });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(mockProvider, "updateAssistant").mockRejectedValueOnce(new Error("Telnyx 500"));
+    vi.spyOn(mockProvider, "deleteIntegrationSecret").mockRejectedValueOnce(new Error("Telnyx 500"));
+
+    const result = await connectElevenLabs(u.id, "sk_acct_alice_2222");
+    // Names the key to revoke: the page shows only the new one's last characters.
+    expect(result).toMatchObject({ agentsNotMoved: 1, previousKeyKept: "1111" });
+    expect((await db.select().from(agents).where(eq(agents.id, agent.id)))[0].status).toBe("failed");
+  });
+
+  it("doesn't ask to revoke the key when the same key was entered again", async () => {
+    const u = await makeUser();
+    await connectElevenLabs(u.id, KEY);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(mockProvider, "deleteIntegrationSecret").mockRejectedValueOnce(new Error("Telnyx 500"));
+    expect((await connectElevenLabs(u.id, KEY)).previousKeyKept).toBeNull(); // revoking it would break the working key
+  });
+
+  it("deletes its new secret when the key can't be saved: another account connected meanwhile", async () => {
+    const u = await makeUser();
+    vi.spyOn(mockProvider, "createIntegrationSecret").mockImplementationOnce(async () => {
+      await connectElevenLabs(u.id, "sk_acct_bob_2222"); // lands first
+      return { id: "secret-alice" };
+    });
+    const del = vi.spyOn(mockProvider, "deleteIntegrationSecret");
+    await expect(connectElevenLabs(u.id, KEY)).rejects.toThrow(/different ElevenLabs account/);
+    expect(del).toHaveBeenCalledWith("secret-alice");
+    expect((await db.select().from(elevenLabsKeys))[0].accountId).toBe("bob");
+  });
+
+  it("deletes every replaced secret when two replacements race", async () => {
+    const u = await makeUser();
+    const { key: first } = await connectElevenLabs(u.id, KEY);
+    let second: { telnyxSecretId: string } | undefined;
+    vi.spyOn(mockProvider, "createIntegrationSecret").mockImplementationOnce(async () => {
+      ({ key: second } = await connectElevenLabs(u.id, "sk_acct_alice_2222")); // lands first
+      return { id: "secret-third" };
+    });
+    const del = vi.spyOn(mockProvider, "deleteIntegrationSecret");
+    await connectElevenLabs(u.id, "sk_acct_alice_3333");
+    expect((await db.select().from(elevenLabsKeys))[0].telnyxSecretId).toBe("secret-third");
+    expect(del.mock.calls.map(([id]) => id).sort()).toEqual([first.telnyxSecretId, second!.telnyxSecretId].sort());
   });
 
   it("refuses a key for a different ElevenLabs account", async () => {
@@ -143,10 +194,69 @@ describe("cloning with ElevenLabs", () => {
   });
 });
 
+describe("ElevenLabs previews and clones that need care", () => {
+  it("never previews another user's clone (it would spend their credits), even once it's cached", async () => {
+    const owner = await makeUser();
+    const other = await makeUser();
+    await connectElevenLabs(owner.id, KEY);
+    await connectElevenLabs(other.id, "sk_acct_bob_2222"); // with a key of their own, only the owner check stops it
+    const v = await elevenLabsClone(owner.id);
+    const speak = vi.spyOn(mockElevenLabs, "synthesize");
+    expect(await voicePreview(other.id, `clone:${v.id}`)).toBeNull();
+    expect(await voicePreview(owner.id, `clone:${v.id}`)).not.toBeNull(); // now cached
+    expect(await voicePreview(other.id, `clone:${v.id}`)).toBeNull();
+    expect(speak).toHaveBeenCalledTimes(1);
+  });
+
+  it("deletes a clone ElevenLabs wants verified, and says why it failed", async () => {
+    const u = await makeUser();
+    await connectElevenLabs(u.id, KEY);
+    vi.spyOn(mockElevenLabs, "cloneVoice").mockResolvedValue({ voiceId: "el_unverified", requiresVerification: true });
+    const del = vi.spyOn(mockElevenLabs, "deleteVoice");
+    const v = await elevenLabsClone(u.id);
+    expect(del).toHaveBeenCalledWith(KEY, "el_unverified");
+    expect(v).toMatchObject({ status: "failed", failureMsg: { key: "stored.voiceNeedsVerification" } });
+  });
+
+  it("flags the key when ElevenLabs rejects it during a preview", async () => {
+    const u = await makeUser();
+    await connectElevenLabs(u.id, KEY);
+    const v = await elevenLabsClone(u.id);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(mockElevenLabs, "synthesize").mockRejectedValue(new ElevenLabsError(401, "invalid_api_key", "Invalid API key"));
+    await expect(voicePreview(u.id, `clone:${v.id}`)).rejects.toBeInstanceOf(ElevenLabsError);
+    expect((await db.select().from(elevenLabsKeys))[0].keyInvalidAt).not.toBeNull();
+  });
+
+  it("clears the flag once ElevenLabs takes the key for a clone or a preview", async () => {
+    const u = await makeUser();
+    await connectElevenLabs(u.id, KEY);
+    const flag = () => db.update(elevenLabsKeys).set({ keyInvalidAt: new Date() });
+    const flagged = async () => (await db.select().from(elevenLabsKeys))[0].keyInvalidAt !== null;
+    await flag();
+    const v = await elevenLabsClone(u.id);
+    expect(await flagged()).toBe(false);
+    await flag();
+    await voicePreview(u.id, `clone:${v.id}`);
+    expect(await flagged()).toBe(false);
+  });
+
+  it("keeps a voice that couldn't be deleted from ElevenLabs, and flags a rejected key", async () => {
+    const u = await makeUser();
+    await connectElevenLabs(u.id, KEY);
+    const v = await elevenLabsClone(u.id);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(mockElevenLabs, "deleteVoice").mockRejectedValue(new ElevenLabsError(401, "invalid_api_key", "Invalid API key"));
+    await expect(deleteVoice(u.id, v.id)).rejects.toThrow(/Couldn't delete the voice from your ElevenLabs account/);
+    expect((await db.select().from(voices).where(eq(voices.id, v.id)))[0].deletedAt).toBeNull();
+    expect((await db.select().from(elevenLabsKeys))[0].keyInvalidAt).not.toBeNull();
+  });
+});
+
 describe("agents with ElevenLabs voices", () => {
   it("send the voice with the user's key reference", async () => {
     const u = await makeUser();
-    const key = await connectElevenLabs(u.id, KEY);
+    const { key } = await connectElevenLabs(u.id, KEY);
     const v = await elevenLabsClone(u.id);
     const create = vi.spyOn(mockProvider, "createAssistant");
     const a = await createAgent(u.id, { ...agentInput, voice: `clone:${v.id}` });
@@ -175,6 +285,18 @@ describe("agents with ElevenLabs voices", () => {
 });
 
 describe("disconnecting ElevenLabs", () => {
+  it("keeps a key that replaced the one being disconnected, so its secret isn't orphaned", async () => {
+    const u = await makeUser();
+    await connectElevenLabs(u.id, KEY);
+    const original = mockProvider.deleteIntegrationSecret.bind(mockProvider);
+    vi.spyOn(mockProvider, "deleteIntegrationSecret").mockImplementationOnce(async (id) => {
+      await original(id);
+      await connectElevenLabs(u.id, "sk_acct_alice_2222"); // replaced while the disconnect is under way
+    });
+    await expect(disconnectElevenLabs(u.id)).rejects.toThrow(UserError);
+    expect((await db.select().from(elevenLabsKeys))[0].keyHint).toBe("2222");
+  });
+
   it("is refused while an agent uses an ElevenLabs voice", async () => {
     const u = await makeUser();
     await connectElevenLabs(u.id, KEY);
@@ -185,7 +307,7 @@ describe("disconnecting ElevenLabs", () => {
 
   it("removes the key, the Telnyx secret and the ElevenLabs voices here, keeping other clones", async () => {
     const u = await makeUser(5000);
-    const key = await connectElevenLabs(u.id, KEY);
+    const { key } = await connectElevenLabs(u.id, KEY);
     const el = await elevenLabsClone(u.id);
     const telnyx = await cloneVoice(u.id, { name: "T", language: "en", gender: "female", audio: audio(), consent: true });
     const a = await createAgent(u.id, { ...agentInput, voice: `clone:${el.id}` });
@@ -203,9 +325,34 @@ describe("disconnecting ElevenLabs", () => {
     expect((await db.select().from(agents).where(eq(agents.id, a.id)))[0].status).toBe("ready");
     expect((await db.select().from(users).where(eq(users.id, u.id)))[0]).toBeTruthy();
   });
+
+  it("keeps everything when the Telnyx secret can't be deleted, so disconnecting again retries it", async () => {
+    const u = await makeUser();
+    const { key } = await connectElevenLabs(u.id, KEY);
+    const v = await elevenLabsClone(u.id);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const del = vi.spyOn(mockProvider, "deleteIntegrationSecret").mockRejectedValueOnce(new Error("Telnyx 503"));
+    await expect(disconnectElevenLabs(u.id)).rejects.toThrow(/Couldn't disconnect ElevenLabs/);
+    expect(await db.select().from(elevenLabsKeys)).toHaveLength(1);
+    expect((await db.select().from(voices).where(eq(voices.id, v.id)))[0].deletedAt).toBeNull();
+
+    await disconnectElevenLabs(u.id);
+    expect(await db.select().from(elevenLabsKeys)).toHaveLength(0);
+    expect(del).toHaveBeenLastCalledWith(key.telnyxSecretId);
+  });
 });
 
 describe("ElevenLabs REST adapter", () => {
+  it("gives up on a slow key check quickly, so it can't hold up answering a call", async () => {
+    // A request that never answers until it is aborted.
+    vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal!.reason));
+    })));
+    const started = Date.now();
+    await expect(liveElevenLabs.checkKey("sk_1")).rejects.toThrow(/timeout/i);
+    expect(Date.now() - started).toBeLessThan(4000);
+  }, 8000);
+
   it("sends the key, reads the account and turns API errors into ElevenLabsError", async () => {
     const fetchMock = vi
       .fn()

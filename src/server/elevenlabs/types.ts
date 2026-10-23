@@ -14,7 +14,7 @@ export interface ElevenLabsClient {
   getAccount(apiKey: string): Promise<ElevenLabsAccount>;
   /** One cheap request that throws ElevenLabsError (status 401) if the key no longer works. */
   checkKey(apiKey: string): Promise<void>;
-  /** Instant Voice Cloning; the voice is usable as soon as this returns. */
+  /** Instant Voice Cloning; the voice is usable as soon as this returns, unless ElevenLabs requires verification first. */
   cloneVoice(
     apiKey: string,
     input: { name: string; language: Language; gender: "male" | "female"; audio: Blob },

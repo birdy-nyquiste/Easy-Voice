@@ -92,7 +92,11 @@ export const ledgerEntries = pgTable(
     amountCents: integer("amount_cents").notNull(), // + credit, - debit
     balanceAfterCents: integer("balance_after_cents").notNull(),
     kind: ledgerKind("kind").notNull(),
-    /** Guarantees a charge/credit is applied once, e.g. "call:<id>", "stripe:<session>". */
+    /**
+     * Guarantees a charge/credit is applied once: "call:<id>", "sms:<message id>", "number:<id>:0" (first month)
+     * or "number:<id>:<paid through>" (renewals), "voice:<id>", "knowledge:<id>", "payment:<payments.id>",
+     * "dev-credit:<uuid>"; a refund adds ":refund".
+     */
     idempotencyKey: text("idempotency_key").notNull().unique(),
     refType: text("ref_type"),
     refId: text("ref_id"),
@@ -241,8 +245,9 @@ export const knowledgeSources = pgTable(
     type: knowledgeSourceType("type").notNull(),
     /** Shown in the list: the title, file name or URL. Cleared on delete. */
     name: text("name"),
-    /** Typed text, kept to show it. Cleared on delete. */
+    /** Typed text, shown on request in the list. Cleared on delete. */
     content: text("content"),
+    /** The website (URL sources), linked from the list. Cleared on delete. */
     url: text("url"),
     /** Provider crawl task (URL sources). */
     crawlTaskId: text("crawl_task_id"),

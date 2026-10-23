@@ -21,12 +21,17 @@ export { schema };
 export type Queryable = Db | Tx;
 
 /**
- * Run `fn` in a transaction holding a per-user advisory lock, so
- * check-then-insert sequences (resource limits, one active call) can't race.
+ * Run `fn` in a transaction holding an advisory lock on `key`, so
+ * check-then-insert sequences can't race.
  */
-export async function withUserLock<T>(userId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
+export async function withLock<T>(key: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
   return db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${userId}, 0))`);
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
     return fn(tx);
   });
+}
+
+/** A per-user lock for resource limits and one active call. */
+export async function withUserLock<T>(userId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
+  return withLock(userId, fn);
 }
