@@ -177,16 +177,27 @@ async function reserve(
 /**
  * Settle a processing source as failed, at most once. Only the caller whose update wins refunds, so
  * a page poll and the daily job can't both settle it, and a source deleted meanwhile is never refunded.
+ * Given the bucket, a text or file source's object is removed too: the provider may still embed it
+ * later, and a failed, refunded source must not be searchable.
  */
-async function failSource(s: KnowledgeSource, agentName: string, reason: StoredText, refund = true): Promise<void> {
-  // One transaction, so a failed refund leaves the source processing and it is settled again later.
+async function failSource(
+  s: KnowledgeSource,
+  agentName: string,
+  reason: StoredText,
+  opts: { refund?: boolean; bucket?: string } = {},
+): Promise<void> {
+  // One transaction, so a failed removal or refund leaves the source processing and it is settled again later.
   await db.transaction(async (tx) => {
     const [u] = await tx
       .update(knowledgeSources)
       .set({ status: "failed", ...failureColumns(reason) })
       .where(and(eq(knowledgeSources.id, s.id), eq(knowledgeSources.status, "processing")))
       .returning();
-    if (u && refund) {
+    if (!u) return;
+    if (opts.bucket && s.type !== "url") {
+      for (const key of objectKeys(s.id)) await voiceProvider().deleteObject(opts.bucket, key);
+    }
+    if (opts.refund ?? true) {
       await refundPurchase(purchase(s, agentName), stored(LEDGER[s.type].refund, { agent: agentName }), tx);
     }
   });
@@ -219,15 +230,20 @@ async function upload(
   write: (bucket: string) => Promise<Partial<KnowledgeSource> | void>,
 ): Promise<KnowledgeSource> {
   const { source, base, agentName } = reserved;
+  let written = false;
   try {
     const embeddingTurnedOn = await ensureBucket(base);
     const patch = await write(base.bucket);
+    written = true;
     if (patch) await db.update(knowledgeSources).set(patch).where(eq(knowledgeSources.id, source.id));
     // The agent can search its bucket from now on.
     if (embeddingTurnedOn) await resyncAgentIfStale(source.agentId);
   } catch (err) {
     console.error("knowledge upload failed", source.id, err);
-    await failSource(source, agentName, isBucketLimit(err) ? stored("knowledgeBucketsFull") : stored("knowledgeUploadFailed"));
+    // Only remove what was written: a write that failed left nothing, and the provider may be down.
+    await failSource(source, agentName, isBucketLimit(err) ? stored("knowledgeBucketsFull") : stored("knowledgeUploadFailed"), {
+      bucket: written ? base.bucket : undefined,
+    });
   }
   // Deleted while uploading: remove what was just written.
   await cleanUpKnowledge({ agentId: source.agentId });
@@ -383,8 +399,8 @@ export async function refreshKnowledge(scope: Scope = {}): Promise<void> {
       if (!statuses.has(bucket)) statuses.set(bucket, await provider.embeddingStatuses(bucket));
       const st = objectKeys(s.id).map((k) => statuses.get(bucket)!.get(k)).find(Boolean);
       if (st === "ready") await markReady(s);
-      else if (st === "failed") await failSource(s, agentName, stored("knowledgeUnreadable"));
-      else if (isStuck(s)) await failSource(s, agentName, stored("knowledgeUploadFailed"));
+      else if (st === "failed") await failSource(s, agentName, stored("knowledgeUnreadable"), { bucket });
+      else if (isStuck(s)) await failSource(s, agentName, stored("knowledgeUploadFailed"), { bucket });
     } catch (err) {
       console.error("refreshKnowledge failed", s.id, err);
     }
@@ -408,7 +424,7 @@ async function settleCrawl(s: KnowledgeSource, bucket: string, agentName: string
     const provider = voiceProvider();
     for (const p of pages) await provider.deleteObject(bucket, p.key);
     // Not refunded: the provider already charged for embedding these pages.
-    await failSource(s, agentName, stored("knowledgeSiteTooLarge"), false);
+    await failSource(s, agentName, stored("knowledgeSiteTooLarge"), { refund: false });
   } else {
     await markReady(s, bytes);
   }

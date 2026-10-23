@@ -188,6 +188,38 @@ describe("settling", () => {
     expect(row).toMatchObject({ status: "failed", failureMsg: { key: "stored.knowledgeUploadFailed" } });
     expect(await balance(user.id)).toBe(1000);
   });
+
+  it("removes a stuck file when it fails, so a late embedding can't make it searchable", async () => {
+    const { user, agent } = await makeLine(1000);
+    // The provider never gets round to embedding it within the hour.
+    mockKnowledge.delayMs = 3 * 60 * 60 * 1000;
+    const s = await addFileSource(user.id, agent.id, new File(["We open at 7:15 am."], "hours.txt"));
+    await db.update(knowledgeSources).set({ createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000) }).where(eq(knowledgeSources.id, s.id));
+    await refreshKnowledge();
+    const [row] = await db.select().from(knowledgeSources).where(eq(knowledgeSources.id, s.id));
+    expect(row).toMatchObject({ status: "failed", failureMsg: { key: "stored.knowledgeUploadFailed" } });
+    expect(await balance(user.id)).toBe(1000);
+    expect(await mockProvider.listObjects(knowledgeBucketName(agent.id))).toEqual([]);
+  });
+
+  it("keeps a stuck source processing, unrefunded, until its object can be removed", async () => {
+    const { user, agent } = await makeLine(1000);
+    mockKnowledge.delayMs = 3 * 60 * 60 * 1000;
+    const s = await addTextSource(user.id, agent.id, text());
+    await db.update(knowledgeSources).set({ createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000) }).where(eq(knowledgeSources.id, s.id));
+    mockKnowledge.failDeletes = true;
+    await refreshKnowledge();
+    let [row] = await db.select().from(knowledgeSources).where(eq(knowledgeSources.id, s.id));
+    expect(row.status).toBe("processing");
+    expect(await balance(user.id)).toBe(1000 - price);
+
+    mockKnowledge.failDeletes = false;
+    await refreshKnowledge();
+    [row] = await db.select().from(knowledgeSources).where(eq(knowledgeSources.id, s.id));
+    expect(row.status).toBe("failed");
+    expect(await balance(user.id)).toBe(1000);
+    expect(await mockProvider.listObjects(knowledgeBucketName(agent.id))).toEqual([]);
+  });
 });
 
 describe("website sources", () => {
