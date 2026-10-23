@@ -8,7 +8,7 @@ import { applyLedger } from "@/server/billing/ledger";
 import { handleStripeWebhook } from "@/server/billing/payments";
 import { runDailyJobs } from "@/server/cron";
 import { mockProvider } from "@/server/telnyx/mock";
-import { cloneVoice } from "@/server/voices";
+import { cloneVoice, deleteVoice } from "@/server/voices";
 import { makeLine, makeUser, resetDb } from "./helpers";
 
 beforeEach(resetDb);
@@ -160,6 +160,19 @@ describe("daily jobs", () => {
     await runDailyJobs();
     expect((await db.select().from(voices)).map((v) => v.status)).toEqual(["failed", "failed"]);
     expect(await balance()).toBe(1000);
+  });
+
+  it("refund a stuck Easy Voice clone even if the user deleted it before the hour was up", async () => {
+    const user = await makeUser(1000);
+    vi.spyOn(mockProvider, "cloneVoice").mockImplementationOnce(() => new Promise(() => {})); // the server stops mid-clone
+    const audio = new File([new Uint8Array(5000)], "s.wav", { type: "audio/wav" });
+    void cloneVoice(user.id, { name: "Me", language: "en", gender: "female", audio, consent: true });
+    await vi.waitFor(async () => expect(await db.select().from(voices)).toHaveLength(1));
+    const [v] = await db.select().from(voices);
+    await deleteVoice(user.id, v.id);
+    await db.update(voices).set({ createdAt: new Date(Date.now() - 2 * 3_600_000) });
+    await runDailyJobs();
+    expect((await db.select().from(users).where(eq(users.id, user.id)))[0].balanceCents).toBe(1000);
   });
 });
 

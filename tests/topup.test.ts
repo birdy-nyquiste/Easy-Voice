@@ -16,11 +16,14 @@ vi.mock("stripe", () => ({
 
 beforeEach(async () => {
   await resetDb();
+  // Top-ups are only on with both set (a payment no webhook can confirm would never be credited).
   config.stripe.secretKey = "sk_test_dummy";
+  config.stripe.webhookSecret = "whsec_test_dummy";
 });
 afterEach(() => {
   vi.resetAllMocks();
   config.stripe.secretKey = "";
+  config.stripe.webhookSecret = "";
 });
 
 const balance = async (id: string) => (await db.select().from(users).where(eq(users.id, id)))[0].balanceCents;

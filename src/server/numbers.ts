@@ -146,8 +146,9 @@ async function failNumber(n: PhoneNumber, reason: StoredText): Promise<PhoneNumb
   return u;
 }
 
-/** Poll the provider for pending orders (called on page view and by cron). */
-export async function refreshPendingNumbers(userId?: string): Promise<void> {
+/** Poll the provider for pending orders (called on page view and by cron). True if any was refunded. */
+export async function refreshPendingNumbers(userId?: string): Promise<boolean> {
+  let refunded = false;
   const pending = await db
     .select()
     .from(phoneNumbers)
@@ -158,16 +159,17 @@ export async function refreshPendingNumbers(userId?: string): Promise<void> {
         if (Date.now() - n.createdAt.getTime() < STUCK_ORDER_MS) continue; // may still be ordering
         const numberId = await voiceProvider().findNumber(n.e164);
         if (numberId) await activateNumber(n, numberId);
-        else await failNumber(n, stored("numberCouldNotOrder"));
+        else refunded = Boolean(await failNumber(n, stored("numberCouldNotOrder")));
         continue;
       }
       const order = await voiceProvider().getNumberOrder(n.providerOrderId);
       if (order.status === "success") await activateNumber(n, order.numberId);
-      else if (order.status === "failure") await failNumber(n, order.failureReason ?? stored("numberOrderFailed"));
+      else if (order.status === "failure") refunded = Boolean(await failNumber(n, order.failureReason ?? stored("numberOrderFailed")));
     } catch (err) {
       console.error("getNumberOrder failed", n.id, err);
     }
   }
+  return refunded;
 }
 
 export async function releaseNumber(userId: string, numberId: string, reason: StoredText = stored("numberReleasedByUser")): Promise<void> {

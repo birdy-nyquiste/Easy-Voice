@@ -32,7 +32,7 @@ export default async function ThreadPage({ searchParams }: { searchParams: Promi
 
   return (
     <div className="space-y-6">
-      <AutoRefresh everyMs={10_000} />
+      <AutoRefresh everyMs={10_000} maxMs={Infinity} />
       <MarkRead from={from} upTo={texts[texts.length - 1].receivedAt.toISOString()} hasUnread={texts.some((m) => !m.readAt)} />
       <PageHeader
         back={{ href: "/messages", label: t("all") }}

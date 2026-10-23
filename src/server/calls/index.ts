@@ -103,18 +103,21 @@ export async function startOutboundCall(
     const [failed] = await db
       .update(calls)
       .set({ ...failedCallFields(new Date()), status: "failed", ...outcomeColumns(stored("outcomeNotPlaced")) })
-      .where(and(eq(calls.id, call.id), isNull(calls.providerCallControlId)))
+      // Nor over a hangup processed meanwhile, which recorded how the call really ended.
+      .where(and(eq(calls.id, call.id), isNull(calls.providerCallControlId), isNull(calls.endedAt)))
       .returning();
     return failed ?? (await db.select().from(calls).where(eq(calls.id, call.id)))[0];
   }
-  // Outside the try: the call is placed, so a failure here mustn't mark it failed. If this write is
-  // lost, its webhooks fill in these ids.
-  const [u] = await db
-    .update(calls)
-    .set({ providerCallControlId: placed.callControlId, providerCallSessionId: placed.callSessionId })
-    .where(eq(calls.id, call.id))
-    .returning();
-  return u;
+  // The call is placed, so a failure here mustn't mark it failed or reach the user as one: its webhooks
+  // fill in these ids if this write is lost.
+  const ids = { providerCallControlId: placed.callControlId, providerCallSessionId: placed.callSessionId ?? null };
+  try {
+    const [u] = await db.update(calls).set(ids).where(eq(calls.id, call.id)).returning();
+    return u;
+  } catch (err) {
+    console.error("storing dial ids failed", call.id, err);
+    return { ...call, ...ids };
+  }
 }
 
 /** Values given for the agent's ask-on-each-call variables; blank ones fall back to the default. */

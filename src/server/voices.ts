@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 import { db, withUserLock, type Tx } from "@/db";
 import { agents, voices, type Voice } from "@/db/schema";
 import { config } from "@/lib/config";
@@ -248,7 +248,11 @@ export async function refreshProcessingVoices(userId?: string): Promise<void> {
   const rows = await db
     .select()
     .from(voices)
-    .where(and(userId ? eq(voices.userId, userId) : undefined, eq(voices.status, "processing"), isNull(voices.deletedAt)));
+    // Including clones the user deleted while they were stuck before reaching the provider: those
+    // still need their refund.
+    .where(
+      and(userId ? eq(voices.userId, userId) : undefined, eq(voices.status, "processing"), or(isNull(voices.deletedAt), isNull(voices.providerVoiceId))),
+    );
   for (const v of rows) {
     try {
       if (!v.providerVoiceId) {
@@ -257,7 +261,7 @@ export async function refreshProcessingVoices(userId?: string): Promise<void> {
         continue;
       }
       // ElevenLabs clones are settled by the request that makes them.
-      if (v.provider !== "telnyx") continue;
+      if (v.provider !== "telnyx" || v.deletedAt) continue;
       const res = await voiceProvider().getClonedVoice(v.providerVoiceId);
       if (res.status === "ready") await db.update(voices).set({ status: "ready", voiceRef: res.ref || v.voiceRef }).where(eq(voices.id, v.id));
       else if (res.status === "failed") await failVoice(v, res.failureReason ?? stored("voiceCloningFailed"));

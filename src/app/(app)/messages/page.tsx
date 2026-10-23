@@ -24,7 +24,7 @@ export default async function MessagesPage() {
 
   return (
     <div className="space-y-6">
-      <AutoRefresh everyMs={10_000} />
+      <AutoRefresh everyMs={10_000} maxMs={Infinity} />
       <PageHeader
         title={t("title")}
         description={t("description", { price: formatCents(config.pricing.smsInboundPerPartCents, locale) })}

@@ -130,6 +130,9 @@ describe("login form steps", () => {
     for (let i = 0; i < 5; i++) await requestEmailOtp(email, "en");
     const state = await loginAction({ step: "code", email }, form({ email, intent: "send" }));
     expect(state).toEqual({ step: "code", email, error: "Too many codes requested. Try again later." });
+    // After an earlier successful resend, the note that only the newest code works stays.
+    const again = await loginAction({ step: "code", email, resent: true }, form({ email, intent: "send" }));
+    expect(again).toMatchObject({ step: "code", resent: true });
   });
 
   it("goes back to the email step to use a different address", async () => {

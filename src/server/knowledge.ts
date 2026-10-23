@@ -15,7 +15,7 @@ import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
 import { toMegabytes } from "@/lib/format";
 import { failureColumns, stored, type StoredText } from "@/lib/stored-text";
-import { agentFingerprint, DELETED_SOURCE, desiredKnowledge, resyncStaleAgents, syncAgentQuietly } from "./agents";
+import { agentFingerprint, DELETED_SOURCE, desiredKnowledge, resyncAgentIfStale, syncAgentQuietly } from "./agents";
 import { chargePurchase, refundPurchase, type Purchase } from "./billing/ledger";
 import { voiceProvider } from "./telnyx";
 import type { StoredObject } from "./telnyx/types";
@@ -224,7 +224,7 @@ async function upload(
     const patch = await write(base.bucket);
     if (patch) await db.update(knowledgeSources).set(patch).where(eq(knowledgeSources.id, source.id));
     // The agent can search its bucket from now on.
-    if (embeddingTurnedOn) await resyncStaleAgents(source.userId);
+    if (embeddingTurnedOn) await resyncAgentIfStale(source.agentId);
   } catch (err) {
     console.error("knowledge upload failed", source.id, err);
     await failSource(source, agentName, isBucketLimit(err) ? stored("knowledgeBucketsFull") : stored("knowledgeUploadFailed"));
@@ -322,7 +322,7 @@ export async function deleteSource(userId: string, sourceId: string): Promise<vo
   await cleanUpKnowledge({ agentId: s.agentId });
   // Usually a no-op. While provider cleanup is still pending this drops the retrieval tool so the
   // deleted content can't be quoted, and it restores the tool once cleanup is done.
-  await resyncStaleAgents(userId);
+  await resyncAgentIfStale(s.agentId);
 }
 
 /**
@@ -522,12 +522,12 @@ export async function countUserSources(userId: string, q: Queryable = db): Promi
   return n;
 }
 
-/** The agent's sources (deleting the agent deletes them too). */
+/** The agent's paid-for sources (deleting the agent deletes them too; failed ones were refunded). */
 export async function countAgentSources(agentId: string): Promise<number> {
   const [{ n }] = await db
     .select({ n: count() })
     .from(knowledgeSources)
-    .where(and(eq(knowledgeSources.agentId, agentId), ne(knowledgeSources.status, "deleting")));
+    .where(and(eq(knowledgeSources.agentId, agentId), inArray(knowledgeSources.status, ["processing", "ready"])));
   return n;
 }
 

@@ -59,8 +59,11 @@ export interface ElevenLabsConnection {
   key: ElevenLabsKey;
   /** Agents that couldn't be moved to a replacement key: they're failed until saved again. */
   agentsNotMoved: number;
-  /** The replaced key's Telnyx secret couldn't be deleted, so the user should revoke that key. */
-  previousKeyKept: boolean;
+  /**
+   * The last 4 characters of a replaced key whose Telnyx secret couldn't be deleted, so the user should
+   * revoke that key; null when there is nothing to do (including when the same key was entered again).
+   */
+  previousKeyKept: string | null;
 }
 
 /**
@@ -110,15 +113,23 @@ export async function connectElevenLabs(userId: string, rawKey: string): Promise
   }
 
   const { key, replaced } = saved;
-  if (!replaced) return { key, agentsNotMoved: 0, previousKeyKept: false };
+  if (!replaced) return { key, agentsNotMoved: 0, previousKeyKept: null };
   // Point agents at the new secret before the old one goes away. One that can't be updated is marked
   // failed and takes no calls until it's saved again, so the old secret is no use to it either.
   let agentsNotMoved = 0;
   for (const a of await agentsUsingElevenLabs(userId)) {
     if ((await syncAgent(a)).status === "failed") agentsNotMoved++;
   }
-  const previousKeyKept = !(await deleteTelnyxSecret(replaced.telnyxSecretId));
-  return { key, agentsNotMoved, previousKeyKept };
+  const deleted = await deleteTelnyxSecret(replaced.telnyxSecretId);
+  // Re-entering the same key (e.g. after a "rejected" notice) replaces nothing worth revoking: telling
+  // the user to revoke it would block their working key.
+  let sameKey = false;
+  try {
+    sameKey = decryptSecret(replaced.keyEncrypted) === apiKey;
+  } catch {
+    // unreadable: treat as a different key
+  }
+  return { key, agentsNotMoved, previousKeyKept: deleted || sameKey ? null : replaced.keyHint };
 }
 
 /**
@@ -139,7 +150,13 @@ export async function disconnectElevenLabs(userId: string): Promise<void> {
       .update(voices)
       .set({ deletedAt: new Date() })
       .where(and(eq(voices.userId, userId), eq(voices.provider, "elevenlabs"), isNull(voices.deletedAt)));
-    await tx.delete(elevenLabsKeys).where(eq(elevenLabsKeys.userId, userId));
+    // Only the row whose secret we just deleted: a key replaced meanwhile points at a new secret, and
+    // deleting its row would leave that secret (the user's key) with nothing pointing at it.
+    const [gone] = await tx
+      .delete(elevenLabsKeys)
+      .where(and(eq(elevenLabsKeys.userId, userId), eq(elevenLabsKeys.telnyxSecretId, existing.telnyxSecretId)))
+      .returning({ userId: elevenLabsKeys.userId });
+    if (!gone) throw new UserError("elevenLabsDisconnectFailed"); // rolls back the voices too; retrying uses the new row
   });
 }
 

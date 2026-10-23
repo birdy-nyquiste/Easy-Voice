@@ -127,7 +127,7 @@ describe("catalogs", () => {
     vi.restoreAllMocks();
   });
 
-  const down =() => vi.fn(async () => new Response("unavailable", { status: 503 }));
+  const down = () => vi.fn(async () => new Response("unavailable", { status: 503 }));
   const ok = (body: unknown) => vi.fn(async () => new Response(JSON.stringify(body), { status: 200 }));
 
   it.each([

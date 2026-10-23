@@ -9,11 +9,21 @@ const SLOWEST_MS = 30_000;
 
 /**
  * Re-render the server component periodically while something is in flight. Every tick re-runs the
- * page's queries (and may call the provider), so it slows down after the first minute, stops after
- * `maxMs` (a call whose hangup never arrives would otherwise poll forever) and skips hidden tabs.
- * Coming back to the tab refreshes at once and starts over. The default outlasts the longest call (30 min).
+ * page's queries (and may call the provider), so it slows down after the first minute (to `slowestMs`),
+ * stops after `maxMs` (a call whose hangup never arrives would otherwise poll forever) and skips hidden
+ * tabs. Coming back to the tab refreshes at once and starts over. The default outlasts the longest call
+ * (30 min). Pages that show what arrives (the texts inbox) pass maxMs={Infinity}; a live call keeps a
+ * small slowestMs, since the user is watching for it to end.
  */
-export function AutoRefresh({ everyMs = 2000, maxMs = 40 * 60_000 }: { everyMs?: number; maxMs?: number }) {
+export function AutoRefresh({
+  everyMs = 2000,
+  maxMs = 40 * 60_000,
+  slowestMs = SLOWEST_MS,
+}: {
+  everyMs?: number;
+  maxMs?: number;
+  slowestMs?: number;
+}) {
   const router = useRouter();
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -24,7 +34,7 @@ export function AutoRefresh({ everyMs = 2000, maxMs = 40 * 60_000 }: { everyMs?:
       clearTimeout(timer);
       const elapsed = Date.now() - started;
       if (document.visibilityState === "hidden" || elapsed >= maxMs) return;
-      if (elapsed >= FAST_FOR_MS) delay = Math.min(delay * 2, Math.max(SLOWEST_MS, everyMs));
+      if (elapsed >= FAST_FOR_MS) delay = Math.min(delay * 2, Math.max(slowestMs, everyMs));
       timer = setTimeout(() => {
         router.refresh();
         schedule();
@@ -47,6 +57,6 @@ export function AutoRefresh({ everyMs = 2000, maxMs = 40 * 60_000 }: { everyMs?:
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [router, everyMs, maxMs]);
+  }, [router, everyMs, maxMs, slowestMs]);
   return null;
 }

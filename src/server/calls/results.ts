@@ -18,11 +18,12 @@ export async function fetchCallResults(call: Call, now = Date.now()): Promise<Ca
     const complete = !!res && !res.summaryPending;
     // Nothing new to store: no results yet, or the transcript is already kept and the summary still pending.
     if (!complete && !final && (!res || call.transcript)) return call;
-    // Not onto a call whose content was deleted while the results were being fetched.
+    // Not onto a call whose content was deleted while the results were being fetched, nor over complete
+    // results an overlapping fetch (another page refresh) already stored.
     const [u] = await db
       .update(calls)
       .set({ ...(res && { transcript: res.transcript, summary: res.summary ?? null }), resultsFetched: complete || final })
-      .where(and(eq(calls.id, call.id), isNull(calls.purgedAt), isNull(calls.deletedAt)))
+      .where(and(eq(calls.id, call.id), eq(calls.resultsFetched, false), isNull(calls.purgedAt), isNull(calls.deletedAt)))
       .returning();
     return u ?? call;
   } catch (err) {

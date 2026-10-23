@@ -195,9 +195,16 @@ describe("US numbers", () => {
     expect(toE164US("1 202 555 0123")).toBe("+12025550123");
   });
 
-  it("refuses toll-free, premium, service and reserved codes, and other +1 countries", () => {
+  it("calls toll-free numbers, but doesn't sell them", () => {
+    for (const n of ["8005550100", "8885550100", "8335550100"]) {
+      expect(toE164US(n), n).toBe(`+1${n}`);
+      expect(isUsNumber(`+1${n}`), n).toBe(false);
+    }
+  });
+
+  it("refuses premium, service and reserved codes, and other +1 countries", () => {
     const refused = [
-      "8005550100", "8885550100", "8335550100", "8805550100", // toll-free, incl. reserved 88X
+      "8805550100", "8995550100", "4565550100", "7105550100", // reserved 88X, X9X, international inbound, government
       "9005550100", "4115550100", "2005550100", "3955550100", // premium, N11, N00, X9X
       "4154110100", "4159760100", "4151230100", // N11 exchange, 976 premium exchange, exchange starting 1
       "0415550100", "1415550100", // area code starting 0 or 1

@@ -114,23 +114,30 @@ const NON_US_AREA_CODES = new Set([
   "340", "670", "671", "684", "787", "939",
 ]);
 
+/** US toll-free area codes: fine to call (no extra cost), but not numbers we sell. */
+const TOLL_FREE_AREA_CODES = new Set(["800", "833", "844", "855", "866", "877", "888"]);
+
 /**
- * Whether an E.164 number is an ordinary US number: a real area code and exchange, not toll-free,
- * premium-rate, a service code or another country in the +1 plan.
+ * Whether an E.164 number is an ordinary US number: a real area code and exchange, not premium-rate,
+ * one of the common special-use codes, or another country in the +1 plan. Toll-free numbers count only
+ * with `tollFree` (calls to them are fine; we don't sell them). Rarely used non-geographic codes may
+ * still pass: the outbound profile's US-only setting is the safeguard (README).
  */
-export function isUsNumber(e164: string): boolean {
+export function isUsNumber(e164: string, { tollFree = false } = {}): boolean {
   const m = /^\+1([2-9]\d\d)([2-9]\d\d)\d{4}$/.exec(e164);
   if (!m) return false;
   const [, area, exchange] = m;
-  // Special-use area codes repeat their last two digits (800, 888, 900, 911…); X9X and 88X are reserved.
-  if (area[1] === area[2] || area[1] === "9" || area.startsWith("88") || NON_US_AREA_CODES.has(area)) return false;
+  // Special-use area codes repeat their last two digits (800, 888, 900, 911…); X9X and 88X are reserved;
+  // 456 is inbound international and 710 the US government.
+  const special = area[1] === area[2] || area[1] === "9" || area.startsWith("88") || area === "456" || area === "710";
+  if ((special && !(tollFree && TOLL_FREE_AREA_CODES.has(area))) || NON_US_AREA_CODES.has(area)) return false;
   // N11 service codes and 976 premium lines.
   return !exchange.endsWith("11") && exchange !== "976";
 }
 
-/** Normalize a US number typed by a user to E.164, or null if it isn't one (see isUsNumber). */
+/** Normalize a US number typed by a user to call it, to E.164, or null if it isn't one we call (see isUsNumber). */
 export function toE164US(input: string): string | null {
   const digits = input.replace(/\D/g, "");
   const e164 = digits.length === 10 ? `+1${digits}` : digits.length === 11 && digits.startsWith("1") ? `+${digits}` : null;
-  return e164 && isUsNumber(e164) ? e164 : null;
+  return e164 && isUsNumber(e164, { tollFree: true }) ? e164 : null;
 }

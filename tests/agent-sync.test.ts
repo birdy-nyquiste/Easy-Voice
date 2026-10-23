@@ -47,6 +47,41 @@ const input = {
   voice: "stock:Telnyx.KokoroTTS.af_heart",
 };
 
+describe("assistant ids", () => {
+  it("keeps one assistant when two pushes create one at the same time, deleting the other", async () => {
+    const u = await makeUser();
+    const a = await createAgent(u.id, input);
+    // As if the first create was cut off: no assistant yet, and stale.
+    const [stale] = await db.update(agents).set({ providerAssistantId: null, syncedConfig: "old" }).where(eq(agents.id, a.id)).returning();
+    let n = 0;
+    vi.spyOn(mockProvider, "createAssistant").mockImplementation(async () => {
+      const id = `assistant-race-${++n}`;
+      await new Promise((r) => setTimeout(r, 20)); // both are in flight before either is stored
+      return { assistantId: id };
+    });
+    const del = vi.spyOn(mockProvider, "deleteAssistant");
+    await Promise.all([syncAgentQuietly(stale), syncAgentQuietly(stale)]);
+    const [row] = await db.select().from(agents).where(eq(agents.id, a.id));
+    expect(n).toBe(2);
+    expect(del).toHaveBeenCalledTimes(1);
+    const kept = row.providerAssistantId;
+    expect(["assistant-race-1", "assistant-race-2"]).toContain(kept);
+    expect(del.mock.calls[0][0]).not.toBe(kept);
+  });
+
+  it("doesn't clear an assistant id stored after the agent was read for deletion", async () => {
+    const u = await makeUser();
+    const a = await createAgent(u.id, input);
+    // While the old assistant is being deleted, a push stores a new one.
+    vi.spyOn(mockProvider, "deleteAssistant").mockImplementation(async () => {
+      await db.update(agents).set({ providerAssistantId: "assistant-late" }).where(eq(agents.id, a.id));
+    });
+    await deleteAgent(u.id, a.id);
+    const [row] = await db.select().from(agents).where(eq(agents.id, a.id));
+    expect(row).toMatchObject({ deletedAt: expect.any(Date), providerAssistantId: "assistant-late" }); // left for the cleanup
+  });
+});
+
 describe("platform model settings", () => {
   it("pins the models verified on a live call", () => {
     expect(config.telnyx.llmModel).toBe("moonshotai/Kimi-K2.6");

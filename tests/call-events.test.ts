@@ -354,6 +354,17 @@ describe("outbound calls that go wrong", () => {
     expect(await callByCcid("cc-unstored")).toMatchObject({ id: c.id, status: "answered" });
   });
 
+  it("keeps the real outcome when the hangup was processed before the dial error", async () => {
+    const { user, agent } = await makeLine(1000);
+    vi.spyOn(mockProvider, "dial").mockImplementationOnce(async ({ clientState }) => {
+      // Telnyx placed the call and it was declined, but the dial response is lost.
+      await handleCallEvent(event("call.hangup", { clientState, hangupCause: "call_rejected" }));
+      throw new Error("socket hang up");
+    });
+    const call = await startOutboundCall(user, { agentId: agent.id, to: "+14155550100" });
+    expect(call).toMatchObject({ status: "failed", outcomeMsg: { key: "stored.outcomeDeclined" }, hangupCause: "call_rejected" });
+  });
+
   it("hangs up without charging when the assistant can't start on an answered outbound call", async () => {
     const line = await makeLine(1000);
     const c = await outboundRow(line);

@@ -12,6 +12,7 @@ import { runKnowledgeJobs } from "./knowledge";
 import { enablePendingInboundSms, purgeExpiredMessages } from "./messages";
 import { chargeNumberRenewals, refreshPendingNumbers, releaseNumber } from "./numbers";
 import { refreshProcessingVoices } from "./voices";
+import { negativeBalanceReleaseCutoff } from "./billing/ledger";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -38,7 +39,7 @@ export async function runDailyJobs(now = new Date()) {
   await stage("knowledge", runKnowledgeJobs, undefined);
   const resynced = await stage("resync agents", resyncStaleAgents, 0);
   const assistantsDeleted = await stage("deleted agents' assistants", deleteLeftoverAssistants, 0);
-  await stage("pending numbers", refreshPendingNumbers, undefined);
+  await stage("pending numbers", refreshPendingNumbers, false);
   // Settle voice clones (refunding ones that were never made) for users who don't reopen the Voices page.
   await stage("voice clones", refreshProcessingVoices, undefined);
   // Release numbers of users whose balance has been negative past the grace period. Before renewals,
@@ -46,7 +47,7 @@ export async function runDailyJobs(now = new Date()) {
   const released = await stage(
     "negative-balance releases",
     async () => {
-      const cutoff = new Date(now.getTime() - config.policy.negativeBalanceReleaseDays * DAY_MS);
+      const cutoff = negativeBalanceReleaseCutoff(now);
       const delinquent = await db
         .select({ numberId: phoneNumbers.id, userId: phoneNumbers.userId })
         .from(phoneNumbers)
@@ -103,7 +104,7 @@ export async function runDailyJobs(now = new Date()) {
         .where(and(eq(calls.status, "completed"), eq(calls.resultsFetched, false), isNull(calls.purgedAt)))
         .orderBy(desc(calls.endedAt))
         .limit(200);
-      for (const c of missing) await fetchCallResults(c);
+      for (const c of missing) await fetchCallResults(c, now.getTime());
       return missing.length;
     },
     0,

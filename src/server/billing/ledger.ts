@@ -135,12 +135,25 @@ export function hasSpendableBalance(balanceCents: number): boolean {
   return balanceCents > 0;
 }
 
+const GRACE_MS = () => config.policy.negativeBalanceReleaseDays * 24 * 60 * 60 * 1000;
+
 /**
  * When the grace period of a balance that went negative at `negativeSince` ends: unless it is topped
  * up, the daily job's first run after this releases the user's numbers.
  */
 export function negativeBalanceReleaseDate(negativeSince: Date): Date {
-  return new Date(negativeSince.getTime() + config.policy.negativeBalanceReleaseDays * 24 * 60 * 60 * 1000);
+  return new Date(negativeSince.getTime() + GRACE_MS());
+}
+
+/** Balances negative since before this are past the grace period (the counterpart of the date above). */
+export function negativeBalanceReleaseCutoff(now: Date): Date {
+  return new Date(now.getTime() - GRACE_MS());
+}
+
+/** The user's balance as it is now (a page's user row can predate a refund made while rendering it). */
+export async function currentBalanceCents(userId: string): Promise<number> {
+  const [u] = await db.select({ balanceCents: users.balanceCents }).from(users).where(eq(users.id, userId));
+  return u?.balanceCents ?? 0;
 }
 
 /** Billable minutes are rounded up; unanswered calls cost nothing. */

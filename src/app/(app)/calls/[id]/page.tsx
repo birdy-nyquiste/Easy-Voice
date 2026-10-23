@@ -52,7 +52,7 @@ export default async function CallPage({ params }: { params: Promise<{ id: strin
 
   return (
     <div className="space-y-6">
-      {(live || awaitingResults) && <AutoRefresh everyMs={live ? 1500 : 4000} />}
+      {(live || awaitingResults) && <AutoRefresh everyMs={live ? 1500 : 4000} slowestMs={live ? 5000 : undefined} />}
       <PageHeader
         back={{ href: "/calls", label: t("all") }}
         title={await callTitle(call)}

@@ -93,7 +93,10 @@ async function resolveVoice(
 ): Promise<{ voiceRef: string; voiceId: string | null }> {
   const parsed = parseVoiceValue(voice);
   if (parsed?.kind === "stock") {
-    const match = await findStockVoice(parsed.value);
+    const match = await findStockVoice(parsed.value).catch((err) => {
+      console.error("voice catalog unavailable", err);
+      throw new UserError("voicesUnavailable");
+    });
     if (!match) throw new UserError("unknownVoice");
     if (!match.speaks.includes(language)) {
       throw new UserError("voiceNoMandarin", { name: match.name });
@@ -279,17 +282,31 @@ async function pushLatest(a: Agent, withKnowledge = true): Promise<Agent | null>
     const knowledge = withKnowledge ? (await desiredKnowledge([a.id])).get(a.id) : undefined;
     const spec = toSpec(a, await voiceApiKeyRef(a), knowledge);
     let assistantId = a.providerAssistantId;
+    let lostClaim = false;
     if (assistantId) await voiceProvider().updateAssistant(assistantId, spec);
-    else assistantId = (await voiceProvider().createAssistant(spec)).assistantId;
-    const [u] = await db
-      .update(agents)
-      .set({ providerAssistantId: assistantId, status: "ready", failureReason: null, failureMsg: null, syncedConfig: agentFingerprint(knowledge) })
-      .where(unchangedSince(a))
-      .returning();
-    if (u) return u;
-    if (!a.providerAssistantId) {
-      // Keep the new assistant's id anyway: the next push updates it, or the cleanup of deleted agents removes it.
-      await db.update(agents).set({ providerAssistantId: assistantId }).where(and(eq(agents.id, a.id), isNull(agents.providerAssistantId)));
+    else {
+      assistantId = (await voiceProvider().createAssistant(spec)).assistantId;
+      // Claim the id at once, whatever else changed: if two pushes both created an assistant, only the
+      // first keeps it, and the other deletes its own rather than leave it at the provider with no row.
+      // (A claim on a deleted agent is fine: the cleanup of deleted agents removes it.)
+      const [claimed] = await db
+        .update(agents)
+        .set({ providerAssistantId: assistantId })
+        .where(and(eq(agents.id, a.id), isNull(agents.providerAssistantId)))
+        .returning({ id: agents.id });
+      if (claimed) a = { ...a, providerAssistantId: assistantId };
+      else {
+        await deleteAssistantQuietly(a.id, assistantId);
+        lostClaim = true;
+      }
+    }
+    if (!lostClaim) {
+      const [u] = await db
+        .update(agents)
+        .set({ providerAssistantId: assistantId, status: "ready", failureReason: null, failureMsg: null, syncedConfig: agentFingerprint(knowledge) })
+        .where(unchangedSince(a))
+        .returning();
+      if (u) return u;
     }
     const latest = await agentRow(a.id);
     if (!latest || latest.deletedAt) return null;
@@ -417,6 +434,18 @@ export async function resyncStaleAgents(userId?: string): Promise<number> {
 }
 
 /**
+ * Re-push one agent if its provider copy is out of date, e.g. after its knowledge base changed. Not the
+ * user's other agents: on a preview build (shared database and Telnyx account) every agent looks stale,
+ * and sweeping them all would push the preview's settings over production's.
+ */
+export async function resyncAgentIfStale(agentId: string): Promise<boolean> {
+  const a = await agentRow(agentId);
+  if (a?.status !== "ready" || a.deletedAt) return false;
+  if (a.syncedConfig === agentFingerprint((await desiredKnowledge([a.id])).get(a.id))) return false;
+  return syncAgentQuietly(a);
+}
+
+/**
  * resyncStaleAgents() when the user's agent pages are viewed, on the production deployment only.
  * Previews share its database and Telnyx account: if their page views synced too, each deployment
  * would push its own settings (fingerprint) over the other's, on every agent.
@@ -444,7 +473,9 @@ export async function deleteLeftoverAssistants(): Promise<number> {
   const leftover = await db
     .select({ id: agents.id, assistantId: agents.providerAssistantId })
     .from(agents)
-    .where(and(isNotNull(agents.deletedAt), isNotNull(agents.providerAssistantId)));
+    .where(and(isNotNull(agents.deletedAt), isNotNull(agents.providerAssistantId)))
+    // A backlog (agents deleted before this cleanup existed) is worked off over several days.
+    .limit(100);
   let deleted = 0;
   for (const { id, assistantId } of leftover) {
     if (!(await deleteAssistantQuietly(id, assistantId!))) continue;
@@ -457,14 +488,14 @@ export async function deleteLeftoverAssistants(): Promise<number> {
 export async function deleteAgent(userId: string, agentId: string): Promise<void> {
   const a = await getUserAgent(userId, agentId);
   if (!a) throw new UserError("agentNotFound");
-  // The deletion goes ahead either way (SPEC §18.3). The assistant's id is kept only if it's still
-  // there, for deleteLeftoverAssistants() to retry.
-  const assistantGone = !a.providerAssistantId || (await deleteAssistantQuietly(a.id, a.providerAssistantId));
+  // The deletion goes ahead either way (SPEC §18.3). The assistant's id is kept if its delete failed,
+  // for deleteLeftoverAssistants() to retry, and so is an id a push stored after we read the row.
+  const deletedId = a.providerAssistantId && (await deleteAssistantQuietly(a.id, a.providerAssistantId)) ? a.providerAssistantId : null;
   await db.transaction(async (tx) => {
     await tx.update(phoneNumbers).set({ agentId: null }).where(eq(phoneNumbers.agentId, a.id));
     await tx
       .update(agents)
-      .set({ deletedAt: new Date(), ...(assistantGone ? { providerAssistantId: null } : {}) })
+      .set({ deletedAt: new Date(), ...(deletedId ? { providerAssistantId: sql`nullif(${agents.providerAssistantId}, ${deletedId})` } : {}) })
       .where(eq(agents.id, a.id));
     // The knowledge base goes with the agent, permanently: clear what we hold now; the provider copy is
     // removed by cleanUpKnowledge() (SPEC §18.3). Whatever the feature flag says, but only where the

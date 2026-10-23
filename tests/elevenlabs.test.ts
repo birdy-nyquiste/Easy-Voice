@@ -9,6 +9,7 @@ import { connectElevenLabs, disconnectElevenLabs } from "@/server/elevenlabs-key
 import { liveElevenLabs } from "@/server/elevenlabs/live";
 import { mockElevenLabs } from "@/server/elevenlabs/mock";
 import { ElevenLabsError } from "@/server/elevenlabs/types";
+import { UserError } from "@/lib/errors";
 import { decryptSecret, encryptSecret } from "@/server/secrets";
 import { mockProvider } from "@/server/telnyx/mock";
 import { cloneVoice, deleteVoice, voicePreview } from "@/server/voices";
@@ -72,7 +73,7 @@ describe("connecting ElevenLabs", () => {
     expect(second.telnyxSecretRef).not.toBe(first.telnyxSecretRef);
     expect(update.mock.calls[0][1].voiceApiKeyRef).toBe(second.telnyxSecretRef);
     expect(del).toHaveBeenCalledWith(first.telnyxSecretId);
-    expect({ agentsNotMoved, previousKeyKept }).toEqual({ agentsNotMoved: 0, previousKeyKept: false });
+    expect({ agentsNotMoved, previousKeyKept }).toEqual({ agentsNotMoved: 0, previousKeyKept: null });
   });
 
   it("reports agents that couldn't move to a replaced key, and an old secret that couldn't be deleted", async () => {
@@ -85,8 +86,17 @@ describe("connecting ElevenLabs", () => {
     vi.spyOn(mockProvider, "deleteIntegrationSecret").mockRejectedValueOnce(new Error("Telnyx 500"));
 
     const result = await connectElevenLabs(u.id, "sk_acct_alice_2222");
-    expect(result).toMatchObject({ agentsNotMoved: 1, previousKeyKept: true });
+    // Names the key to revoke: the page shows only the new one's last characters.
+    expect(result).toMatchObject({ agentsNotMoved: 1, previousKeyKept: "1111" });
     expect((await db.select().from(agents).where(eq(agents.id, agent.id)))[0].status).toBe("failed");
+  });
+
+  it("doesn't ask to revoke the key when the same key was entered again", async () => {
+    const u = await makeUser();
+    await connectElevenLabs(u.id, KEY);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(mockProvider, "deleteIntegrationSecret").mockRejectedValueOnce(new Error("Telnyx 500"));
+    expect((await connectElevenLabs(u.id, KEY)).previousKeyKept).toBeNull(); // revoking it would break the working key
   });
 
   it("deletes its new secret when the key can't be saved: another account connected meanwhile", async () => {
@@ -275,6 +285,18 @@ describe("agents with ElevenLabs voices", () => {
 });
 
 describe("disconnecting ElevenLabs", () => {
+  it("keeps a key that replaced the one being disconnected, so its secret isn't orphaned", async () => {
+    const u = await makeUser();
+    await connectElevenLabs(u.id, KEY);
+    const original = mockProvider.deleteIntegrationSecret.bind(mockProvider);
+    vi.spyOn(mockProvider, "deleteIntegrationSecret").mockImplementationOnce(async (id) => {
+      await original(id);
+      await connectElevenLabs(u.id, "sk_acct_alice_2222"); // replaced while the disconnect is under way
+    });
+    await expect(disconnectElevenLabs(u.id)).rejects.toThrow(UserError);
+    expect((await db.select().from(elevenLabsKeys))[0].keyHint).toBe("2222");
+  });
+
   it("is refused while an agent uses an ElevenLabs voice", async () => {
     const u = await makeUser();
     await connectElevenLabs(u.id, KEY);

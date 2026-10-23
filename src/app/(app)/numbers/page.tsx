@@ -14,6 +14,7 @@ import { listRecentNegativeBalanceReleases, listUserNumbers, refreshPendingNumbe
 import { NegativeBalanceNotice } from "../negative-balance-notice";
 import { assignAgentAction, buyNumberAction, releaseNumberAction, simulateInboundAction, simulateTextAction } from "./actions";
 import { viewerTimeZone } from "@/server/time-zone";
+import { currentBalanceCents } from "@/server/billing/ledger";
 
 export async function generateMetadata(): Promise<Metadata> {
   return { title: (await getTranslations("numbers"))("title") };
@@ -24,7 +25,8 @@ export default async function NumbersPage({ searchParams }: { searchParams: Prom
   const { area } = await searchParams;
   const [t, tc, ts, locale] = await Promise.all([getTranslations("numbers"), getTranslations("common"), getTranslations("status"), getLocale()]);
   const tz = await viewerTimeZone();
-  await refreshPendingNumbers(user.id);
+  // A failed order is refunded while this renders: then the user row read earlier is out of date.
+  const balanceCents = (await refreshPendingNumbers(user.id)) ? await currentBalanceCents(user.id) : user.balanceCents;
   const [numbers, agents, releasedForBalance] = await Promise.all([
     listUserNumbers(user.id),
     listUserAgents(user.id),
@@ -33,7 +35,7 @@ export default async function NumbersPage({ searchParams }: { searchParams: Prom
   const owned = numbers.filter((n) => n.status !== "failed");
   const canBuy = owned.length < config.limits.numbersPerUser;
   // The first month is charged up front, so say so before the user searches and picks one.
-  const canAfford = user.balanceCents >= config.pricing.numberMonthlyCents;
+  const canAfford = balanceCents >= config.pricing.numberMonthlyCents;
   // Each render asks the provider about pending orders. A row without an order id is a lost order,
   // looked up only once it is an hour old, so polling wouldn't settle it any sooner.
   const activating = numbers.some((n) => n.status === "pending" && n.providerOrderId);
@@ -57,7 +59,7 @@ export default async function NumbersPage({ searchParams }: { searchParams: Prom
         description={t("description", { price: formatCents(config.pricing.numberMonthlyCents, locale) })}
       />
 
-      {user.balanceCents < 0 && numbers.some((n) => n.status === "active") && (
+      {balanceCents < 0 && numbers.some((n) => n.status === "active") && (
         <NegativeBalanceNotice user={user} hasNumber linkToBilling />
       )}
 

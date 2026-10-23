@@ -111,7 +111,8 @@ export async function settleReturnedTopup(userId: string, sessionId: string): Pr
   if (p.status !== "pending") return p.status;
   if (!config.stripe.enabled) return "pending";
   try {
-    const s = await stripe().checkout.sessions.retrieve(sessionId);
+    // Short and without retries: the page asks again on its next refresh, and the webhook settles it anyway.
+    const s = await stripe().checkout.sessions.retrieve(sessionId, {}, { timeout: 5000, maxNetworkRetries: 0 });
     if (s.payment_status === "paid") {
       await completePayment(sessionId); // idempotent with the webhook
       return "credited";
