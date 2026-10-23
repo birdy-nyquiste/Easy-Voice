@@ -1,7 +1,7 @@
 import "server-only";
 import { randomBytes } from "node:crypto";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
-import { db } from "@/db";
+import { db, withUserLock } from "@/db";
 import { agents, elevenLabsKeys, voices, type ElevenLabsKey } from "@/db/schema";
 import { config } from "@/lib/config";
 import { UserError } from "@/lib/errors";
@@ -31,8 +31,8 @@ export async function requireElevenLabsApiKey(userId: string): Promise<string> {
   return decryptSecret(row.keyEncrypted);
 }
 
-/** Turn an ElevenLabs failure into something the key's owner can act on. */
-export function elevenLabsUserError(err: unknown, action: "check" | "clone"): UserError | unknown {
+/** Turn an ElevenLabs failure into a UserError the key's owner can act on; anything else is returned as it is. */
+export function elevenLabsUserError(err: unknown, action: "check" | "clone"): unknown {
   if (!(err instanceof ElevenLabsError)) return err;
   if (err.status === 401) {
     return new UserError("elevenLabsKeyRefused", { detail: err.detail });
@@ -55,11 +55,19 @@ async function checkAccount(apiKey: string): Promise<ElevenLabsAccount> {
   return account;
 }
 
+export interface ElevenLabsConnection {
+  key: ElevenLabsKey;
+  /** Agents that couldn't be moved to a replacement key: they're failed until saved again. */
+  agentsNotMoved: number;
+  /** The replaced key's Telnyx secret couldn't be deleted, so the user should revoke that key. */
+  previousKeyKept: boolean;
+}
+
 /**
  * Connect a key, or replace the connected one with another key for the same ElevenLabs account
  * (clones live in that account, so a different account would leave them unusable).
  */
-export async function connectElevenLabs(userId: string, rawKey: string): Promise<ElevenLabsKey> {
+export async function connectElevenLabs(userId: string, rawKey: string): Promise<ElevenLabsConnection> {
   if (!config.features.elevenLabs) throw new UserError("elevenLabsUnavailable");
   const apiKey = rawKey.trim();
   if (!apiKey) throw new UserError("apiKeyRequired");
@@ -81,18 +89,36 @@ export async function connectElevenLabs(userId: string, rawKey: string): Promise
     telnyxSecretRef,
     updatedAt: new Date(),
   };
-  const [row] = await db
-    .insert(elevenLabsKeys)
-    .values({ userId, ...values })
-    .onConflictDoUpdate({ target: elevenLabsKeys.userId, set: values })
-    .returning();
-
-  if (existing) {
-    // Point agents at the new secret before the old one goes away.
-    for (const a of await agentsUsingElevenLabs(userId)) await syncAgent(a);
-    await deleteTelnyxSecret(existing.telnyxSecretId);
+  let saved: { key: ElevenLabsKey; replaced: ElevenLabsKey | undefined };
+  try {
+    // Under the user's lock and from the row as it is now, so when two connects race, each one deletes
+    // the secret it actually replaced.
+    saved = await withUserLock(userId, async (tx) => {
+      const [current] = await tx.select().from(elevenLabsKeys).where(eq(elevenLabsKeys.userId, userId));
+      if (current && current.accountId !== account.accountId) throw new UserError("elevenLabsOtherAccount");
+      const [key] = await tx
+        .insert(elevenLabsKeys)
+        .values({ userId, ...values })
+        .onConflictDoUpdate({ target: elevenLabsKeys.userId, set: values })
+        .returning();
+      return { key, replaced: current };
+    });
+  } catch (err) {
+    // Nothing points at the new secret, and it holds the user's key.
+    await deleteTelnyxSecret(secret.id);
+    throw err;
   }
-  return row;
+
+  const { key, replaced } = saved;
+  if (!replaced) return { key, agentsNotMoved: 0, previousKeyKept: false };
+  // Point agents at the new secret before the old one goes away. One that can't be updated is marked
+  // failed and takes no calls until it's saved again, so the old secret is no use to it either.
+  let agentsNotMoved = 0;
+  for (const a of await agentsUsingElevenLabs(userId)) {
+    if ((await syncAgent(a)).status === "failed") agentsNotMoved++;
+  }
+  const previousKeyKept = !(await deleteTelnyxSecret(replaced.telnyxSecretId));
+  return { key, agentsNotMoved, previousKeyKept };
 }
 
 /**
@@ -105,6 +131,9 @@ export async function disconnectElevenLabs(userId: string): Promise<void> {
   if ((await agentsUsingElevenLabs(userId)).length) {
     throw new UserError("elevenLabsVoiceInUse");
   }
+  // The Telnyx secret holds the user's key, and once the row is gone nothing knows about it: delete it
+  // first, and keep everything if that fails so disconnecting again retries it.
+  if (!(await deleteTelnyxSecret(existing.telnyxSecretId))) throw new UserError("elevenLabsDisconnectFailed");
   await db.transaction(async (tx) => {
     await tx
       .update(voices)
@@ -112,7 +141,6 @@ export async function disconnectElevenLabs(userId: string): Promise<void> {
       .where(and(eq(voices.userId, userId), eq(voices.provider, "elevenlabs"), isNull(voices.deletedAt)));
     await tx.delete(elevenLabsKeys).where(eq(elevenLabsKeys.userId, userId));
   });
-  await deleteTelnyxSecret(existing.telnyxSecretId);
 }
 
 /** Whether ElevenLabs rejected the key (status 401): revoked, expired, or missing a permission. */
@@ -163,10 +191,13 @@ async function agentsUsingElevenLabs(userId: string) {
     .where(and(eq(agents.userId, userId), isNull(agents.deletedAt), inArray(agents.voiceId, elVoices)));
 }
 
-async function deleteTelnyxSecret(id: string) {
+/** Delete an integration secret (already gone counts); returns whether it's gone. */
+async function deleteTelnyxSecret(id: string): Promise<boolean> {
   try {
     await voiceProvider().deleteIntegrationSecret(id);
+    return true;
   } catch (err) {
     console.error("deleteIntegrationSecret failed", id, err);
+    return false;
   }
 }

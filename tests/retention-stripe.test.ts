@@ -2,12 +2,13 @@ import { eq } from "drizzle-orm";
 import Stripe from "stripe";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
-import { calls, emailOtps, ledgerEntries, payments, phoneNumbers, sessions, users } from "@/db/schema";
+import { calls, emailOtps, ledgerEntries, payments, phoneNumbers, sessions, users, voices } from "@/db/schema";
 import { config } from "@/lib/config";
 import { applyLedger } from "@/server/billing/ledger";
 import { handleStripeWebhook } from "@/server/billing/payments";
 import { runDailyJobs } from "@/server/cron";
 import { mockProvider } from "@/server/telnyx/mock";
+import { cloneVoice } from "@/server/voices";
 import { makeLine, makeUser, resetDb } from "./helpers";
 
 beforeEach(resetDb);
@@ -139,6 +140,26 @@ describe("daily jobs", () => {
     expect(row).toMatchObject({ status: "failed", billedCents: 0, outcome: "We lost track of this call's status, so it wasn't charged." });
     expect(row.endedAt).toBeInstanceOf(Date);
     expect((await db.select().from(users).where(eq(users.id, user.id)))[0].balanceCents).toBe(1000);
+  });
+
+  it("fail and refund voice clones that never reached the provider, once an hour has passed", async () => {
+    const user = await makeUser(1000);
+    vi.spyOn(mockProvider, "cloneVoice").mockImplementationOnce(() => new Promise(() => {})); // the server stops mid-clone
+    const audio = new File([new Uint8Array(5000)], "s.wav", { type: "audio/wav" });
+    void cloneVoice(user.id, { name: "Me", language: "en", gender: "female", audio, consent: true });
+    await vi.waitFor(async () => expect(await db.select().from(voices)).toHaveLength(1));
+    const balance = async () => (await db.select().from(users).where(eq(users.id, user.id)))[0].balanceCents;
+    expect(await balance()).toBe(1000 - config.pricing.voiceCloneCents);
+    // An ElevenLabs clone cut off the same way: nothing to refund, but it holds a slot.
+    await db.insert(voices).values({ userId: user.id, name: "El", language: "en", provider: "elevenlabs", consentAt: new Date(), status: "processing" });
+
+    await runDailyJobs();
+    expect((await db.select().from(voices)).map((v) => v.status)).toEqual(["processing", "processing"]); // may still be in flight
+
+    await db.update(voices).set({ createdAt: new Date(Date.now() - 2 * 3_600_000) });
+    await runDailyJobs();
+    expect((await db.select().from(voices)).map((v) => v.status)).toEqual(["failed", "failed"]);
+    expect(await balance()).toBe(1000);
   });
 });
 

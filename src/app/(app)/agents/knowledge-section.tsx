@@ -19,7 +19,7 @@ import { KnowledgeFileInput } from "./knowledge-file-input";
 
 /** The agent's knowledge base: how it's used, its sources, and forms to add more (SPEC §18). */
 export async function KnowledgeSection({ agent }: { agent: Agent }) {
-  const [{ base, sources, notApplied }, used, t, locale] = await Promise.all([
+  const [{ base, sources, website, notApplied, notRemoved }, used, t, locale] = await Promise.all([
     getAgentKnowledge(agent),
     countUserSources(agent.userId),
     getTranslations("knowledge"),
@@ -31,18 +31,22 @@ export async function KnowledgeSection({ agent }: { agent: Agent }) {
   const usesIt = base && base.mode !== "off";
   const pending = sources.some((s) => s.status === "processing");
   const typeLabel = { text: t("typeText"), file: t("typeFile"), url: t("typeUrl") };
-  // A new key after each add remounts the forms, which clears what was typed.
+  // A new key after each add remounts the forms, which clears what was typed. It also drops the
+  // form's message, so adds show none: the new row is the confirmation.
   const formKey = sources.map((s) => s.id).join();
 
   return (
     <Card>
-      {pending && <AutoRefresh />}
+      {/* A deleted website goes once its crawl is quiet, which page visits check; slowly, as that takes a while. */}
+      {pending ? <AutoRefresh /> : website === "removing" && <AutoRefresh everyMs={60_000} />}
       <CardTitle>{t("title")}</CardTitle>
       <div className="space-y-4">
         <p className="text-sm text-stone-600">{t("intro", { price })}</p>
         <p className="text-xs text-stone-500">{t("privacy")}</p>
 
         {notApplied && <Notice>{t("notApplied")}</Notice>}
+        {notRemoved && <Notice>{t("notRemoved")}</Notice>}
+        {website === "removing" && <Notice>{t("websiteRemoving")}</Notice>}
         {usesIt && !pending && !sources.some((s) => s.status === "ready") && <Notice>{t("noUsable")}</Notice>}
 
         {base && (
@@ -67,13 +71,38 @@ export async function KnowledgeSection({ agent }: { agent: Agent }) {
           <ul className="divide-y divide-stone-100 rounded-lg border border-stone-200">
             {sources.map((s) => (
               <li key={s.id} className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
-                <Badge>{typeLabel[s.type]}</Badge>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium text-stone-800">{s.name}</p>
+                {/* On phones the name gets a line of its own; a name that is still cut off shows in full on hover. */}
+                <div className="min-w-0 grow basis-full sm:basis-0">
+                  <p className="flex min-w-0 items-center gap-2">
+                    <Badge>{typeLabel[s.type]}</Badge>
+                    {s.type === "url" && s.url ? (
+                      <a
+                        href={s.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={s.url}
+                        className="truncate font-medium text-stone-800 hover:underline"
+                      >
+                        {s.name}
+                      </a>
+                    ) : (
+                      <span title={s.name ?? undefined} className="truncate font-medium text-stone-800">
+                        {s.name}
+                      </span>
+                    )}
+                  </p>
                   {s.status === "failed" && <p className="text-xs text-red-600">{showStored(locale, s.failureReason, s.failureMsg)}</p>}
                   {/* Small sources would read "0 MB". */}
                   {s.status === "ready" && s.sizeBytes !== null && s.sizeBytes >= 100 * 1024 && (
                     <p className="text-xs text-stone-500">{formatMegabytes(s.sizeBytes, locale)}</p>
+                  )}
+                  {s.type === "text" && s.content && (
+                    <details className="mt-1 text-xs">
+                      <summary className="cursor-pointer text-stone-500">{t("showText")}</summary>
+                      <p className="mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-stone-50 p-2 text-stone-700">
+                        {s.content}
+                      </p>
+                    </details>
                   )}
                 </div>
                 <StatusBadge status={s.status === "deleting" ? "processing" : s.status} />
@@ -82,6 +111,7 @@ export async function KnowledgeSection({ agent }: { agent: Agent }) {
                   <input type="hidden" name="sourceId" value={s.id} />
                   <SubmitButton variant="danger" confirm={t("deleteConfirm")}>
                     {t("delete")}
+                    <span className="sr-only"> {s.name}</span>
                   </SubmitButton>
                 </ActionForm>
               </li>
@@ -126,7 +156,8 @@ export async function KnowledgeSection({ agent }: { agent: Agent }) {
                 <SubmitButton>{t("addFor", { price })}</SubmitButton>
               </ActionForm>
             </details>
-            {config.features.knowledgeUrls && (
+            {/* One website per agent, counting one that is still being removed. */}
+            {config.features.knowledgeUrls && !website && (
               <details className="rounded-lg border border-stone-200 px-4 py-3">
                 <summary className="cursor-pointer text-sm font-medium text-stone-700">{t("addUrl")}</summary>
                 <ActionForm action={addKnowledgeUrlAction} className="mt-3 space-y-3">

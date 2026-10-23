@@ -15,12 +15,18 @@ function set(next: PlayerState) {
   listeners.forEach((l) => l());
 }
 
+/**
+ * Stop the preview. Forgetting the element matters: pausing before playback starts rejects its
+ * pending play(), which would otherwise show the voice as unavailable.
+ */
+function stop() {
+  player?.pause();
+  player = null;
+  set({ voice: null, status: "idle" });
+}
+
 function toggle(voice: string) {
-  if (current.voice === voice && current.status !== "error" && current.status !== "idle") {
-    player?.pause();
-    set({ voice: null, status: "idle" });
-    return;
-  }
+  if (current.voice === voice && current.status !== "error" && current.status !== "idle") return stop();
   player?.pause();
   const audio = new Audio(`/api/voices/preview?voice=${encodeURIComponent(voice)}`);
   player = audio;
@@ -42,27 +48,31 @@ function usePlayer(): PlayerState {
   );
 }
 
-/** Play/stop a preview of a voice picker value ("stock:<ref>" or "clone:<voice uuid>"). */
-export function PreviewButton({ voice, compact }: { voice: string; compact?: boolean }) {
+/**
+ * Play/stop a preview of a voice picker value ("stock:<ref>" or "clone:<voice uuid>"). Give the voice's
+ * `name` where several buttons share a page, so each says which voice it plays.
+ */
+export function PreviewButton({ voice, name, compact }: { voice: string; name?: string; compact?: boolean }) {
   const t = useTranslations("preview");
   const p = usePlayer();
   useEffect(() => () => {
-    if (current.voice === voice) {
-      player?.pause();
-      set({ voice: null, status: "idle" });
-    }
+    if (current.voice === voice) stop();
   }, [voice]);
   const status = p.voice === voice ? p.status : "idle";
-  const label = { idle: t("play"), loading: t("loading"), playing: t("stop"), error: t("unavailable") };
+  const text = { idle: t("play"), loading: t("loading"), playing: t("stop"), error: t("unavailable") };
+  // No label while loading or unavailable, so screen readers hear that state as it's shown.
+  const label = name && status === "idle" ? t("playLabel", { name }) : name && status === "playing" ? t("stopLabel", { name }) : undefined;
   return (
     <button
       type="button"
       disabled={!voice}
       onClick={() => toggle(voice)}
-      aria-label={status === "playing" ? t("stopLabel") : t("playLabel")}
+      aria-label={label}
       className={compact ? "shrink-0 rounded-md px-2 py-1 text-xs font-medium text-stone-600 hover:bg-stone-100 disabled:opacity-40" : `${buttonClass("secondary")} shrink-0`}
     >
-      {label[status]}
+      {status === "idle" && <span aria-hidden="true">▶ </span>}
+      {status === "playing" && <span aria-hidden="true">■ </span>}
+      {text[status]}
     </button>
   );
 }

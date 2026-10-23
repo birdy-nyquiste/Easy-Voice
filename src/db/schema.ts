@@ -241,8 +241,9 @@ export const knowledgeSources = pgTable(
     type: knowledgeSourceType("type").notNull(),
     /** Shown in the list: the title, file name or URL. Cleared on delete. */
     name: text("name"),
-    /** Typed text, kept to show it. Cleared on delete. */
+    /** Typed text, shown on request in the list. Cleared on delete. */
     content: text("content"),
+    /** The website (URL sources), linked from the list. Cleared on delete. */
     url: text("url"),
     /** Provider crawl task (URL sources). */
     crawlTaskId: text("crawl_task_id"),

@@ -1,5 +1,5 @@
 import "server-only";
-import { and, count, eq, gt, inArray, isNull, ne } from "drizzle-orm";
+import { and, count, eq, gt, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 import { db, withUserLock, type Queryable } from "@/db";
 import {
   agentKnowledge,
@@ -85,21 +85,34 @@ function purchase(s: Pick<KnowledgeSource, "id" | "userId" | "type" | "priceCent
 
 export interface AgentKnowledgeView {
   base: AgentKnowledge | null;
+  /** Sources to list: deleted ones are gone as far as the user is concerned. */
   sources: KnowledgeSource[];
+  /**
+   * The agent's website source: listed, or deleted but still being removed (its crawl may still be
+   * writing), which holds back the knowledge base and another website until it's gone.
+   */
+  website: "listed" | "removing" | null;
   /** The agent should search its knowledge base but the provider doesn't have that yet. */
   notApplied: boolean;
+  /** The provider still has the knowledge base on the agent although it shouldn't (mode off, or a deletion). */
+  notRemoved: boolean;
 }
 
 export async function getAgentKnowledge(agent: Agent): Promise<AgentKnowledgeView> {
   const [base] = await db.select().from(agentKnowledge).where(eq(agentKnowledge.agentId, agent.id));
-  const sources = await db
-    .select()
-    .from(knowledgeSources)
-    .where(and(eq(knowledgeSources.agentId, agent.id), ne(knowledgeSources.status, "deleting")))
-    .orderBy(knowledgeSources.createdAt);
+  const all = await db.select().from(knowledgeSources).where(eq(knowledgeSources.agentId, agent.id)).orderBy(knowledgeSources.createdAt);
+  const sources = all.filter((s) => s.status !== "deleting");
+  const website = sources.some((s) => s.type === "url") ? "listed" : all.some((s) => s.type === "url") ? "removing" : null;
   const desired = (await desiredKnowledge([agent.id])).get(agent.id);
-  const notApplied = Boolean(desired) && agent.status === "ready" && agent.syncedConfig !== agentFingerprint(desired);
-  return { base: base ?? null, sources, notApplied };
+  const stale = agent.status === "ready" && agent.syncedConfig !== agentFingerprint(desired);
+  return {
+    base: base ?? null,
+    sources,
+    website,
+    notApplied: stale && Boolean(desired),
+    // A fingerprint with a knowledge part means the last push included the retrieval tool.
+    notRemoved: stale && !desired && Boolean(agent.syncedConfig?.includes(":")),
+  };
 }
 
 /** Check limits, record the source and charge for it, all under the user's lock (like a voice clone). */
@@ -136,10 +149,10 @@ async function reserve(
       // One crawl per bucket: its pages are told apart only by not being ours. A deleted URL source
       // keeps its row until its crawl has finished and its pages are gone.
       const [existing] = await tx
-        .select({ id: knowledgeSources.id })
+        .select({ status: knowledgeSources.status })
         .from(knowledgeSources)
         .where(and(eq(knowledgeSources.agentId, agentId), eq(knowledgeSources.type, "url")));
-      if (existing) throw new UserError("knowledgeOneUrl");
+      if (existing) throw new UserError(existing.status === "deleting" ? "knowledgeUrlStillRemoving" : "knowledgeOneUrl");
     }
 
     let [base] = await tx.select().from(agentKnowledge).where(eq(agentKnowledge.agentId, agentId));
@@ -219,12 +232,35 @@ async function upload(
   // Deleted while uploading: remove what was just written.
   await cleanUpKnowledge({ agentId: source.agentId });
   const [fresh] = await db.select().from(knowledgeSources).where(eq(knowledgeSources.id, source.id));
+  if (!fresh) await removeLateWrite(source, base.bucket);
   return fresh ?? source;
+}
+
+/**
+ * The source (or its agent) was deleted and cleaned up while it uploaded, so that cleanup ran before
+ * this write landed and its rows are gone: nothing else would remove what was written. Website
+ * sources can't get here, since their row is kept while a crawl is being submitted.
+ */
+async function removeLateWrite(s: KnowledgeSource, bucket: string): Promise<void> {
+  const provider = voiceProvider();
+  try {
+    const [base] = await db.select({ agentId: agentKnowledge.agentId }).from(agentKnowledge).where(eq(agentKnowledge.agentId, s.agentId));
+    if (base) {
+      for (const key of objectKeys(s.id)) await provider.deleteObject(bucket, key);
+    } else {
+      // The agent's knowledge base was torn down before ensureBucket() created the bucket again.
+      for (const o of await provider.listObjects(bucket)) await provider.deleteObject(bucket, o.key);
+      await provider.deleteBucket(bucket);
+    }
+  } catch (err) {
+    console.error("knowledge late write cleanup failed", s.id, err);
+  }
 }
 
 export async function addTextSource(userId: string, agentId: string, raw: { title: unknown; text: unknown }): Promise<KnowledgeSource> {
   const title = String(raw.title ?? "").trim();
-  const text = String(raw.text ?? "").trim();
+  // Forms send line breaks as CRLF, which the textarea's maxLength counts as one character.
+  const text = String(raw.text ?? "").replace(/\r\n?/g, "\n").trim();
   if (!title || title.length > 80) throw new UserError("knowledgeTitleRequired");
   if (!text) throw new UserError("knowledgeTextRequired");
   if (text.length > config.limits.knowledgeTextChars) throw new UserError("knowledgeTextTooLong", { max: config.limits.knowledgeTextChars });
@@ -289,7 +325,11 @@ export async function deleteSource(userId: string, sourceId: string): Promise<vo
   await resyncStaleAgents(userId);
 }
 
-export async function setKnowledgeMode(userId: string, agentId: string, mode: unknown): Promise<void> {
+/**
+ * Save how the agent uses its knowledge base. Returns whether the agent has the change now; if not,
+ * it keeps its previous setup until a retry (page visits and the daily job) gets through.
+ */
+export async function setKnowledgeMode(userId: string, agentId: string, mode: unknown): Promise<boolean> {
   requireFeature();
   if (mode !== "off" && mode !== "reference" && mode !== "strict") throw new UserError("invalidInput");
   const [base] = await db
@@ -299,7 +339,8 @@ export async function setKnowledgeMode(userId: string, agentId: string, mode: un
     .returning();
   if (!base) throw new UserError("knowledgeNotFound");
   const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
-  if (agent?.status === "ready") await syncAgentQuietly(agent);
+  // An agent that isn't ready gets the mode with its next save.
+  return agent?.status === "ready" ? syncAgentQuietly(agent) : true;
 }
 
 function requireFeature() {
@@ -380,6 +421,26 @@ async function settleCrawl(s: KnowledgeSource, bucket: string, agentName: string
 export async function cleanUpKnowledge(scope: Scope = {}): Promise<void> {
   const provider = voiceProvider();
 
+  // A build from before knowledge bases (previews share the database) deletes an agent without
+  // marking its knowledge base; do here what deleteAgent() does now.
+  const deletedAgents = db.select({ id: agents.id }).from(agents).where(isNotNull(agents.deletedAt));
+  await db.transaction(async (tx) => {
+    await tx
+      .update(knowledgeSources)
+      .set(DELETED_SOURCE)
+      .where(and(inArray(knowledgeSources.agentId, deletedAgents), ne(knowledgeSources.status, "deleting"), scoped(scope)));
+    await tx
+      .update(agentKnowledge)
+      .set({ status: "deleting" })
+      .where(
+        and(
+          inArray(agentKnowledge.agentId, deletedAgents),
+          eq(agentKnowledge.status, "ready"),
+          scope.agentId ? eq(agentKnowledge.agentId, scope.agentId) : undefined,
+        ),
+      );
+  });
+
   const bases = await db
     .select()
     .from(agentKnowledge)
@@ -451,12 +512,13 @@ export async function runKnowledgeJobs(): Promise<void> {
   }
 }
 
-/** Sources counting toward the user's limit, across all agents. */
+/** Sources counting toward the user's limit, across all agents (a deleted agent's don't, however it was deleted). */
 export async function countUserSources(userId: string, q: Queryable = db): Promise<number> {
   const [{ n }] = await q
     .select({ n: count() })
     .from(knowledgeSources)
-    .where(and(eq(knowledgeSources.userId, userId), ne(knowledgeSources.status, "deleting")));
+    .innerJoin(agents, eq(agents.id, knowledgeSources.agentId))
+    .where(and(eq(knowledgeSources.userId, userId), ne(knowledgeSources.status, "deleting"), isNull(agents.deletedAt)));
   return n;
 }
 
@@ -469,7 +531,7 @@ export async function countAgentSources(agentId: string): Promise<number> {
   return n;
 }
 
-/** Whether the agent has sources still processing or being deleted (the page keeps polling). */
+/** Whether the agent has sources still processing or being deleted, which the agent page settles as it renders. */
 export async function hasPendingKnowledge(agentId: string): Promise<boolean> {
   const [{ n }] = await db
     .select({ n: count() })

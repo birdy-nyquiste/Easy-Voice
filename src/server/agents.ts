@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { and, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, withUserLock } from "@/db";
-import { agentKnowledge, agents, elevenLabsKeys, knowledgeSources, phoneNumbers, voices, type Agent, type KnowledgeMode } from "@/db/schema";
+import { agentKnowledge, agents, elevenLabsKeys, knowledgeSources, phoneNumbers, type Agent, type KnowledgeMode } from "@/db/schema";
 import {
   agentVariable,
   MAX_KEY_TERMS_LENGTH,
@@ -22,7 +22,7 @@ import { isUuid } from "@/lib/uuid";
 import { FeatureNotPermittedError, voiceProvider, type AssistantSpec } from "./telnyx";
 import { isElevenLabsVoice, voiceSpeaks } from "./telnyx/stock-voices";
 import { ASSISTANT_BODY_VERSION } from "./telnyx/version";
-import { cloningAvailable } from "./voices";
+import { cloningAvailable, findOwnedClone, findStockVoice, parseVoiceValue } from "./voices";
 
 export const RECORDING_NOTICE = {
   en: "This call may be recorded.",
@@ -91,20 +91,17 @@ async function resolveVoice(
   voice: string,
   language: Language,
 ): Promise<{ voiceRef: string; voiceId: string | null }> {
-  const [kind, value] = [voice.slice(0, voice.indexOf(":")), voice.slice(voice.indexOf(":") + 1)];
-  if (kind === "stock") {
-    const stock = await voiceProvider().listStockVoices();
-    const match = stock.find((v) => v.ref === value);
+  const parsed = parseVoiceValue(voice);
+  if (parsed?.kind === "stock") {
+    const match = await findStockVoice(parsed.value);
     if (!match) throw new UserError("unknownVoice");
     if (!match.speaks.includes(language)) {
       throw new UserError("voiceNoMandarin", { name: match.name });
     }
-    return { voiceRef: value, voiceId: null };
+    return { voiceRef: match.ref, voiceId: null };
   }
-  if (kind === "clone") {
-    const [v] = isUuid(value)
-      ? await db.select().from(voices).where(and(eq(voices.id, value), eq(voices.userId, userId), isNull(voices.deletedAt)))
-      : [];
+  if (parsed?.kind === "clone") {
+    const v = await findOwnedClone(userId, parsed.value);
     if (!v) throw new UserError("unknownVoice");
     if (!cloningAvailable(v.provider)) throw new UserError("cloningUnavailablePickBuiltIn");
     if (v.status !== "ready" || !v.voiceRef) throw new UserError("cloneNotReady");

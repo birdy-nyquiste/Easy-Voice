@@ -10,6 +10,7 @@ import {
   addTextSource,
   addUrlSource,
   cleanUpKnowledge,
+  countUserSources,
   deleteSource,
   getAgentKnowledge,
   knowledgeBucketName,
@@ -101,6 +102,13 @@ describe("adding sources", () => {
     const max = config.limits.knowledgeSources;
     for (let i = 0; i < max; i++) await addTextSource(user.id, i % 2 ? second.id : agent.id, text(`T${i}`));
     await expect(addTextSource(user.id, second.id, text())).rejects.toThrow(errorText("en", "knowledgeLimit", { max }));
+  });
+
+  it("counts a line break as one character, as the text box does, though forms send CRLF", async () => {
+    const { user, agent } = await makeLine(1000);
+    const lines = "a\n".repeat(Math.floor(config.limits.knowledgeTextChars / 2)); // at the limit in the text box
+    const s = await addTextSource(user.id, agent.id, { title: "Lines", text: lines.replace(/\n/g, "\r\n") });
+    expect(s.content).toBe(lines.trim());
   });
 
   it("refuses when the balance can't pay, writing nothing", async () => {
@@ -283,6 +291,22 @@ describe("website sources", () => {
     expect(await balance(user.id)).toBe(1000);
   });
 
+  it("says a deleted website is still being removed, and refuses another until it's gone", async () => {
+    const { user, agent } = await makeLine(1000);
+    crawlQuietMs(60_000);
+    const s = await addUrlSource(user.id, agent.id, "https://example.com");
+    const website = async () => (await getAgentKnowledge((await db.select().from(agents).where(eq(agents.id, agent.id)))[0])).website;
+    expect(await website()).toBe("listed");
+
+    await deleteSource(user.id, s.id); // its crawl may still be writing
+    expect(await website()).toBe("removing");
+    await expect(addUrlSource(user.id, agent.id, "https://example.org")).rejects.toThrow(errorText("en", "knowledgeUrlStillRemoving"));
+
+    crawlQuietMs(0);
+    await cleanUpKnowledge();
+    expect(await website()).toBeNull();
+  });
+
   it("rejects addresses that aren't web pages", async () => {
     const { user, agent } = await makeLine(1000);
     await expect(addUrlSource(user.id, agent.id, "file:///etc/passwd")).rejects.toThrow(errorText("en", "knowledgeUrlInvalid"));
@@ -356,6 +380,44 @@ describe("deleting", () => {
     await expect(mockProvider.enableEmbedding(knowledgeBucketName(agent.id))).rejects.toThrow(/no bucket/);
   });
 
+  it("removes a text upload that lands after its source was deleted and cleaned up", async () => {
+    const { user, agent } = await makeLine(1000);
+    const put = mockProvider.putObject.bind(mockProvider);
+    vi.spyOn(mockProvider, "putObject").mockImplementationOnce(async (...args) => {
+      const [s] = await db.select().from(knowledgeSources);
+      await deleteSource(user.id, s.id); // nothing to delete at the provider yet, so its row goes at once
+      return put(...args);
+    });
+    await addTextSource(user.id, agent.id, text());
+    expect(await db.select().from(knowledgeSources)).toEqual([]);
+    expect(await mockProvider.listObjects(knowledgeBucketName(agent.id))).toEqual([]);
+  });
+
+  it("removes a bucket an upload created again after its agent's knowledge base was torn down", async () => {
+    const { user, agent } = await makeLine(1000);
+    const create = mockProvider.createBucket.bind(mockProvider);
+    vi.spyOn(mockProvider, "createBucket").mockImplementationOnce(async (bucket) => {
+      await deleteAgent(user.id, agent.id);
+      await cleanUpKnowledge({ agentId: agent.id });
+      return create(bucket);
+    });
+    await addTextSource(user.id, agent.id, text());
+    expect(await db.select().from(agentKnowledge)).toEqual([]);
+    await expect(mockProvider.enableEmbedding(knowledgeBucketName(agent.id))).rejects.toThrow(/no bucket/);
+  });
+
+  it("removes the knowledge base of an agent an older build deleted without marking it", async () => {
+    const { user, agent } = await makeLine(1000);
+    await addTextSource(user.id, agent.id, text());
+    // Builds from before knowledge bases only set deleted_at (previews share the database).
+    await db.update(agents).set({ deletedAt: new Date() }).where(eq(agents.id, agent.id));
+    expect(await countUserSources(user.id)).toBe(0);
+    await runKnowledgeJobs();
+    expect(await db.select().from(knowledgeSources)).toEqual([]);
+    expect(await db.select().from(agentKnowledge)).toEqual([]);
+    await expect(mockProvider.enableEmbedding(knowledgeBucketName(agent.id))).rejects.toThrow(/no bucket/);
+  });
+
   it("removes the whole knowledge base with the agent", async () => {
     const { user, agent } = await makeLine(1000);
     await addTextSource(user.id, agent.id, text());
@@ -384,7 +446,7 @@ describe("agent sync", () => {
     await addTextSource(user.id, agent.id, text());
     captureSpecs();
     mockKnowledge.rejectRetrieval = true;
-    await setKnowledgeMode(user.id, agent.id, "strict");
+    expect(await setKnowledgeMode(user.id, agent.id, "strict")).toBe(false); // saved, not applied yet
     const [quiet] = await db.select().from(agents).where(eq(agents.id, agent.id));
     expect(quiet.status).toBe("ready");
 
@@ -400,6 +462,21 @@ describe("agent sync", () => {
     // Pushed without the knowledge base, so it shows as not applied and is retried.
     expect(saved.syncedConfig).toBe(agentFingerprint());
     expect((await getAgentKnowledge(saved)).notApplied).toBe(true);
+  });
+
+  it("says when switching the knowledge base off hasn't reached the agent yet", async () => {
+    const { user, agent } = await makeLine(1000);
+    await addTextSource(user.id, agent.id, text()); // the agent can search it now
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(mockProvider, "updateAssistant").mockRejectedValue(new Error("Telnyx 500"));
+    expect(await setKnowledgeMode(user.id, agent.id, "off")).toBe(false);
+    const [stale] = await db.select().from(agents).where(eq(agents.id, agent.id));
+    expect(await getAgentKnowledge(stale)).toMatchObject({ notApplied: false, notRemoved: true });
+
+    vi.mocked(mockProvider.updateAssistant).mockRestore();
+    await resyncStaleAgents(user.id);
+    const [synced] = await db.select().from(agents).where(eq(agents.id, agent.id));
+    expect(await getAgentKnowledge(synced)).toMatchObject({ notApplied: false, notRemoved: false });
   });
 
   it("drops the tool everywhere when the feature is switched off", async () => {

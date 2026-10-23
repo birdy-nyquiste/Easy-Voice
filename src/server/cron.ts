@@ -11,12 +11,13 @@ import { fetchCallResults } from "./calls/results";
 import { runKnowledgeJobs } from "./knowledge";
 import { enablePendingInboundSms, purgeExpiredMessages } from "./messages";
 import { chargeNumberRenewals, refreshPendingNumbers, releaseNumber } from "./numbers";
+import { refreshProcessingVoices } from "./voices";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Daily maintenance: renewals, grace-period releases, retention purge, expired sign-ins, stuck orders,
- * texting setup.
+ * Daily maintenance: renewals, grace-period releases, retention purge, expired sign-ins, stuck orders
+ * and clones, texting setup.
  * Each stage runs even if an earlier one fails (a provider error must not hold up the retention
  * purge); failures are logged and reported by throwing once everything has run.
  */
@@ -37,6 +38,8 @@ export async function runDailyJobs(now = new Date()) {
   const resynced = await stage("resync agents", resyncStaleAgents, 0);
   const assistantsDeleted = await stage("deleted agents' assistants", deleteLeftoverAssistants, 0);
   await stage("pending numbers", refreshPendingNumbers, undefined);
+  // Settle voice clones (refunding ones that were never made) for users who don't reopen the Voices page.
+  await stage("voice clones", refreshProcessingVoices, undefined);
   // Release numbers of users whose balance has been negative past the grace period. Before renewals,
   // so a number that is being released isn't charged another month first.
   const released = await stage(

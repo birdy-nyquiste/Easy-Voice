@@ -5,6 +5,18 @@ import { useEffect, useRef, useState } from "react";
 import { buttonClass, inputClass } from "@/components/ui";
 import { formatMegabytes } from "@/lib/format";
 
+/**
+ * Why recording couldn't start. Only a refusal means access was denied; for the rest, uploading a file
+ * still works. A browser without recording (or a page not served over HTTPS) fails before asking.
+ */
+function recordingProblem(err: unknown): "micDenied" | "micNotFound" | "micUnavailable" | "recordingUnsupported" {
+  const name = (err as { name?: unknown } | null)?.name;
+  if (name === "NotAllowedError" || name === "SecurityError") return "micDenied";
+  if (name === "NotFoundError" || name === "OverconstrainedError") return "micNotFound";
+  if (name === "NotReadableError" || name === "AbortError") return "micUnavailable";
+  return "recordingUnsupported";
+}
+
 /** File input that can also be filled from a microphone recording. */
 export function SampleInput({ maxBytes }: { maxBytes: number }) {
   const t = useTranslations("voices");
@@ -77,9 +89,9 @@ export function SampleInput({ maxBytes }: { maxBytes: number }) {
       rec.start();
       recRef.current = rec;
       setRecording(true);
-    } catch {
+    } catch (err) {
       releaseMic();
-      setError(t("micDenied"));
+      setError(t(recordingProblem(err)));
     }
   }
 
@@ -103,7 +115,10 @@ export function SampleInput({ maxBytes }: { maxBytes: number }) {
         <button type="button" onClick={recording ? stop : start} className={buttonClass(recording ? "danger" : "secondary")}>
           {recording ? t("stopRecording") : t("record")}
         </button>
-        {recording && <span className="text-sm text-red-600">{t("recording")}</span>}
+        {/* Always present, so screen readers announce when recording starts. */}
+        <span role="status" className="text-sm text-red-600">
+          {recording && t("recording")}
+        </span>
       </div>
       {preview && !recording && (
         <div className="flex items-center gap-3">
@@ -113,7 +128,11 @@ export function SampleInput({ maxBytes }: { maxBytes: number }) {
           </button>
         </div>
       )}
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && (
+        <p role="alert" className="text-sm text-red-600">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
